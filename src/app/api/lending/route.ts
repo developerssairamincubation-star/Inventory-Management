@@ -49,9 +49,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    console.log("Raw lending orders:", JSON.stringify(lendingOrders, null, 2));
-    console.log("Total orders fetched:", lendingOrders?.length || 0);
-
     // Fetch lending items separately
     const orderIds = lendingOrders?.map((o: any) => o.lending_order_id) || [];
     
@@ -67,8 +64,6 @@ export async function GET(request: NextRequest) {
         )
       `)
       .in("lend_order_id", orderIds.length > 0 ? orderIds : [""]);
-
-    console.log("Lending items fetched:", lendingItems?.length || 0);
 
     // Group lending items by order ID
     const itemsByOrderId = new Map<string, any[]>();
@@ -128,10 +123,6 @@ export async function GET(request: NextRequest) {
     const staffMap = new Map(staffs?.map((s: any) => [s.staff_id, s]) || []);
     const mentorMap = new Map(mentors?.map((m: any) => [m.staff_id, m.name]) || []);
 
-    console.log("Students fetched:", students?.length || 0);
-    console.log("Staffs fetched:", staffs?.length || 0);
-    console.log("Mentors fetched:", mentors?.length || 0);
-
     // Transform data to match the frontend structure
     const records = (lendingOrders || []).flatMap((order: any) => {
       const borrower = order.borrower_type === "STUDENT" 
@@ -178,18 +169,18 @@ export async function GET(request: NextRequest) {
       });
     });
 
-    // Calculate stats
-    const totalLent = records.reduce((sum, r) => sum + (r.quantity || 0), 0);
+    // Calculate stats - only count currently lent items (not returned)
+    const activeLentRecords = records.filter(r => r.status !== "RETURNED");
+    const totalQuantity = activeLentRecords.reduce((sum, r) => sum + (r.quantity || 0), 0);
+    const uniqueProducts = new Set(activeLentRecords.map(r => r.product_name).filter(name => name !== "—")).size;
     const returned = records.filter(r => r.status === "RETURNED").length;
     const pending = records.filter(r => r.status === "PENDING").length;
-
-    console.log("Final records count:", records.length);
-    console.log("Records:", JSON.stringify(records, null, 2));
 
     return NextResponse.json({
       records,
       stats: {
-        totalLent,
+        totalLent: uniqueProducts,
+        totalQuantity,
         returned,
         pending,
       },
@@ -316,8 +307,6 @@ export async function POST(request: NextRequest) {
       status: status === "CONSUMABLE" ? "NON_RETURNABLE_GIVEN" : "ISSUED",
     }));
 
-    console.log("Attempting to insert lending items:", JSON.stringify(itemsToInsert, null, 2));
-
     const { data: items, error: itemsError } = await supabase
       .from("lending_item")
       .insert(itemsToInsert)
@@ -329,7 +318,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: itemsError.message }, { status: 500 });
     }
 
-    console.log("Successfully created items:", JSON.stringify(items, null, 2));
+    // Reduce stock quantities
+    for (const item of lending_items) {
+      const { data: currentStock, error: stockFetchError } = await supabase
+        .from("stocks")
+        .select("quantity")
+        .eq("product_id", item.product_id)
+        .single();
+
+      if (stockFetchError) {
+        console.error("Error fetching stock:", stockFetchError);
+        continue;
+      }
+
+      const newQuantity = (currentStock.quantity || 0) - item.quantity;
+
+      const { error: stockUpdateError } = await supabase
+        .from("stocks")
+        .update({ quantity: Math.max(0, newQuantity) })
+        .eq("product_id", item.product_id);
+
+      if (stockUpdateError) {
+        console.error("Error updating stock:", stockUpdateError);
+      }
+    }
 
     return NextResponse.json({ order, items }, { status: 201 });
   } catch (error) {

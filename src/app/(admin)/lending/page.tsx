@@ -2,6 +2,16 @@
 
 import { useEffect, useState } from "react";
 
+// Utility function to format date as DD/MM/YYYY
+const formatDate = (dateString: string | null): string => {
+  if (!dateString) return "—";
+  const date = new Date(dateString);
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
 type LendingRecord = {
   id: number;
   borrower_name: string;
@@ -59,9 +69,14 @@ export default function LendingPage() {
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [productSearchQuery, setProductSearchQuery] = useState("");
   const [showProductDropdown, setShowProductDropdown] = useState<number | null>(null);
+  const [editingReturnDate, setEditingReturnDate] = useState<number | null>(null);
+  const [stockErrors, setStockErrors] = useState<{ [key: number]: string }>({});
+  const [editingRow, setEditingRow] = useState<number | null>(null);
+  const [editFormData, setEditFormData] = useState<Partial<LendingRecord>>({});
 
   // Stats
   const [totalLent, setTotalLent] = useState(0);
+  const [totalQuantity, setTotalQuantity] = useState(0);
   const [returned, setReturned] = useState(0);
   const [pending, setPending] = useState(0);
 
@@ -116,6 +131,7 @@ export default function LendingPage() {
         const data = await res.json();
         setRecords(data.records || []);
         setTotalLent(data.stats?.totalLent || 0);
+        setTotalQuantity(data.stats?.totalQuantity || 0);
         setReturned(data.stats?.returned || 0);
         setPending(data.stats?.pending || 0);
       } else {
@@ -145,10 +161,50 @@ export default function LendingPage() {
     try {
       const res = await fetch(`/api/lending/${id}`, { method: "DELETE" });
       if (res.ok) {
-        setRecords(records.filter((r) => r.id !== id));
+        await fetchLendingRecords();
       }
     } catch (error) {
       console.error("Error deleting record:", error);
+    }
+  };
+
+  const handleEdit = (record: LendingRecord, index: number) => {
+    setEditingRow(index);
+    setEditFormData({
+      id: record.id,
+      quantity: record.quantity,
+      due_date: record.due_date,
+      mentor: record.mentor,
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingRow(null);
+    setEditFormData({});
+  };
+
+  const handleSaveEdit = async () => {
+    if (editingRow === null || !editFormData.id) return;
+    
+    try {
+      const res = await fetch(`/api/lending/${editFormData.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quantity: editFormData.quantity,
+          due_date: editFormData.due_date,
+        }),
+      });
+
+      if (res.ok) {
+        await fetchLendingRecords();
+        setEditingRow(null);
+        setEditFormData({});
+      } else {
+        console.error("Failed to update record");
+      }
+    } catch (error) {
+      console.error("Error updating record:", error);
     }
   };
 
@@ -165,6 +221,36 @@ export default function LendingPage() {
     const updated = [...lendingItems];
     updated[index] = { ...updated[index], [field]: value };
     setLendingItems(updated);
+    
+    // Check stock when quantity changes
+    if (field === "quantity" && updated[index].product_id) {
+      checkStock(index, updated[index].product_id, value);
+    }
+  };
+
+  const checkStock = async (index: number, productId: string, requestedQuantity: number) => {
+    try {
+      const res = await fetch(`/api/stocks/${productId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const availableStock = data.quantity || 0;
+        
+        if (requestedQuantity > availableStock) {
+          setStockErrors(prev => ({
+            ...prev,
+            [index]: `Insufficient stock. Available: ${availableStock}`
+          }));
+        } else {
+          setStockErrors(prev => {
+            const updated = { ...prev };
+            delete updated[index];
+            return updated;
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Error checking stock:", error);
+    }
   };
 
   const handleProductSearch = (index: number, query: string) => {
@@ -182,6 +268,9 @@ export default function LendingPage() {
       product_name: product.product_name 
     };
     setLendingItems(updated);
+    
+    // Check stock availability for current quantity
+    checkStock(index, product.product_id, updated[index].quantity);
     
     setShowProductDropdown(null);
     setProductSearchQuery("");
@@ -206,6 +295,12 @@ export default function LendingPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Check if there are any stock errors
+    if (Object.keys(stockErrors).length > 0) {
+      alert("Please resolve stock availability issues before submitting.");
+      return;
+    }
     
     try {
       const res = await fetch("/api/lending", {
@@ -233,6 +328,28 @@ export default function LendingPage() {
       }
     } catch (error) {
       console.error("Error creating lending entry:", error);
+    }
+  };
+
+  const handleReturnDateUpdate = async (recordId: number, returnDate: string) => {
+    try {
+      const res = await fetch(`/api/lending/${recordId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          return_date: returnDate,
+          status: "RETURNED",
+        }),
+      });
+
+      if (res.ok) {
+        await fetchLendingRecords();
+        setEditingReturnDate(null);
+      } else {
+        console.error("Failed to update return date");
+      }
+    } catch (error) {
+      console.error("Error updating return date:", error);
     }
   };
 
@@ -269,7 +386,9 @@ export default function LendingPage() {
           <div className="flex items-start justify-between">
             <div>
               <p className="text-sm text-slate-500 mb-1">Total lent products</p>
-              <h2 className="text-3xl font-bold text-slate-800">{totalLent}</h2>
+              <h2 className="text-3xl font-bold text-slate-800">
+                {totalLent} <span className="text-xl text-slate-600">({totalQuantity})</span>
+              </h2>
               <p className="text-xs text-green-600 mt-1">↑ 12% from last week</p>
             </div>
             <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
@@ -319,7 +438,7 @@ export default function LendingPage() {
             placeholder="Search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full px-4 py-2 border rounded text-sm"
+            className="w-full px-4 py-2 border rounded text-sm text-slate-900 placeholder:text-slate-500"
           />
         </div>
         <button className="flex items-center gap-2 px-4 py-2 border rounded bg-white text-slate-700 text-sm">
@@ -379,15 +498,76 @@ export default function LendingPage() {
                     <td className="px-4 py-3 text-sm text-slate-700">{record.borrower_name || "—"}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{record.department || "—"}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{record.product_name || "—"}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{record.quantity || 0}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">
-                      {record.lending_date ? new Date(record.lending_date).toLocaleDateString() : "—"}
+                      {editingRow === idx ? (
+                        <input
+                          type="number"
+                          min="1"
+                          value={editFormData.quantity || record.quantity}
+                          onChange={(e) => setEditFormData({ ...editFormData, quantity: parseInt(e.target.value) || 1 })}
+                          className="w-20 px-2 py-1 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
+                        />
+                      ) : (
+                        record.quantity || 0
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-700">
-                      {record.due_date ? new Date(record.due_date).toLocaleDateString() : "—"}
+                      {formatDate(record.lending_date)}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-700">
-                      {record.return_date ? new Date(record.return_date).toLocaleDateString() : "—"}
+                      {editingRow === idx ? (
+                        <input
+                          type="date"
+                          value={editFormData.due_date || record.due_date || ""}
+                          onChange={(e) => setEditFormData({ ...editFormData, due_date: e.target.value })}
+                          className="px-2 py-1 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
+                        />
+                      ) : (
+                        formatDate(record.due_date)
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-700">
+                      {record.return_date ? (
+                        formatDate(record.return_date)
+                      ) : editingReturnDate === idx ? (
+                        <input
+                          type="date"
+                          autoFocus
+                          className="px-2 py-1 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              handleReturnDateUpdate(record.id, e.target.value);
+                            }
+                          }}
+                          onBlur={() => setEditingReturnDate(null)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setEditingReturnDate(null);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <button
+                          onClick={() => setEditingReturnDate(idx)}
+                          className="flex items-center gap-1 text-blue-600 hover:text-blue-800"
+                          title="Set return date"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="h-5 w-5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                            />
+                          </svg>
+                        </button>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span
@@ -404,26 +584,45 @@ export default function LendingPage() {
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-700">{record.mentor || "—"}</td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => {/* Edit functionality */}}
-                          className="p-1 text-blue-600 hover:text-blue-800"
-                          title="Edit"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => handleDelete(record.id)}
-                          className="p-1 text-red-600 hover:text-red-800"
-                          title="Delete"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
+                      {editingRow === idx ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleSaveEdit}
+                            className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                            title="Save"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={handleCancelEdit}
+                            className="px-3 py-1 text-xs bg-gray-400 text-white rounded hover:bg-gray-500"
+                            title="Cancel"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleEdit(record, idx)}
+                            className="p-1 text-blue-600 hover:text-blue-800"
+                            title="Edit"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => handleDelete(record.id)}
+                            className="p-1 text-red-600 hover:text-red-800"
+                            title="Delete"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -565,8 +764,13 @@ export default function LendingPage() {
                         placeholder="Quantity"
                         value={item.quantity}
                         onChange={(e) => updateLendingItem(index, "quantity", parseInt(e.target.value) || 1)}
-                        className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500 placeholder:text-slate-600"
+                        className={`w-full px-3 py-2 border rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500 placeholder:text-slate-600 ${
+                          stockErrors[index] ? "border-red-500" : "border-slate-300"
+                        }`}
                       />
+                      {stockErrors[index] && (
+                        <p className="text-xs text-red-600 mt-1">{stockErrors[index]}</p>
+                      )}
                     </div>
                     <div className="col-span-2">
                       <button

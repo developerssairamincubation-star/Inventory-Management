@@ -3,17 +3,17 @@ import { getSupabaseAdmin } from "@/lib/supabaseServer";
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = getSupabaseAdmin();
-    const id = params.id;
+    const { id } = await params;
 
     // Delete lending items first (foreign key constraint)
     const { error: itemError } = await supabase
       .from("lending_item")
       .delete()
-      .eq("order_id", id);
+      .eq("lend_order_id", id);
 
     if (itemError) {
       console.error("Error deleting lending items:", itemError);
@@ -24,7 +24,7 @@ export async function DELETE(
     const { error: orderError } = await supabase
       .from("lending_order")
       .delete()
-      .eq("id", id);
+      .eq("lending_order_id", id);
 
     if (orderError) {
       console.error("Error deleting lending order:", orderError);
@@ -43,11 +43,11 @@ export async function DELETE(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = getSupabaseAdmin();
-    const id = params.id;
+    const { id } = await params;
     const body = await request.json();
 
     const {
@@ -68,7 +68,7 @@ export async function PUT(
     const { error: orderError } = await supabase
       .from("lending_order")
       .update(orderUpdate)
-      .eq("id", id);
+      .eq("lending_order_id", id);
 
     if (orderError) {
       console.error("Error updating lending order:", orderError);
@@ -80,7 +80,7 @@ export async function PUT(
       const { error: itemError } = await supabase
         .from("lending_item")
         .update({ quantity })
-        .eq("order_id", id);
+        .eq("lend_order_id", id);
 
       if (itemError) {
         console.error("Error updating lending item:", itemError);
