@@ -39,15 +39,7 @@ export async function GET(request: NextRequest) {
         borrower_student_id,
         borrower_staff_id,
         mentor_staff_id,
-        project_name,
-        lending_item (
-          quantity,
-          product_id,
-          products (
-            product_name,
-            product_code
-          )
-        )
+        project_name
       `)
       .gte("created_at", startDate.toISOString())
       .order("created_at", { ascending: false });
@@ -56,6 +48,37 @@ export async function GET(request: NextRequest) {
       console.error("Database error:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    console.log("Raw lending orders:", JSON.stringify(lendingOrders, null, 2));
+    console.log("Total orders fetched:", lendingOrders?.length || 0);
+
+    // Fetch lending items separately
+    const orderIds = lendingOrders?.map((o: any) => o.lending_order_id) || [];
+    
+    const { data: lendingItems } = await supabase
+      .from("lending_item")
+      .select(`
+        lend_order_id,
+        quantity,
+        product_id,
+        products (
+          product_name,
+          product_code
+        )
+      `)
+      .in("lend_order_id", orderIds.length > 0 ? orderIds : [""]);
+
+    console.log("Lending items fetched:", lendingItems?.length || 0);
+
+    // Group lending items by order ID
+    const itemsByOrderId = new Map<string, any[]>();
+    lendingItems?.forEach((item: any) => {
+      const orderId = item.lend_order_id;
+      if (!itemsByOrderId.has(orderId)) {
+        itemsByOrderId.set(orderId, []);
+      }
+      itemsByOrderId.get(orderId)!.push(item);
+    });
 
     // Fetch student and staff data separately
     const studentIds = lendingOrders
@@ -105,6 +128,10 @@ export async function GET(request: NextRequest) {
     const staffMap = new Map(staffs?.map((s: any) => [s.staff_id, s]) || []);
     const mentorMap = new Map(mentors?.map((m: any) => [m.staff_id, m.name]) || []);
 
+    console.log("Students fetched:", students?.length || 0);
+    console.log("Staffs fetched:", staffs?.length || 0);
+    console.log("Mentors fetched:", mentors?.length || 0);
+
     // Transform data to match the frontend structure
     const records = (lendingOrders || []).flatMap((order: any) => {
       const borrower = order.borrower_type === "STUDENT" 
@@ -112,10 +139,27 @@ export async function GET(request: NextRequest) {
         : staffMap.get(order.borrower_staff_id);
       
       const department = borrower?.departments;
-      const lendingItems = Array.isArray(order.lending_item) ? order.lending_item : [order.lending_item];
+      const orderItems = itemsByOrderId.get(order.lending_order_id) || [];
+
+      // If there are no items, still show the order with a placeholder
+      if (orderItems.length === 0) {
+        return [{
+          id: order.lending_order_id,
+          borrower_name: borrower?.name || "—",
+          department: department?.department_name || "—",
+          product_name: "—",
+          product_code: "—",
+          quantity: 0,
+          lending_date: order.created_at,
+          due_date: order.due_date,
+          return_date: order.return_date,
+          status: order.status || "PENDING",
+          mentor: mentorMap.get(order.mentor_staff_id) || "—",
+        }];
+      }
 
       // Create a record for each lending item
-      return lendingItems.filter((item: any) => item).map((item: any) => {
+      return orderItems.map((item: any) => {
         const product = item?.products;
         
         return {
@@ -138,6 +182,9 @@ export async function GET(request: NextRequest) {
     const totalLent = records.reduce((sum, r) => sum + (r.quantity || 0), 0);
     const returned = records.filter(r => r.status === "RETURNED").length;
     const pending = records.filter(r => r.status === "PENDING").length;
+
+    console.log("Final records count:", records.length);
+    console.log("Records:", JSON.stringify(records, null, 2));
 
     return NextResponse.json({
       records,
@@ -266,8 +313,10 @@ export async function POST(request: NextRequest) {
       lend_order_id: order.lending_order_id,
       product_id: item.product_id,
       quantity: item.quantity,
-      status: "active",
+      status: status === "CONSUMABLE" ? "NON_RETURNABLE_GIVEN" : "ISSUED",
     }));
+
+    console.log("Attempting to insert lending items:", JSON.stringify(itemsToInsert, null, 2));
 
     const { data: items, error: itemsError } = await supabase
       .from("lending_item")
@@ -276,8 +325,11 @@ export async function POST(request: NextRequest) {
 
     if (itemsError) {
       console.error("Error creating lending items:", itemsError);
+      console.error("Full error details:", JSON.stringify(itemsError, null, 2));
       return NextResponse.json({ error: itemsError.message }, { status: 500 });
     }
+
+    console.log("Successfully created items:", JSON.stringify(items, null, 2));
 
     return NextResponse.json({ order, items }, { status: 201 });
   } catch (error) {

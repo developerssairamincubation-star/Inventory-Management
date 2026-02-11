@@ -174,8 +174,15 @@ export default function LendingPage() {
   };
 
   const selectProduct = (index: number, product: Product) => {
-    updateLendingItem(index, "product_id", product.product_id);
-    updateLendingItem(index, "product_name", product.product_name);
+    // Update both fields at once
+    const updated = [...lendingItems];
+    updated[index] = { 
+      ...updated[index], 
+      product_id: product.product_id,
+      product_name: product.product_name 
+    };
+    setLendingItems(updated);
+    
     setShowProductDropdown(null);
     setProductSearchQuery("");
   };
