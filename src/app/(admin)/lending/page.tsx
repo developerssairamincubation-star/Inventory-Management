@@ -15,6 +15,7 @@ const formatDate = (dateString: string | null): string => {
 type LendingRecord = {
   id: number;
   borrower_name: string;
+  borrower_type: string;
   department: string;
   product_name: string;
   quantity: number;
@@ -473,6 +474,7 @@ export default function LendingPage() {
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">S.No</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Borrower Name</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Borrower</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Dept</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Product Name</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Quantity</th>
@@ -487,7 +489,7 @@ export default function LendingPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={12} className="px-4 py-8 text-center text-slate-500">
                     No lending records found
                   </td>
                 </tr>
@@ -496,6 +498,15 @@ export default function LendingPage() {
                   <tr key={record.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 text-sm text-slate-700">{idx + 1}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{record.borrower_name || "—"}</td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                        record.borrower_type === "STUDENT" 
+                          ? "bg-blue-100 text-blue-800" 
+                          : "bg-purple-100 text-purple-800"
+                      }`}>
+                        {record.borrower_type || "—"}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-sm text-slate-700">{record.department || "—"}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{record.product_name || "—"}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">
@@ -836,21 +847,23 @@ export default function LendingPage() {
                     placeholder="Enter project name"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-900 mb-2">Mentor</label>
-                  <select
-                    value={mentorStaffId}
-                    onChange={(e) => setMentorStaffId(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
-                  >
-                    <option value="">Select mentor</option>
-                    {staffList.map((staff) => (
-                      <option key={staff.staff_id} value={staff.staff_id}>
-                        {staff.name}
-                      </option>
+                {borrowerType === "STUDENT" && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-900 mb-2">Mentor</label>
+                    <select
+                      value={mentorStaffId}
+                      onChange={(e) => setMentorStaffId(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
+                    >
+                      <option value="">Select mentor</option>
+                      {staffList.map((staff) => (
+                        <option key={staff.staff_id} value={staff.staff_id}>
+                          {staff.name}
+                        </option>
                     ))}
                   </select>
                 </div>
+                )}
               </div>
 
               {/* Actions */}

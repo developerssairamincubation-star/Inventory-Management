@@ -137,6 +137,7 @@ export async function GET(request: NextRequest) {
         return [{
           id: order.lending_order_id,
           borrower_name: borrower?.name || "—",
+          borrower_type: order.borrower_type || "—",
           department: department?.department_name || "—",
           product_name: "—",
           product_code: "—",
@@ -156,6 +157,7 @@ export async function GET(request: NextRequest) {
         return {
           id: order.lending_order_id,
           borrower_name: borrower?.name || "—",
+          borrower_type: order.borrower_type || "—",
           department: department?.department_name || "—",
           product_name: product?.product_name || "—",
           product_code: product?.product_code || "—",
