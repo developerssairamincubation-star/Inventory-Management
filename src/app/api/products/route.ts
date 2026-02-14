@@ -6,10 +6,13 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   try {
     const supabaseAdmin = getSupabaseAdmin()
-    // Select products (no category join - category table removed)
+    // Select products with stock information
     const { data, error } = await supabaseAdmin
       .from('products')
-      .select('*')
+      .select(`
+        *,
+        stocks (quantity)
+      `)
       .order('created_at', { ascending: false })
 
     if (error) {

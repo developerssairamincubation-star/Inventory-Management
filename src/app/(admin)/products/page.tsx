@@ -7,8 +7,10 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isUpdateStockModalOpen, setIsUpdateStockModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
 
   // form fields
   const [productName, setProductName] = useState('');
@@ -19,6 +21,10 @@ export default function ProductsPage() {
   const [returnable, setReturnable] = useState<boolean | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+  // Update stock form fields
+  const [additionalStock, setAdditionalStock] = useState<number | ''>('');
+  const [newUnitCost, setNewUnitCost] = useState<number | ''>('');
 
   useEffect(() => {
     let mounted = true;
@@ -72,6 +78,57 @@ export default function ProductsPage() {
     return name.includes(searchQuery.toLowerCase());
   });
 
+  const handleOpenUpdateStock = (product: any) => {
+    setSelectedProduct(product);
+    setAdditionalStock('');
+    setNewUnitCost(product.unit_cost || '');
+    setIsUpdateStockModalOpen(true);
+  };
+
+  const handleUpdateStock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProduct) return;
+
+    setSaving(true);
+    try {
+      const body: any = {};
+      if (additionalStock !== '' && additionalStock !== 0) {
+        body.additionalStock = Number(additionalStock);
+      }
+      if (newUnitCost !== '' && newUnitCost !== selectedProduct.unit_cost) {
+        body.unitCost = Number(newUnitCost);
+      }
+
+      const productId = selectedProduct.product_id || selectedProduct.id;
+      const res = await fetch(`/api/products/${productId}/update-stock`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        console.error('Failed to update stock', await res.text());
+        return;
+      }
+
+      const result = await res.json();
+      
+      // Update the product in the list
+      setProducts((prevProducts) =>
+        prevProducts.map((p) =>
+          (p.product_id || p.id) === productId ? result.product : p
+        )
+      );
+
+      setIsUpdateStockModalOpen(false);
+      setSelectedProduct(null);
+    } catch (err) {
+      console.error('Error updating stock', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const GridIcon = () => (
     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
@@ -111,6 +168,9 @@ export default function ProductsPage() {
     const code =
       normalized.product_code ?? normalized.productCode ?? null;
 
+    const productId = normalized.product_id ?? normalized.id;
+    const currentStock = normalized.stocks?.quantity ?? 0;
+
     return (
       <div className="bg-slate-600 rounded-xl p-4 flex flex-col items-center shadow-md hover:shadow-lg transition-transform hover:-translate-y-1">
         <div className="w-full bg-white rounded-md p-3 mb-4 flex items-center justify-center h-40 overflow-hidden">
@@ -129,6 +189,13 @@ export default function ProductsPage() {
 
         <h3 className="text-white text-center font-semibold text-lg truncate w-full">{name ?? 'Unnamed'}</h3>
         <p className="text-slate-300 text-sm mt-1">{code ?? '—'}</p>
+        
+        <button
+          onClick={() => handleOpenUpdateStock(normalized)}
+          className="mt-3 w-full bg-white text-slate-800 px-3 py-2 rounded-lg text-sm font-medium hover:bg-slate-100 transition-colors"
+        >
+          Update Stock
+        </button>
       </div>
     );
   }
@@ -309,6 +376,95 @@ export default function ProductsPage() {
         </div>
       )}
 
+      {/* Update Stock Modal */}
+      {isUpdateStockModalOpen && selectedProduct && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl p-6 w-[90%] max-w-md">
+            <div className="flex items-start justify-between mb-4">
+              <h2 className="text-xl font-semibold text-slate-800">Update Stock</h2>
+              <button onClick={() => setIsUpdateStockModalOpen(false)} className="text-slate-500 text-2xl leading-none">✕</button>
+            </div>
+
+            <form onSubmit={handleUpdateStock}>
+              <div className="space-y-4">
+                {/* Product Name */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Product Name</label>
+                  <div className="text-base font-semibold text-slate-900">
+                    {selectedProduct.product_name || selectedProduct.name || 'N/A'}
+                  </div>
+                </div>
+
+                {/* Current Stock */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Current Stock</label>
+                  <div className="text-base font-semibold text-slate-900">
+                    {selectedProduct.stocks?.quantity ?? 0} units
+                  </div>
+                </div>
+
+                {/* Additional Stock Input */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-900 mb-1">
+                    Add New Stock <span className="text-slate-500 font-normal">(quantity received)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={additionalStock}
+                    onChange={(e) => setAdditionalStock(e.target.value === '' ? '' : Number(e.target.value))}
+                    className="mt-1 block w-full border border-slate-300 rounded-lg px-4 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-slate-800 focus:border-transparent"
+                    placeholder="Enter quantity to add"
+                  />
+                </div>
+
+                {/* Unit Cost Input */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-900 mb-1">
+                    Unit Cost
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    value={newUnitCost}
+                    onChange={(e) => setNewUnitCost(e.target.value === '' ? '' : Number(e.target.value))}
+                    className="mt-1 block w-full border border-slate-300 rounded-lg px-4 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-slate-800 focus:border-transparent"
+                    placeholder="Enter unit cost"
+                  />
+                </div>
+
+                {/* Result Preview */}
+                {additionalStock !== '' && additionalStock > 0 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <div className="text-sm text-blue-800">
+                      <strong>New Total Stock:</strong> {(selectedProduct.stocks?.quantity ?? 0) + Number(additionalStock)} units
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsUpdateStockModalOpen(false)}
+                  className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-900 disabled:opacity-50"
+                >
+                  {saving ? 'Updating...' : 'Update Stock'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {viewMode === "grid" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
           {filteredProducts.map((product) => (
@@ -322,9 +478,9 @@ export default function ProductsPage() {
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product Name</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product ID</th>
-                
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Available Stock</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -344,15 +500,22 @@ export default function ProductsPage() {
                 const id = normalized.id ?? normalized.product_id ?? idx;
                 
                 const cost = normalized.cost ?? normalized.price ?? normalized.unit_cost ?? '';
-                const stock = normalized.stock ?? normalized.quantity ?? normalized.total_stock ?? normalized.available ?? 0;
+                const stock = normalized.stocks?.quantity ?? normalized.stock ?? normalized.quantity ?? normalized.total_stock ?? normalized.available ?? 0;
 
                 return (
                   <tr key={id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{name}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{code}</td>
-                    
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{cost}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{stock}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <button
+                        onClick={() => handleOpenUpdateStock(normalized)}
+                        className="bg-slate-800 text-white px-3 py-1 rounded hover:bg-slate-900"
+                      >
+                        Update Stock
+                      </button>
+                    </td>
                   </tr>
                 )
               })}

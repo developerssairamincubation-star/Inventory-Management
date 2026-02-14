@@ -28,7 +28,6 @@ export default function Sidebar() {
     { label: "Staff Management", href: "/staffs", icon: "/icons/staffs.svg" },
     
     { label: "Invoice Details", href: "/billing", icon: "/icons/billing.svg" },
-    { label: "Reports & Insights", href: "/reports", icon: "/icons/reports.svg" },
     { label: "User Management", href: "/users", icon: "/icons/users.svg" },
   ];
 
