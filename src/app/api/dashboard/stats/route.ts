@@ -41,7 +41,16 @@ export async function GET() {
     ).length || 0
 
     // 4. Get stock status distribution
-    // Calculate lent items
+    // Get all stocks including damaged_quantity
+    const { data: allStocksData, error: allStocksError } = await supabaseAdmin
+      .from('stocks')
+      .select('quantity, damaged_quantity')
+
+    if (allStocksError) throw allStocksError
+
+    const damagedQuantity = allStocksData?.reduce((sum, stock) => sum + (stock.damaged_quantity || 0), 0) || 0
+
+    // Calculate lent items (PENDING status = actively lent)
     const { data: lendingData, error: lendingError } = await supabaseAdmin
       .from('lending_item')
       .select(`
@@ -51,30 +60,30 @@ export async function GET() {
 
     if (lendingError) throw lendingError
 
-    // Count items that are currently lent (status = 'ACTIVE' or 'OVERDUE')
-    const lentQuantity = lendingData?.filter((item: any) => 
-      item.lending_order?.status === 'ACTIVE' || item.lending_order?.status === 'OVERDUE'
+    // Count items that are currently lent (status = 'PENDING', 'ACTIVE', or 'OVERDUE')
+    const lentQuantity = lendingData?.filter((item: any) =>
+      item.lending_order?.status === 'PENDING' ||
+      item.lending_order?.status === 'ACTIVE' ||
+      item.lending_order?.status === 'OVERDUE'
     ).reduce((sum, item) => sum + (item.quantity || 0), 0) || 0
 
-    // Get available stock (total - lent)
-    const availableQuantity = totalStockQuantity - lentQuantity
-
-    // For now, we'll set lost/damaged to 0 since we don't have this data yet
-    // This can be calculated from a separate table or field if available
-    const lostDamagedQuantity = 0
+    // Available = total stock quantity (already reduced by lent & damaged)
+    const availableQuantity = totalStockQuantity
 
     const stockDistribution = {
       lent: lentQuantity,
       available: availableQuantity,
-      lostDamaged: lostDamagedQuantity,
-      total: totalStockQuantity
+      lostDamaged: damagedQuantity,
+      total: totalStockQuantity + lentQuantity + damagedQuantity
     }
+
+    const grandTotal = stockDistribution.total || 1
 
     // Calculate percentages
     const stockDistributionPercentages = {
-      lent: totalStockQuantity > 0 ? Math.round((lentQuantity / totalStockQuantity) * 100) : 0,
-      available: totalStockQuantity > 0 ? Math.round((availableQuantity / totalStockQuantity) * 100) : 0,
-      lostDamaged: totalStockQuantity > 0 ? Math.round((lostDamagedQuantity / totalStockQuantity) * 100) : 0,
+      lent: Math.round((lentQuantity / grandTotal) * 100),
+      available: Math.round((availableQuantity / grandTotal) * 100),
+      lostDamaged: Math.round((damagedQuantity / grandTotal) * 100),
     }
 
     return NextResponse.json({

@@ -18,6 +18,7 @@ type LendingRecord = {
   borrower_type: string;
   department: string;
   product_name: string;
+  product_id: string | null;
   quantity: number;
   lending_date: string;
   due_date: string;
@@ -75,6 +76,11 @@ export default function LendingPage() {
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editFormData, setEditFormData] = useState<Partial<LendingRecord>>({});
 
+  // Damage-related state
+  const [damagedRowIdx, setDamagedRowIdx] = useState<number | null>(null);
+  const [damagedQtyStr, setDamagedQtyStr] = useState<string>("1");
+  const [damageLoading, setDamageLoading] = useState(false);
+
   // Stats
   const [totalLent, setTotalLent] = useState(0);
   const [totalQuantity, setTotalQuantity] = useState(0);
@@ -130,11 +136,9 @@ export default function LendingPage() {
       const res = await fetch(`/api/lending?period=${timeFilter.toLowerCase()}`);
       if (res.ok) {
         const data = await res.json();
-        setRecords(data.records || []);
-        setTotalLent(data.stats?.totalLent || 0);
-        setTotalQuantity(data.stats?.totalQuantity || 0);
-        setReturned(data.stats?.returned || 0);
-        setPending(data.stats?.pending || 0);
+        const fetched = data.records || [];
+        setRecords(fetched);
+        applyStats(fetched);
       } else {
         console.error("Failed to fetch lending records");
       }
@@ -144,6 +148,15 @@ export default function LendingPage() {
       setLoading(false);
     }
   }
+
+  // Recalculate header stats from a records array without a full fetch
+  const applyStats = (recs: LendingRecord[]) => {
+    const active = recs.filter(r => r.status !== "RETURNED" && r.status !== "DAMAGED");
+    setTotalLent(new Set(active.map(r => r.product_name).filter(n => n !== "—")).size);
+    setTotalQuantity(active.reduce((s, r) => s + (r.quantity || 0), 0));
+    setReturned(recs.filter(r => r.status === "RETURNED").length);
+    setPending(recs.filter(r => r.status === "PENDING").length);
+  };
 
   const filteredRecords = records.filter((record) => {
     if (!searchQuery) return true;
@@ -158,13 +171,20 @@ export default function LendingPage() {
 
   const handleDelete = async (id: number) => {
     if (!confirm("Are you sure you want to delete this lending record?")) return;
-    
+    const prevRecords = records;
+    const updated = records.filter(r => r.id !== id);
+    setRecords(updated);
+    applyStats(updated);
     try {
       const res = await fetch(`/api/lending/${id}`, { method: "DELETE" });
-      if (res.ok) {
-        await fetchLendingRecords();
+      if (!res.ok) {
+        setRecords(prevRecords);
+        applyStats(prevRecords);
+        console.error("Failed to delete record");
       }
     } catch (error) {
+      setRecords(prevRecords);
+      applyStats(prevRecords);
       console.error("Error deleting record:", error);
     }
   };
@@ -184,9 +204,65 @@ export default function LendingPage() {
     setEditFormData({});
   };
 
+  const handleMarkDamaged = async (record: LendingRecord) => {
+    if (!record.product_id) {
+      alert("This record has no associated product and cannot be marked as damaged.");
+      return;
+    }
+    const damagedQty = parseInt(damagedQtyStr) || 0;
+    if (damagedQty < 1 || damagedQty > record.quantity) {
+      alert(`Damaged quantity must be between 1 and ${record.quantity}`);
+      return;
+    }
+    // Optimistic update
+    const prevRecords = records;
+    const newQty = record.quantity - damagedQty;
+    const updated = records.map(r =>
+      r.id === record.id && r.product_id === record.product_id
+        ? { ...r, quantity: newQty }
+        : r
+    );
+    setDamagedRowIdx(null);
+    setDamagedQtyStr("1");
+    setRecords(updated);
+    applyStats(updated);
+    setDamageLoading(true);
+    try {
+      const res = await fetch(`/api/lending/${record.id}/damage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          product_id: record.product_id,
+          damaged_quantity: damagedQty,
+        }),
+      });
+      if (!res.ok) {
+        setRecords(prevRecords);
+        applyStats(prevRecords);
+        const data = await res.json();
+        alert(data.error || "Failed to mark items as damaged");
+      }
+    } catch (error) {
+      setRecords(prevRecords);
+      applyStats(prevRecords);
+      console.error("Error marking items as damaged:", error);
+    } finally {
+      setDamageLoading(false);
+    }
+  };
+
   const handleSaveEdit = async () => {
     if (editingRow === null || !editFormData.id) return;
-    
+    const prevRecords = records;
+    const updated = records.map(r =>
+      r.id === editFormData.id
+        ? { ...r, quantity: editFormData.quantity ?? r.quantity, due_date: editFormData.due_date ?? r.due_date }
+        : r
+    );
+    setRecords(updated);
+    applyStats(updated);
+    setEditingRow(null);
+    setEditFormData({});
     try {
       const res = await fetch(`/api/lending/${editFormData.id}`, {
         method: "PUT",
@@ -196,15 +272,14 @@ export default function LendingPage() {
           due_date: editFormData.due_date,
         }),
       });
-
-      if (res.ok) {
-        await fetchLendingRecords();
-        setEditingRow(null);
-        setEditFormData({});
-      } else {
+      if (!res.ok) {
+        setRecords(prevRecords);
+        applyStats(prevRecords);
         console.error("Failed to update record");
       }
     } catch (error) {
+      setRecords(prevRecords);
+      applyStats(prevRecords);
       console.error("Error updating record:", error);
     }
   };
@@ -333,6 +408,13 @@ export default function LendingPage() {
   };
 
   const handleReturnDateUpdate = async (recordId: number, returnDate: string) => {
+    const prevRecords = records;
+    const updated = records.map(r =>
+      r.id === recordId ? { ...r, return_date: returnDate, status: "RETURNED" } : r
+    );
+    setRecords(updated);
+    applyStats(updated);
+    setEditingReturnDate(null);
     try {
       const res = await fetch(`/api/lending/${recordId}`, {
         method: "PUT",
@@ -342,14 +424,14 @@ export default function LendingPage() {
           status: "RETURNED",
         }),
       });
-
-      if (res.ok) {
-        await fetchLendingRecords();
-        setEditingReturnDate(null);
-      } else {
+      if (!res.ok) {
+        setRecords(prevRecords);
+        applyStats(prevRecords);
         console.error("Failed to update return date");
       }
     } catch (error) {
+      setRecords(prevRecords);
+      applyStats(prevRecords);
       console.error("Error updating return date:", error);
     }
   };
@@ -581,17 +663,33 @@ export default function LendingPage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          record.status === "RETURNED"
-                            ? "bg-green-100 text-green-800"
-                            : record.status === "PENDING"
-                            ? "bg-yellow-100 text-yellow-800"
-                            : "bg-gray-100 text-gray-800"
-                        }`}
-                      >
-                        {record.status || "—"}
-                      </span>
+                      {record.status === "PENDING" ? (
+                        <select
+                          value="PENDING"
+                          onChange={(e) => {
+                            if (e.target.value === "DAMAGED") {
+                              setDamagedRowIdx(idx);
+                              setDamagedQtyStr("1");
+                            }
+                          }}
+                          className="px-2 py-1 text-xs font-semibold rounded border border-yellow-400 bg-yellow-100 text-yellow-800 focus:outline-none focus:ring-2 focus:ring-yellow-500 cursor-pointer"
+                        >
+                          <option value="PENDING">PENDING</option>
+                          <option value="DAMAGED">DAMAGED</option>
+                        </select>
+                      ) : (
+                        <span
+                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            record.status === "RETURNED"
+                              ? "bg-green-100 text-green-800"
+                              : record.status === "DAMAGED"
+                              ? "bg-red-100 text-red-800"
+                              : "bg-gray-100 text-gray-800"
+                          }`}
+                        >
+                          {record.status || "—"}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-700">{record.mentor || "—"}</td>
                     <td className="px-4 py-3">
@@ -642,6 +740,47 @@ export default function LendingPage() {
           </table>
         </div>
       </div>
+
+      {/* Damage Confirmation Modal */}
+      {damagedRowIdx !== null && filteredRecords[damagedRowIdx] && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <h2 className="text-lg font-semibold text-slate-800 mb-1">Mark Items as Damaged</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              Product: <span className="font-medium text-slate-700">{filteredRecords[damagedRowIdx].product_name}</span>
+              <br />
+              Lent quantity: <span className="font-medium text-slate-700">{filteredRecords[damagedRowIdx].quantity}</span>
+            </p>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Number of damaged items
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={filteredRecords[damagedRowIdx].quantity}
+              value={damagedQtyStr}
+              onChange={(e) => setDamagedQtyStr(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-400 mb-4"
+            />
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => { setDamagedRowIdx(null); setDamagedQtyStr("1"); }}
+                disabled={damageLoading}
+                className="px-4 py-2 border border-slate-300 rounded text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleMarkDamaged(filteredRecords[damagedRowIdx])}
+                disabled={damageLoading}
+                className="px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                {damageLoading ? "Saving..." : "Confirm Damaged"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Entry Modal */}
       {isModalOpen && (

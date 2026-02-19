@@ -45,9 +45,14 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [lowStockProducts, setLowStockProducts] = useState<LowStockProduct[]>([])
   const [overdueAlerts, setOverdueAlerts] = useState<OverdueAlert[]>([])
+  const [dismissedOverdue, setDismissedOverdue] = useState<Set<string>>(new Set())
   const [topLentProducts, setTopLentProducts] = useState<TopLentProduct[]>([])
   const [loading, setLoading] = useState(true)
   const [alertTab, setAlertTab] = useState<'low-stock' | 'overdue'>('low-stock')
+
+  const dismissOverdue = (id: string) => {
+    setDismissedOverdue(prev => new Set(prev).add(id))
+  }
 
   useEffect(() => {
     fetchDashboardStats()
@@ -119,10 +124,23 @@ export default function Dashboard() {
   }
 
   // Prepare data for donut chart
+  const grandTotal = stats.stockDistribution.total || 1
   const chartData = [
-    { name: 'Available', value: stats.stockDistribution.available, percentage: stats.stockDistributionPercentages.available },
-    { name: 'Lent', value: stats.stockDistribution.lent, percentage: stats.stockDistributionPercentages.lent },
-    { name: 'Lost/Damaged', value: stats.stockDistribution.lostDamaged, percentage: stats.stockDistributionPercentages.lostDamaged },
+    {
+      name: 'Available',
+      value: stats.stockDistribution.available,
+      percentage: parseFloat(((stats.stockDistribution.available / grandTotal) * 100).toFixed(1)),
+    },
+    {
+      name: 'Lent',
+      value: stats.stockDistribution.lent,
+      percentage: parseFloat(((stats.stockDistribution.lent / grandTotal) * 100).toFixed(1)),
+    },
+    {
+      name: 'Lost/Damaged',
+      value: stats.stockDistribution.lostDamaged,
+      percentage: parseFloat(((stats.stockDistribution.lostDamaged / grandTotal) * 100).toFixed(1)),
+    },
   ].filter(item => item.value > 0) // Only show non-zero values
 
   const COLORS = {
@@ -219,8 +237,10 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="space-y-2">
-                {overdueAlerts.length > 0 ? (
-                  overdueAlerts.map((alert, index) => (
+                {overdueAlerts.filter(a => !dismissedOverdue.has(a.lending_order_id)).length > 0 ? (
+                  overdueAlerts
+                    .filter(a => !dismissedOverdue.has(a.lending_order_id))
+                    .map((alert, index) => (
                     <div
                       key={`${alert.lending_order_id}-${index}`}
                       className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm"
@@ -234,6 +254,15 @@ export default function Dashboard() {
                             {alert.borrower_name} did not return {alert.product_name} within {new Date(alert.due_date).toLocaleDateString()}
                           </p>
                         </div>
+                        <button
+                          onClick={() => dismissOverdue(alert.lending_order_id)}
+                          className="ml-1 flex-shrink-0 text-orange-400 hover:text-orange-700 transition-colors"
+                          title="Dismiss"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
                       </div>
                     </div>
                   ))
@@ -262,6 +291,7 @@ export default function Dashboard() {
                     innerRadius={60}
                     outerRadius={80}
                     paddingAngle={2}
+                    minAngle={5}
                     dataKey="value"
                     label={({ percentage }) => `${percentage}%`}
                   >
@@ -270,14 +300,17 @@ export default function Dashboard() {
                     ))}
                   </Pie>
                   <Tooltip 
-                    formatter={(value: number) => [`${value} items`, 'Quantity']}
+                    formatter={(value: number, name: string) => {
+                      const item = chartData.find(d => d.name === name)
+                      return [`${value} items (${item?.percentage ?? 0}%)`, 'Quantity']
+                    }}
                   />
                   <Legend 
                     verticalAlign="bottom" 
                     height={36}
                     formatter={(value) => {
                       const item = chartData.find(d => d.name === value)
-                      return `${value}: ${item?.value || 0}`
+                      return `${value}: ${item?.value || 0} (${item?.percentage ?? 0}%)`
                     }}
                   />
                 </PieChart>
@@ -326,13 +359,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Department-wise Graph - Placeholder */}
-      <div className="bg-gray-200 rounded-lg p-6 shadow">
-        <h3 className="text-gray-700 text-lg font-semibold mb-4">Department-wise distribution</h3>
-        <div className="text-gray-600 text-sm">
-          <p>Department-wise graph will be displayed here</p>
-        </div>
-      </div>
     </div>
   )
 }

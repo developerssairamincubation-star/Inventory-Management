@@ -1,4 +1,5 @@
 import "./globals.css";
+import NextTopLoader from "nextjs-toploader";
 
 export default function RootLayout({
   children,
@@ -7,7 +8,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body suppressHydrationWarning>{children}</body>
+      <body suppressHydrationWarning>
+        <NextTopLoader color="#475569" showSpinner={false} />
+        {children}
+      </body>
     </html>
   );
 }

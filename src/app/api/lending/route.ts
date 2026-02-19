@@ -161,6 +161,7 @@ export async function GET(request: NextRequest) {
           department: department?.department_name || "—",
           product_name: product?.product_name || "—",
           product_code: product?.product_code || "—",
+          product_id: item?.product_id || null,
           quantity: item?.quantity || 0,
           lending_date: order.created_at,
           due_date: order.due_date,
@@ -171,8 +172,8 @@ export async function GET(request: NextRequest) {
       });
     });
 
-    // Calculate stats - only count currently lent items (not returned)
-    const activeLentRecords = records.filter(r => r.status !== "RETURNED");
+    // Calculate stats - only count currently lent items (not returned or damaged)
+    const activeLentRecords = records.filter(r => r.status !== "RETURNED" && r.status !== "DAMAGED");
     const totalQuantity = activeLentRecords.reduce((sum, r) => sum + (r.quantity || 0), 0);
     const uniqueProducts = new Set(activeLentRecords.map(r => r.product_name).filter(name => name !== "—")).size;
     const returned = records.filter(r => r.status === "RETURNED").length;
