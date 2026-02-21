@@ -19,7 +19,10 @@ type LendingRecord = {
   department: string;
   product_name: string;
   product_id: string | null;
-  quantity: number;
+  original_quantity: number;   // total initially borrowed
+  quantity: number;            // current remaining (outstanding or returned)
+  damaged_quantity: number;    // items marked damaged
+  lost_quantity: number;       // items marked lost
   lending_date: string;
   due_date: string;
   return_date: string | null;
@@ -80,6 +83,17 @@ export default function LendingPage() {
   const [damagedRowIdx, setDamagedRowIdx] = useState<number | null>(null);
   const [damagedQtyStr, setDamagedQtyStr] = useState<string>("1");
   const [damageLoading, setDamageLoading] = useState(false);
+
+  // Lost-related state
+  const [lostRowIdx, setLostRowIdx] = useState<number | null>(null);
+  const [lostQtyStr, setLostQtyStr] = useState<string>("1");
+  const [lostLoading, setLostLoading] = useState(false);
+
+  // Return-from-dropdown modal state
+  const [returnPickerRowIdx, setReturnPickerRowIdx] = useState<number | null>(null);
+  const [returnPickerDate, setReturnPickerDate] = useState<string>("");
+  const [returnPickerQty, setReturnPickerQty] = useState<number>(1);
+  const [returnPickerLoading, setReturnPickerLoading] = useState(false);
 
   // Stats
   const [totalLent, setTotalLent] = useState(0);
@@ -150,12 +164,19 @@ export default function LendingPage() {
   }
 
   // Recalculate header stats from a records array without a full fetch
+  const FINAL_STATUSES = ["RETURNED", "RETURNED_DAMAGED", "RETURNED_LOST", "DAMAGED", "LOST", "CONSUMABLE"];
+
   const applyStats = (recs: LendingRecord[]) => {
-    const active = recs.filter(r => r.status !== "RETURNED" && r.status !== "DAMAGED");
+    const active = recs.filter(r => !FINAL_STATUSES.includes(r.status));
     setTotalLent(new Set(active.map(r => r.product_name).filter(n => n !== "—")).size);
     setTotalQuantity(active.reduce((s, r) => s + (r.quantity || 0), 0));
-    setReturned(recs.filter(r => r.status === "RETURNED").length);
-    setPending(recs.filter(r => r.status === "PENDING").length);
+    setReturned(recs.filter(r => r.status === "RETURNED" || r.status === "RETURNED_DAMAGED" || r.status === "RETURNED_LOST").length);
+    setPending(recs.filter(r =>
+      r.status === "PENDING" ||
+      r.status === "PARTIALLY_RETURNED" ||
+      r.status === "PARTIALLY_DAMAGED" ||
+      r.status === "PARTIALLY_LOST"
+    ).length);
   };
 
   const filteredRecords = records.filter((record) => {
@@ -217,9 +238,10 @@ export default function LendingPage() {
     // Optimistic update
     const prevRecords = records;
     const newQty = record.quantity - damagedQty;
+    const newStatus = newQty === 0 ? "DAMAGED" : "PARTIALLY_DAMAGED";
     const updated = records.map(r =>
       r.id === record.id && r.product_id === record.product_id
-        ? { ...r, quantity: newQty }
+        ? { ...r, quantity: newQty, damaged_quantity: r.damaged_quantity + damagedQty, status: newStatus }
         : r
     );
     setDamagedRowIdx(null);
@@ -248,6 +270,53 @@ export default function LendingPage() {
       console.error("Error marking items as damaged:", error);
     } finally {
       setDamageLoading(false);
+    }
+  };
+
+  const handleMarkLost = async (record: LendingRecord) => {
+    if (!record.product_id) {
+      alert("This record has no associated product and cannot be marked as lost.");
+      return;
+    }
+    const lostQty = parseInt(lostQtyStr) || 0;
+    if (lostQty < 1 || lostQty > record.quantity) {
+      alert(`Lost quantity must be between 1 and ${record.quantity}`);
+      return;
+    }
+    const prevRecords = records;
+    const newQty = record.quantity - lostQty;
+    const newStatus = newQty === 0 ? "LOST" : "PARTIALLY_LOST";
+    const updated = records.map(r =>
+      r.id === record.id && r.product_id === record.product_id
+        ? { ...r, quantity: newQty, lost_quantity: r.lost_quantity + lostQty, status: newStatus }
+        : r
+    );
+    setLostRowIdx(null);
+    setLostQtyStr("1");
+    setRecords(updated);
+    applyStats(updated);
+    setLostLoading(true);
+    try {
+      const res = await fetch(`/api/lending/${record.id}/lost`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          product_id: record.product_id,
+          lost_quantity: lostQty,
+        }),
+      });
+      if (!res.ok) {
+        setRecords(prevRecords);
+        applyStats(prevRecords);
+        const data = await res.json();
+        alert(data.error || "Failed to mark items as lost");
+      }
+    } catch (error) {
+      setRecords(prevRecords);
+      applyStats(prevRecords);
+      console.error("Error marking items as lost:", error);
+    } finally {
+      setLostLoading(false);
     }
   };
 
@@ -407,22 +476,48 @@ export default function LendingPage() {
     }
   };
 
-  const handleReturnDateUpdate = async (recordId: number, returnDate: string) => {
+  const handleReturnDateUpdate = async (recordId: number, returnDate: string, returnQty?: number) => {
     const prevRecords = records;
+    const existingRecord = records.find(r => r.id === recordId);
+    if (!existingRecord) return;
+
+    // How many are still outstanding after this return
+    const currentOutstanding = existingRecord.quantity;
+    const nowReturning = returnQty ?? currentOutstanding;
+    const remaining = currentOutstanding - nowReturning;
+
+    let returnStatus: string;
+    if (remaining > 0) {
+      // Still items outstanding – partial return
+      returnStatus = "PARTIALLY_RETURNED";
+    } else {
+      // All outstanding items accounted for
+      returnStatus =
+        existingRecord.status === "PARTIALLY_DAMAGED" || existingRecord.status === "DAMAGED"
+          ? "RETURNED_DAMAGED"
+          : existingRecord.status === "PARTIALLY_LOST"
+          ? "RETURNED_LOST"
+          : "RETURNED";
+    }
+
     const updated = records.map(r =>
-      r.id === recordId ? { ...r, return_date: returnDate, status: "RETURNED" } : r
+      r.id === recordId
+        ? { ...r, return_date: returnDate, status: returnStatus, quantity: remaining }
+        : r
     );
     setRecords(updated);
     applyStats(updated);
     setEditingReturnDate(null);
+    setReturnPickerRowIdx(null);
+    setReturnPickerDate("");
+    setReturnPickerQty(1);
     try {
+      // Send remaining balance as quantity so the DB always holds outstanding count
+      const body: any = { return_date: returnDate, status: returnStatus, quantity: remaining };
       const res = await fetch(`/api/lending/${recordId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          return_date: returnDate,
-          status: "RETURNED",
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         setRecords(prevRecords);
@@ -559,10 +654,14 @@ export default function LendingPage() {
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Borrower</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Dept</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Product Name</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Quantity</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Date of lending</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">No. of Borrowed</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">No. Returned</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">No. Damaged</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">No. Lost</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Balance</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Date of Lending</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Due Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Return Date</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Return Date</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Status</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Mentor</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Actions</th>
@@ -571,7 +670,7 @@ export default function LendingPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={16} className="px-4 py-8 text-center text-slate-500">
                     No lending records found
                   </td>
                 </tr>
@@ -591,19 +690,61 @@ export default function LendingPage() {
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-700">{record.department || "—"}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{record.product_name || "—"}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      {editingRow === idx ? (
-                        <input
-                          type="number"
-                          min="1"
-                          value={editFormData.quantity || record.quantity}
-                          onChange={(e) => setEditFormData({ ...editFormData, quantity: parseInt(e.target.value) || 1 })}
-                          className="w-20 px-2 py-1 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
-                        />
-                      ) : (
-                        record.quantity || 0
-                      )}
-                    </td>
+                    {/* ── Quantity breakdown columns ── */}
+                    {(() => {
+                      const FULLY_RETURNED_STATUSES = ["RETURNED", "RETURNED_DAMAGED", "RETURNED_LOST"];
+                      const borrowed   = record.original_quantity ?? record.quantity;
+                      const damaged    = record.damaged_quantity ?? 0;
+                      const lost       = record.lost_quantity ?? 0;
+                      const currentQty = record.quantity; // remaining outstanding items
+                      const isFullyReturned = FULLY_RETURNED_STATUSES.includes(record.status);
+                      // For fully-returned rows, derive returned from original minus damaged/lost
+                      // (works regardless of whether DB quantity stores remaining or returned count)
+                      const returned   = isFullyReturned
+                        ? Math.max(0, borrowed - damaged - lost)
+                        : Math.max(0, borrowed - currentQty - damaged - lost);
+                      const balance    = isFullyReturned ? 0 : currentQty;
+                      return (
+                        <>
+                          {/* No. of Borrowed */}
+                          <td className="px-4 py-3 text-sm text-slate-700 text-center">
+                            {editingRow === idx ? (
+                              <input
+                                type="number"
+                                min="1"
+                                value={editFormData.quantity || record.quantity}
+                                onChange={(e) => setEditFormData({ ...editFormData, quantity: parseInt(e.target.value) || 1 })}
+                                className="w-16 px-2 py-1 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
+                              />
+                            ) : borrowed}
+                          </td>
+                          {/* No. Returned */}
+                          <td className="px-4 py-3 text-sm text-center">
+                            <span className={returned > 0 ? "font-semibold text-green-700" : "text-slate-400"}>
+                              {returned > 0 ? returned : "—"}
+                            </span>
+                          </td>
+                          {/* No. Damaged */}
+                          <td className="px-4 py-3 text-sm text-center">
+                            <span className={damaged > 0 ? "font-semibold text-red-600" : "text-slate-400"}>
+                              {damaged > 0 ? damaged : "—"}
+                            </span>
+                          </td>
+                          {/* No. Lost */}
+                          <td className="px-4 py-3 text-sm text-center">
+                            <span className={lost > 0 ? "font-semibold text-orange-600" : "text-slate-400"}>
+                              {lost > 0 ? lost : "—"}
+                            </span>
+                          </td>
+                          {/* Balance */}
+                          <td className="px-4 py-3 text-sm text-center">
+                            <span className={balance > 0 ? "font-semibold text-yellow-700" : "text-slate-400"}>
+                              {balance > 0 ? balance : "—"}
+                            </span>
+                          </td>
+                        </>
+                      );
+                    })()}
                     <td className="px-4 py-3 text-sm text-slate-700">
                       {formatDate(record.lending_date)}
                     </td>
@@ -622,26 +763,13 @@ export default function LendingPage() {
                     <td className="px-4 py-3 text-sm text-slate-700">
                       {record.return_date ? (
                         formatDate(record.return_date)
-                      ) : editingReturnDate === idx ? (
-                        <input
-                          type="date"
-                          autoFocus
-                          className="px-2 py-1 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
-                          onChange={(e) => {
-                            if (e.target.value) {
-                              handleReturnDateUpdate(record.id, e.target.value);
-                            }
-                          }}
-                          onBlur={() => setEditingReturnDate(null)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') {
-                              setEditingReturnDate(null);
-                            }
-                          }}
-                        />
                       ) : (
                         <button
-                          onClick={() => setEditingReturnDate(idx)}
+                          onClick={() => {
+                            setReturnPickerRowIdx(idx);
+                            setReturnPickerDate(new Date().toISOString().split("T")[0]);
+                            setReturnPickerQty(record.quantity);
+                          }}
                           className="flex items-center gap-1 text-blue-600 hover:text-blue-800"
                           title="Set return date"
                         >
@@ -663,32 +791,91 @@ export default function LendingPage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {record.status === "PENDING" ? (
+                      {(["PENDING", "PARTIALLY_RETURNED", "PARTIALLY_DAMAGED", "PARTIALLY_LOST"].includes(record.status)) ? (
                         <select
-                          value="PENDING"
+                          value={record.status}
                           onChange={(e) => {
-                            if (e.target.value === "DAMAGED") {
+                            if (e.target.value === "DO_DAMAGED") {
                               setDamagedRowIdx(idx);
                               setDamagedQtyStr("1");
+                            } else if (e.target.value === "DO_LOST") {
+                              setLostRowIdx(idx);
+                              setLostQtyStr("1");
+                            } else if (e.target.value === "DO_RETURN") {
+                              setReturnPickerRowIdx(idx);
+                              setReturnPickerDate(new Date().toISOString().split("T")[0]);
+                              setReturnPickerQty(record.quantity);
                             }
                           }}
-                          className="px-2 py-1 text-xs font-semibold rounded border border-yellow-400 bg-yellow-100 text-yellow-800 focus:outline-none focus:ring-2 focus:ring-yellow-500 cursor-pointer"
-                        >
-                          <option value="PENDING">PENDING</option>
-                          <option value="DAMAGED">DAMAGED</option>
-                        </select>
-                      ) : (
-                        <span
-                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            record.status === "RETURNED"
-                              ? "bg-green-100 text-green-800"
-                              : record.status === "DAMAGED"
-                              ? "bg-red-100 text-red-800"
-                              : "bg-gray-100 text-gray-800"
+                          className={`px-2 py-1 text-xs font-semibold rounded border cursor-pointer focus:outline-none focus:ring-2 ${
+                            record.status === "PARTIALLY_DAMAGED"
+                              ? "border-red-400 bg-red-50 text-red-700 focus:ring-red-400"
+                              : record.status === "PARTIALLY_LOST"
+                              ? "border-orange-400 bg-orange-50 text-orange-700 focus:ring-orange-400"
+                              : record.status === "PARTIALLY_RETURNED"
+                              ? "border-blue-400 bg-blue-50 text-blue-700 focus:ring-blue-400"
+                              : "border-yellow-400 bg-yellow-100 text-yellow-800 focus:ring-yellow-500"
                           }`}
                         >
-                          {record.status || "—"}
-                        </span>
+                          <option value={record.status}>
+                            {record.status === "PENDING"
+                              ? "PENDING"
+                              : record.status === "PARTIALLY_RETURNED"
+                              ? "PARTIALLY RETURNED"
+                              : record.status === "PARTIALLY_DAMAGED"
+                              ? "PARTIALLY DAMAGED"
+                              : "PARTIALLY LOST"}
+                          </option>
+                          <option value="DO_RETURN">Mark as Returned</option>
+                          <option value="DO_DAMAGED">Mark as Damaged</option>
+                          <option value="DO_LOST">Mark as Lost</option>
+                        </select>
+                      ) : (
+                        (() => {
+                          const FINAL_RETURNED = ["RETURNED", "RETURNED_DAMAGED", "RETURNED_LOST"];
+                          const d = record.damaged_quantity ?? 0;
+                          const l = record.lost_quantity ?? 0;
+                          const orig = record.original_quantity ?? record.quantity;
+                          // returnedCount = items not damaged, not lost, and not still outstanding
+                          const returnedCount = FINAL_RETURNED.includes(record.status)
+                            ? Math.max(0, orig - d - l)
+                            : 0;
+
+                          const hasPills = returnedCount > 0 || d > 0 || l > 0;
+
+                          if (hasPills) {
+                            return (
+                              <div className="flex flex-col gap-1">
+                                {returnedCount > 0 && (
+                                  <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-green-200 text-green-900 whitespace-nowrap">
+                                    {returnedCount} Returned
+                                  </span>
+                                )}
+                                {d > 0 && (
+                                  <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-red-200 text-red-900 whitespace-nowrap">
+                                    {d} Damaged
+                                  </span>
+                                )}
+                                {l > 0 && (
+                                  <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-[#c4a8a8] text-[#3b1f1f] whitespace-nowrap">
+                                    {l} Lost
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          // Fallback for CONSUMABLE or any unhandled status
+                          const fallbackColor =
+                            record.status === "CONSUMABLE"
+                              ? "bg-purple-100 text-purple-800"
+                              : "bg-gray-100 text-gray-700";
+                          return (
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full cursor-default ${fallbackColor}`}>
+                              {record.status || "—"}
+                            </span>
+                          );
+                        })()
                       )}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-700">{record.mentor || "—"}</td>
@@ -741,6 +928,81 @@ export default function LendingPage() {
         </div>
       </div>
 
+      {/* Return Date Modal */}
+      {returnPickerRowIdx !== null && filteredRecords[returnPickerRowIdx] && (() => {
+        const rec = filteredRecords[returnPickerRowIdx];
+        const isPartiallyDamaged = rec.status === "PARTIALLY_DAMAGED";
+        const isPartiallyLost = rec.status === "PARTIALLY_LOST";
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">Set Return Date</h2>
+              <p className="text-sm text-slate-500 mb-1">
+                Product: <span className="font-medium text-slate-700">{rec.product_name}</span>
+              </p>
+              {isPartiallyDamaged && (
+                <p className="text-xs text-red-600 bg-red-50 rounded px-2 py-1 mb-3">
+                  ⚠ {rec.damaged_quantity ?? 0} item{(rec.damaged_quantity ?? 0) !== 1 ? "s were" : " was"} damaged.
+                  Returning the remaining {rec.quantity} item{rec.quantity !== 1 ? "s" : ""} → status will be <strong>Returned (Damaged)</strong>.
+                </p>
+              )}
+              {isPartiallyLost && (
+                <p className="text-xs text-orange-600 bg-orange-50 rounded px-2 py-1 mb-3">
+                  ⚠ {rec.lost_quantity ?? 0} item{(rec.lost_quantity ?? 0) !== 1 ? "s were" : " was"} lost. Returning the remaining {rec.quantity} item{rec.quantity !== 1 ? "s" : ""} → status will be <strong>Returned (Lost)</strong>.
+                </p>
+              )}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Return date</label>
+                  <input
+                    type="date"
+                    value={returnPickerDate}
+                    max={new Date().toISOString().split("T")[0]}
+                    onChange={(e) => setReturnPickerDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-green-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Qty returned
+                    <span className="text-slate-400 font-normal ml-1">(max {rec.quantity})</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={rec.quantity}
+                    value={returnPickerQty}
+                    onChange={(e) => setReturnPickerQty(Math.min(rec.quantity, Math.max(1, parseInt(e.target.value) || 1)))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-green-400"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => { setReturnPickerRowIdx(null); setReturnPickerDate(""); setReturnPickerQty(1); }}
+                  disabled={returnPickerLoading}
+                  className="px-4 py-2 border border-slate-300 rounded text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!returnPickerDate) { alert("Please select a return date."); return; }
+                    setReturnPickerLoading(true);
+                    await handleReturnDateUpdate(rec.id, returnPickerDate, returnPickerQty);
+                    setReturnPickerLoading(false);
+                  }}
+                  disabled={returnPickerLoading || !returnPickerDate}
+                  className="px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700 disabled:opacity-50"
+                >
+                  {returnPickerLoading ? "Saving..." : "Confirm Return"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Damage Confirmation Modal */}
       {damagedRowIdx !== null && filteredRecords[damagedRowIdx] && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -776,6 +1038,47 @@ export default function LendingPage() {
                 className="px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50"
               >
                 {damageLoading ? "Saving..." : "Confirm Damaged"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lost Confirmation Modal */}
+      {lostRowIdx !== null && filteredRecords[lostRowIdx] && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <h2 className="text-lg font-semibold text-slate-800 mb-1">Mark Items as Lost</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              Product: <span className="font-medium text-slate-700">{filteredRecords[lostRowIdx].product_name}</span>
+              <br />
+              Lent quantity: <span className="font-medium text-slate-700">{filteredRecords[lostRowIdx].quantity}</span>
+            </p>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Number of lost items
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={filteredRecords[lostRowIdx].quantity}
+              value={lostQtyStr}
+              onChange={(e) => setLostQtyStr(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-400 mb-4"
+            />
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => { setLostRowIdx(null); setLostQtyStr("1"); }}
+                disabled={lostLoading}
+                className="px-4 py-2 border border-slate-300 rounded text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleMarkLost(filteredRecords[lostRowIdx])}
+                disabled={lostLoading}
+                className="px-4 py-2 bg-orange-600 text-white rounded text-sm hover:bg-orange-700 disabled:opacity-50"
+              >
+                {lostLoading ? "Saving..." : "Confirm Lost"}
               </button>
             </div>
           </div>

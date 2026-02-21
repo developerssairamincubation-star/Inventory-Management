@@ -51,19 +51,44 @@ export async function GET(request: NextRequest) {
 
     // Fetch lending items separately
     const orderIds = lendingOrders?.map((o: any) => o.lending_order_id) || [];
-    
-    const { data: lendingItems } = await supabase
+    const inClause = orderIds.length > 0 ? orderIds : [""];
+
+    let { data: lendingItems, error: itemsError } = await supabase
       .from("lending_item")
       .select(`
         lend_order_id,
         quantity,
+        original_quantity,
+        damaged_quantity,
+        lost_quantity,
         product_id,
         products (
           product_name,
           product_code
         )
       `)
-      .in("lend_order_id", orderIds.length > 0 ? orderIds : [""]);
+      .in("lend_order_id", inClause);
+
+    // Fallback: if the new columns don't exist yet (migration not run), retry without them
+    if (itemsError) {
+      console.warn("lending_item select with new columns failed, retrying without them:", itemsError.message);
+      const { data: fallbackItems, error: fallbackError } = await supabase
+        .from("lending_item")
+        .select(`
+          lend_order_id,
+          quantity,
+          product_id,
+          products (
+            product_name,
+            product_code
+          )
+        `)
+        .in("lend_order_id", inClause);
+      if (fallbackError) {
+        console.error("lending_item fallback select also failed:", fallbackError.message);
+      }
+      lendingItems = fallbackItems as any;
+    }
 
     // Group lending items by order ID
     const itemsByOrderId = new Map<string, any[]>();
@@ -141,7 +166,11 @@ export async function GET(request: NextRequest) {
           department: department?.department_name || "—",
           product_name: "—",
           product_code: "—",
+          product_id: null,
           quantity: 0,
+          original_quantity: 0,
+          damaged_quantity: 0,
+          lost_quantity: 0,
           lending_date: order.created_at,
           due_date: order.due_date,
           return_date: order.return_date,
@@ -163,6 +192,9 @@ export async function GET(request: NextRequest) {
           product_code: product?.product_code || "—",
           product_id: item?.product_id || null,
           quantity: item?.quantity || 0,
+          original_quantity: item?.original_quantity ?? item?.quantity ?? 0,
+          damaged_quantity: item?.damaged_quantity || 0,
+          lost_quantity: item?.lost_quantity || 0,
           lending_date: order.created_at,
           due_date: order.due_date,
           return_date: order.return_date,
@@ -307,6 +339,9 @@ export async function POST(request: NextRequest) {
       lend_order_id: order.lending_order_id,
       product_id: item.product_id,
       quantity: item.quantity,
+      original_quantity: item.quantity,
+      damaged_quantity: 0,
+      lost_quantity: 0,
       status: status === "CONSUMABLE" ? "NON_RETURNABLE_GIVEN" : "ISSUED",
     }));
 

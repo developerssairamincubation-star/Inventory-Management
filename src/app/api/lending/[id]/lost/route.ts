@@ -9,11 +9,11 @@ export async function POST(
     const supabase = getSupabaseAdmin();
     const { id } = await params;
     const body = await request.json();
-    const { product_id, damaged_quantity } = body;
+    const { product_id, lost_quantity } = body;
 
-    if (!product_id || !damaged_quantity || damaged_quantity < 1) {
+    if (!product_id || !lost_quantity || lost_quantity < 1) {
       return NextResponse.json(
-        { error: "product_id and damaged_quantity (≥1) are required" },
+        { error: "product_id and lost_quantity (≥1) are required" },
         { status: 400 }
       );
     }
@@ -21,7 +21,7 @@ export async function POST(
     // 1. Get the current lending_item row for this order + product
     const { data: lendingItem, error: lendingItemError } = await supabase
       .from("lending_item")
-      .select("quantity, damaged_quantity")
+      .select("quantity, lost_quantity")
       .eq("lend_order_id", id)
       .eq("product_id", product_id)
       .single();
@@ -33,21 +33,21 @@ export async function POST(
       );
     }
 
-    if (damaged_quantity > lendingItem.quantity) {
+    if (lost_quantity > lendingItem.quantity) {
       return NextResponse.json(
-        { error: `Damaged quantity (${damaged_quantity}) exceeds lent quantity (${lendingItem.quantity})` },
+        { error: `Lost quantity (${lost_quantity}) exceeds lent quantity (${lendingItem.quantity})` },
         { status: 400 }
       );
     }
 
-    const newLentQuantity = lendingItem.quantity - damaged_quantity;
-    const newItemDamagedQty = (lendingItem.damaged_quantity || 0) + damaged_quantity;
+    const newLentQuantity = lendingItem.quantity - lost_quantity;
+    const newItemLostQty = (lendingItem.lost_quantity || 0) + lost_quantity;
 
-    // 2. Update lending_item: reduce quantity, increment damaged_quantity
+    // 2. Update lending_item: reduce quantity, increment lost_quantity
     //    (quantity can reach 0 — constraint was relaxed to >= 0)
     const { error: lendingUpdateError } = await supabase
       .from("lending_item")
-      .update({ quantity: newLentQuantity, damaged_quantity: newItemDamagedQty })
+      .update({ quantity: newLentQuantity, lost_quantity: newItemLostQty })
       .eq("lend_order_id", id)
       .eq("product_id", product_id);
 
@@ -60,7 +60,7 @@ export async function POST(
     if (newLentQuantity === 0) {
       const { error: orderStatusError } = await supabase
         .from("lending_order")
-        .update({ status: "DAMAGED" })
+        .update({ status: "LOST" })
         .eq("lending_order_id", id);
 
       if (orderStatusError) {
@@ -74,10 +74,10 @@ export async function POST(
         .eq("lending_order_id", id)
         .single();
 
-      if (lendingOrder && lendingOrder.status === "PENDING") {
+      if (lendingOrder && (lendingOrder.status === "PENDING" || lendingOrder.status === "PARTIALLY_DAMAGED")) {
         const { error: orderStatusError } = await supabase
           .from("lending_order")
-          .update({ status: "PARTIALLY_DAMAGED" })
+          .update({ status: "PARTIALLY_LOST" })
           .eq("lending_order_id", id);
 
         if (orderStatusError) {
@@ -87,10 +87,10 @@ export async function POST(
       }
     }
 
-    // 3. Reduce stocks.quantity and increase stocks.damaged_quantity
+    // 3. Reduce stocks.quantity and increase stocks.lost_quantity
     const { data: stockData, error: stockFetchError } = await supabase
       .from("stocks")
-      .select("quantity, damaged_quantity")
+      .select("quantity, lost_quantity")
       .eq("product_id", product_id)
       .single();
 
@@ -99,34 +99,41 @@ export async function POST(
       return NextResponse.json({ error: "Stock record not found" }, { status: 404 });
     }
 
-    const newStockQuantity = Math.max(0, (stockData.quantity || 0) - damaged_quantity);
-    const newDamagedQuantity = (stockData.damaged_quantity || 0) + damaged_quantity;
+    const newStockQuantity = Math.max(0, (stockData.quantity || 0) - lost_quantity);
+    const newLostQuantity = (stockData.lost_quantity || 0) + lost_quantity;
 
     const { error: stockUpdateError } = await supabase
       .from("stocks")
       .update({
         quantity: newStockQuantity,
-        damaged_quantity: newDamagedQuantity,
+        lost_quantity: newLostQuantity,
       })
       .eq("product_id", product_id);
 
     if (stockUpdateError) {
-      console.error("Error updating stock:", stockUpdateError);
-      return NextResponse.json({ error: stockUpdateError.message }, { status: 500 });
+      // If lost_quantity column doesn't exist yet, fall back to just reducing quantity
+      if (stockUpdateError.code === "42703") {
+        await supabase
+          .from("stocks")
+          .update({ quantity: newStockQuantity })
+          .eq("product_id", product_id);
+      } else {
+        console.error("Error updating stock:", stockUpdateError);
+        return NextResponse.json({ error: stockUpdateError.message }, { status: 500 });
+      }
     }
 
     return NextResponse.json({
       success: true,
       newLentQuantity,
-      newItemDamagedQty,
       newStockQuantity,
-      newDamagedQuantity,
-      orderStatus: newLentQuantity === 0 ? "DAMAGED" : "PARTIALLY_DAMAGED",
+      newLostQuantity,
+      orderStatus: newLentQuantity === 0 ? "LOST" : "PARTIALLY_LOST",
     });
   } catch (error) {
-    console.error("Error processing damage request:", error);
+    console.error("Error processing lost request:", error);
     return NextResponse.json(
-      { error: "Failed to mark items as damaged" },
+      { error: "Failed to mark items as lost" },
       { status: 500 }
     );
   }

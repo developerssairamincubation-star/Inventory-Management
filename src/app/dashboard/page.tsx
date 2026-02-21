@@ -137,7 +137,7 @@ export default function Dashboard() {
       percentage: parseFloat(((stats.stockDistribution.lent / grandTotal) * 100).toFixed(1)),
     },
     {
-      name: 'Lost/Damaged',
+      name: 'Damaged',
       value: stats.stockDistribution.lostDamaged,
       percentage: parseFloat(((stats.stockDistribution.lostDamaged / grandTotal) * 100).toFixed(1)),
     },
@@ -146,15 +146,15 @@ export default function Dashboard() {
   const COLORS = {
     'Available': '#3b82f6', // blue
     'Lent': '#6b7280', // gray
-    'Lost/Damaged': '#ef4444', // red
+    'Damaged': '#ef4444', // red
   }
 
   return (
-    <div className="p-6 bg-gray-50 min-h-screen">
-      <h1 className="text-2xl font-bold mb-6">Dashboard</h1>
+    <div className="p-4 bg-gray-50 h-full overflow-hidden flex flex-col">
+      <h1 className="text-2xl font-bold mb-3 text-gray-900">Dashboard</h1>
 
       {/* Top Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
         {/* Total Products at Stock */}
         <div className="bg-gray-200 rounded-lg p-6 shadow">
           <h3 className="text-blue-600 text-sm font-medium mb-2">Total products at stock</h3>
@@ -175,13 +175,13 @@ export default function Dashboard() {
       </div>
 
       {/* Second Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-0">
         {/* Alerts Box */}
-        <div className="bg-gray-200 rounded-lg p-6 shadow">
-          <h3 className="text-gray-700 text-lg font-semibold mb-4">Alerts</h3>
+        <div className="bg-gray-200 rounded-lg p-4 shadow flex flex-col min-h-0">
+          <h3 className="text-gray-900 text-lg font-semibold mb-3">Alerts</h3>
           
           {/* Toggle Buttons */}
-          <div className="flex gap-2 mb-4">
+          <div className="flex gap-2 mb-3">
             <button
               onClick={() => setAlertTab('low-stock')}
               className={`flex-1 py-2 px-4 rounded ${
@@ -205,7 +205,7 @@ export default function Dashboard() {
           </div>
 
           {/* Alert Content */}
-          <div className="max-h-64 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto">
             {alertTab === 'low-stock' ? (
               <div className="space-y-2">
                 {lowStockProducts.length > 0 ? (
@@ -251,7 +251,7 @@ export default function Dashboard() {
                         </svg>
                         <div className="flex-1">
                           <p className="text-orange-800 font-medium">
-                            {alert.borrower_name} did not return {alert.product_name} within {new Date(alert.due_date).toLocaleDateString()}
+                            {alert.borrower_name} did not return {alert.product_name} within {(() => { const d = new Date(alert.due_date); const day = String(d.getDate()).padStart(2, '0'); const month = String(d.getMonth() + 1).padStart(2, '0'); const year = d.getFullYear(); return `${day}/${month}/${year}`; })()}
                           </p>
                         </div>
                         <button
@@ -277,11 +277,11 @@ export default function Dashboard() {
         </div>
 
         {/* Stock Status Distribution */}
-        <div className="bg-gray-200 rounded-lg p-6 shadow">
-          <h3 className="text-blue-600 text-lg font-semibold mb-4">Stock status distribution</h3>
+        <div className="bg-gray-200 rounded-lg p-4 shadow flex flex-col min-h-0">
+          <h3 className="text-gray-900 text-lg font-semibold mb-3">Stock status distribution</h3>
           
           {chartData.length > 0 ? (
-            <div className="h-64">
+            <div className="flex-1 min-h-0">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -317,16 +317,16 @@ export default function Dashboard() {
               </ResponsiveContainer>
             </div>
           ) : (
-            <div className="h-64 flex items-center justify-center text-gray-500">
+            <div className="flex-1 min-h-0 flex items-center justify-center text-gray-500">
               No stock data available
             </div>
           )}
         </div>
 
         {/* Top Lent Products */}
-        <div className="bg-gray-200 rounded-lg p-6 shadow">
-          <h3 className="text-blue-600 text-lg font-semibold mb-4">Top lent products</h3>
-          <div className="max-h-80 overflow-y-auto pr-1 space-y-3">
+        <div className="bg-gray-200 rounded-lg p-4 shadow flex flex-col min-h-0">
+          <h3 className="text-gray-900 text-lg font-semibold mb-3">Top lent products</h3>
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
             {topLentProducts.length > 0 ? (
               (() => {
                 const totalLent = topLentProducts.reduce((sum, p) => sum + p.total_lent, 0) || 1

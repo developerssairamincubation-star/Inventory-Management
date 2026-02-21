@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function ProductsPage() {
+  const router = useRouter();
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -171,8 +173,15 @@ export default function ProductsPage() {
     const productId = normalized.product_id ?? normalized.id;
     const currentStock = normalized.stocks?.quantity ?? 0;
 
+    const handleNavigate = () => {
+      if (productId) router.push(`/products/${productId}`);
+    };
+
     return (
-      <div className="bg-slate-600 rounded-xl p-4 flex flex-col items-center shadow-md hover:shadow-lg transition-transform hover:-translate-y-1">
+      <div
+        className="bg-slate-600 rounded-xl p-4 flex flex-col items-center shadow-md hover:shadow-lg transition-transform hover:-translate-y-1 cursor-pointer"
+        onClick={handleNavigate}
+      >
         <div className="w-full bg-white rounded-md p-3 mb-4 flex items-center justify-center h-40 overflow-hidden">
           {image ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -189,13 +198,25 @@ export default function ProductsPage() {
 
         <h3 className="text-white text-center font-semibold text-lg truncate w-full">{name ?? 'Unnamed'}</h3>
         <p className="text-slate-300 text-sm mt-1">{code ?? '—'}</p>
-        
-        <button
-          onClick={() => handleOpenUpdateStock(normalized)}
-          className="mt-3 w-full bg-white text-slate-800 px-3 py-2 rounded-lg text-sm font-medium hover:bg-slate-100 transition-colors"
-        >
-          Update Stock
-        </button>
+
+        <div className="mt-3 flex gap-2 w-full">
+          <button
+            onClick={(e) => { e.stopPropagation(); handleOpenUpdateStock(normalized); }}
+            className="flex-1 bg-white text-slate-800 px-3 py-2 rounded-lg text-sm font-medium hover:bg-slate-100 transition-colors"
+          >
+            Update Stock
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleNavigate(); }}
+            className="px-3 py-2 bg-slate-500 text-white rounded-lg text-sm font-medium hover:bg-slate-400 transition-colors"
+            title="View Details"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+          </button>
+        </div>
       </div>
     );
   }
@@ -509,12 +530,24 @@ export default function ProductsPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{cost}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{stock}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <button
-                        onClick={() => handleOpenUpdateStock(normalized)}
-                        className="bg-slate-800 text-white px-3 py-1 rounded hover:bg-slate-900"
-                      >
-                        Update Stock
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleOpenUpdateStock(normalized)}
+                          className="bg-slate-800 text-white px-3 py-1 rounded hover:bg-slate-900"
+                        >
+                          Update Stock
+                        </button>
+                        <button
+                          onClick={() => { const pid = normalized.product_id ?? normalized.id; if (pid) router.push(`/products/${pid}`); }}
+                          className="p-1.5 text-blue-600 hover:text-blue-800"
+                          title="View Details"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                          </svg>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
