@@ -78,6 +78,7 @@ export default function LendingPage() {
   const [stockErrors, setStockErrors] = useState<{ [key: number]: string }>({});
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editFormData, setEditFormData] = useState<Partial<LendingRecord>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Damage-related state
   const [damagedRowIdx, setDamagedRowIdx] = useState<number | null>(null);
@@ -179,16 +180,18 @@ export default function LendingPage() {
     ).length);
   };
 
-  const filteredRecords = records.filter((record) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      record.borrower_name?.toLowerCase().includes(query) ||
-      record.department?.toLowerCase().includes(query) ||
-      record.product_name?.toLowerCase().includes(query) ||
-      record.status?.toLowerCase().includes(query)
-    );
-  });
+  const filteredRecords = records
+    .filter((record) => {
+      if (!searchQuery) return true;
+      const query = searchQuery.toLowerCase();
+      return (
+        record.borrower_name?.toLowerCase().includes(query) ||
+        record.department?.toLowerCase().includes(query) ||
+        record.product_name?.toLowerCase().includes(query) ||
+        record.status?.toLowerCase().includes(query)
+      );
+    })
+    .sort((a, b) => new Date(b.lending_date).getTime() - new Date(a.lending_date).getTime());
 
   const handleDelete = async (id: number) => {
     if (!confirm("Are you sure you want to delete this lending record?")) return;
@@ -440,13 +443,17 @@ export default function LendingPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Prevent double submission
+    if (isSubmitting) return;
     
     // Check if there are any stock errors
     if (Object.keys(stockErrors).length > 0) {
       alert("Please resolve stock availability issues before submitting.");
       return;
     }
-    
+
+    setIsSubmitting(true);
     try {
       const res = await fetch("/api/lending", {
         method: "POST",
@@ -473,38 +480,59 @@ export default function LendingPage() {
       }
     } catch (error) {
       console.error("Error creating lending entry:", error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleReturnDateUpdate = async (recordId: number, returnDate: string, returnQty?: number) => {
+  const handleReturnDateUpdate = async (recordId: number, productId: string | null, returnDate: string, returnQty?: number) => {
     const prevRecords = records;
-    const existingRecord = records.find(r => r.id === recordId);
+    const existingRecord = records.find(r => r.id === recordId && r.product_id === productId);
     if (!existingRecord) return;
 
-    // How many are still outstanding after this return
+    // How many are still outstanding for this specific item after this return
     const currentOutstanding = existingRecord.quantity;
     const nowReturning = returnQty ?? currentOutstanding;
     const remaining = currentOutstanding - nowReturning;
 
-    let returnStatus: string;
-    if (remaining > 0) {
-      // Still items outstanding – partial return
-      returnStatus = "PARTIALLY_RETURNED";
+    // Compute order-level status from ALL items in the same order after this return
+    const orderRecords = records.filter(r => r.id === recordId);
+    const totalOutstandingAfter = orderRecords.reduce(
+      (sum, r) => sum + (r.product_id === productId ? remaining : (r.quantity || 0)),
+      0
+    );
+    const anyDamagedInOrder = orderRecords.some(r => (r.damaged_quantity || 0) > 0);
+    const anyLostInOrder = orderRecords.some(r => (r.lost_quantity || 0) > 0);
+
+    let newOrderStatus: string;
+    if (totalOutstandingAfter > 0) {
+      const curStatus = existingRecord.status;
+      if (curStatus === "PARTIALLY_DAMAGED" || curStatus === "DAMAGED") {
+        newOrderStatus = "PARTIALLY_DAMAGED";
+      } else if (curStatus === "PARTIALLY_LOST") {
+        newOrderStatus = "PARTIALLY_LOST";
+      } else {
+        newOrderStatus = "PARTIALLY_RETURNED";
+      }
     } else {
-      // All outstanding items accounted for
-      returnStatus =
-        existingRecord.status === "PARTIALLY_DAMAGED" || existingRecord.status === "DAMAGED"
-          ? "RETURNED_DAMAGED"
-          : existingRecord.status === "PARTIALLY_LOST"
-          ? "RETURNED_LOST"
-          : "RETURNED";
+      if (anyDamagedInOrder) {
+        newOrderStatus = "RETURNED_DAMAGED";
+      } else if (anyLostInOrder) {
+        newOrderStatus = "RETURNED_LOST";
+      } else {
+        newOrderStatus = "RETURNED";
+      }
     }
 
-    const updated = records.map(r =>
-      r.id === recordId
-        ? { ...r, return_date: returnDate, status: returnStatus, quantity: remaining }
-        : r
-    );
+    // Update ALL rows in this order with the new order-level status;
+    // update only this specific item's quantity and return_date
+    const updated = records.map(r => {
+      if (r.id !== recordId) return r;
+      if (r.product_id === productId) {
+        return { ...r, quantity: remaining, status: newOrderStatus, return_date: returnDate };
+      }
+      return { ...r, status: newOrderStatus };
+    });
     setRecords(updated);
     applyStats(updated);
     setEditingReturnDate(null);
@@ -512,8 +540,8 @@ export default function LendingPage() {
     setReturnPickerDate("");
     setReturnPickerQty(1);
     try {
-      // Send remaining balance as quantity so the DB always holds outstanding count
-      const body: any = { return_date: returnDate, status: returnStatus, quantity: remaining };
+      // Send remaining balance + product_id so the backend updates only this item
+      const body: any = { return_date: returnDate, quantity: remaining, product_id: productId };
       const res = await fetch(`/api/lending/${recordId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -676,7 +704,7 @@ export default function LendingPage() {
                 </tr>
               ) : (
                 filteredRecords.map((record, idx) => (
-                  <tr key={record.id} className="hover:bg-slate-50">
+                  <tr key={`${record.id}-${record.product_id ?? 'none'}-${idx}`} className="hover:bg-slate-50">
                     <td className="px-4 py-3 text-sm text-slate-700">{idx + 1}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{record.borrower_name || "—"}</td>
                     <td className="px-4 py-3">
@@ -989,7 +1017,7 @@ export default function LendingPage() {
                   onClick={async () => {
                     if (!returnPickerDate) { alert("Please select a return date."); return; }
                     setReturnPickerLoading(true);
-                    await handleReturnDateUpdate(rec.id, returnPickerDate, returnPickerQty);
+                    await handleReturnDateUpdate(rec.id, rec.product_id, returnPickerDate, returnPickerQty);
                     setReturnPickerLoading(false);
                   }}
                   disabled={returnPickerLoading || !returnPickerDate}
@@ -1319,9 +1347,10 @@ export default function LendingPage() {
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2 bg-slate-700 text-white rounded hover:bg-slate-800 text-sm font-medium"
+                  disabled={isSubmitting}
+                  className="px-6 py-2 bg-slate-700 text-white rounded hover:bg-slate-800 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Save changes
+                  {isSubmitting ? "Saving..." : "Save changes"}
                 </button>
               </div>
             </form>
