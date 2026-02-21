@@ -41,14 +41,15 @@ export async function GET() {
     ).length || 0
 
     // 4. Get stock status distribution
-    // Get all stocks including damaged_quantity
+    // Get all stocks including damaged_quantity and lost_quantity
     const { data: allStocksData, error: allStocksError } = await supabaseAdmin
       .from('stocks')
-      .select('quantity, damaged_quantity')
+      .select('quantity, damaged_quantity, lost_quantity')
 
     if (allStocksError) throw allStocksError
 
     const damagedQuantity = allStocksData?.reduce((sum, stock) => sum + (stock.damaged_quantity || 0), 0) || 0
+    const lostQuantity = allStocksData?.reduce((sum, stock) => sum + (stock.lost_quantity || 0), 0) || 0
 
     // Calculate lent items (PENDING status = actively lent)
     const { data: lendingData, error: lendingError } = await supabaseAdmin
@@ -60,11 +61,10 @@ export async function GET() {
 
     if (lendingError) throw lendingError
 
-    // Count items that are currently lent (status = 'PENDING', 'ACTIVE', or 'OVERDUE')
+    // Count items that are currently lent out (still outstanding)
+    const ACTIVE_LENDING_STATUSES = ['PENDING', 'ACTIVE', 'OVERDUE', 'PARTIALLY_RETURNED', 'PARTIALLY_DAMAGED', 'PARTIALLY_LOST']
     const lentQuantity = lendingData?.filter((item: any) =>
-      item.lending_order?.status === 'PENDING' ||
-      item.lending_order?.status === 'ACTIVE' ||
-      item.lending_order?.status === 'OVERDUE'
+      ACTIVE_LENDING_STATUSES.includes(item.lending_order?.status)
     ).reduce((sum, item) => sum + (item.quantity || 0), 0) || 0
 
     // Available = total stock quantity (already reduced by lent & damaged)
@@ -74,7 +74,8 @@ export async function GET() {
       lent: lentQuantity,
       available: availableQuantity,
       lostDamaged: damagedQuantity,
-      total: totalStockQuantity + lentQuantity + damagedQuantity
+      lost: lostQuantity,
+      total: totalStockQuantity + lentQuantity + damagedQuantity + lostQuantity
     }
 
     const grandTotal = stockDistribution.total || 1
@@ -84,6 +85,7 @@ export async function GET() {
       lent: Math.round((lentQuantity / grandTotal) * 100),
       available: Math.round((availableQuantity / grandTotal) * 100),
       lostDamaged: Math.round((damagedQuantity / grandTotal) * 100),
+      lost: Math.round((lostQuantity / grandTotal) * 100),
     }
 
     return NextResponse.json({

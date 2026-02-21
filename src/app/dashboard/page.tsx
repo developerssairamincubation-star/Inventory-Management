@@ -11,12 +11,14 @@ interface DashboardStats {
     lent: number
     available: number
     lostDamaged: number
+    lost: number
     total: number
   }
   stockDistributionPercentages: {
     lent: number
     available: number
     lostDamaged: number
+    lost: number
   }
 }
 
@@ -47,6 +49,7 @@ export default function Dashboard() {
   const [overdueAlerts, setOverdueAlerts] = useState<OverdueAlert[]>([])
   const [dismissedOverdue, setDismissedOverdue] = useState<Set<string>>(new Set())
   const [topLentProducts, setTopLentProducts] = useState<TopLentProduct[]>([])
+  const [topLentFilter, setTopLentFilter] = useState<string>('Monthly')
   const [loading, setLoading] = useState(true)
   const [alertTab, setAlertTab] = useState<'low-stock' | 'overdue'>('low-stock')
 
@@ -58,8 +61,11 @@ export default function Dashboard() {
     fetchDashboardStats()
     fetchLowStockProducts()
     fetchOverdueAlerts()
-    fetchTopLentProducts()
   }, [])
+
+  useEffect(() => {
+    fetchTopLentProducts(topLentFilter)
+  }, [topLentFilter])
 
   const fetchDashboardStats = async () => {
     try {
@@ -96,9 +102,9 @@ export default function Dashboard() {
     }
   }
 
-  const fetchTopLentProducts = async () => {
+  const fetchTopLentProducts = async (period: string = 'Monthly') => {
     try {
-      const response = await fetch('/api/dashboard/top-lent')
+      const response = await fetch(`/api/dashboard/top-lent?period=${period.toLowerCase()}`)
       if (!response.ok) throw new Error('Failed to fetch top lent products')
       const data = await response.json()
       setTopLentProducts(data)
@@ -141,12 +147,18 @@ export default function Dashboard() {
       value: stats.stockDistribution.lostDamaged,
       percentage: parseFloat(((stats.stockDistribution.lostDamaged / grandTotal) * 100).toFixed(1)),
     },
+    {
+      name: 'Lost',
+      value: stats.stockDistribution.lost,
+      percentage: parseFloat(((stats.stockDistribution.lost / grandTotal) * 100).toFixed(1)),
+    },
   ].filter(item => item.value > 0) // Only show non-zero values
 
   const COLORS = {
     'Available': '#3b82f6', // blue
-    'Lent': '#6b7280', // gray
-    'Damaged': '#ef4444', // red
+    'Lent': '#6b7280',     // gray
+    'Damaged': '#ef4444',  // red
+    'Lost': '#f97316',     // orange
   }
 
   return (
@@ -325,7 +337,19 @@ export default function Dashboard() {
 
         {/* Top Lent Products */}
         <div className="bg-gray-200 rounded-lg p-4 shadow flex flex-col min-h-0">
-          <h3 className="text-gray-900 text-lg font-semibold mb-3">Top lent products</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-gray-900 text-lg font-semibold">Top lent products</h3>
+            <select
+              value={topLentFilter}
+              onChange={(e) => setTopLentFilter(e.target.value)}
+              className="px-2 py-1 text-xs border rounded bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400"
+            >
+              <option>Daily</option>
+              <option>Weekly</option>
+              <option>Monthly</option>
+              <option>Yearly</option>
+            </select>
+          </div>
           <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
             {topLentProducts.length > 0 ? (
               (() => {

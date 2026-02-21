@@ -19,6 +19,9 @@ type StudentRecord = {
   mentor: string;
   product_name: string;
   quantity: number;
+  original_quantity: number;
+  damaged_quantity: number;
+  lost_quantity: number;
   borrow_date: string;
   return_date: string | null;
   status: string;
@@ -227,17 +230,70 @@ export default function StudentsPage() {
                       <td className="px-4 py-3 text-sm text-slate-700">{formatDate(record.borrow_date)}</td>
                       <td className="px-4 py-3 text-sm text-slate-700">{formatDate(record.return_date)}</td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            record.status === "RETURNED"
-                              ? "bg-green-100 text-green-800"
-                              : record.status === "PENDING"
-                              ? "bg-yellow-100 text-yellow-800"
-                              : "bg-gray-100 text-gray-800"
-                          }`}
-                        >
-                          {record.status || "—"}
-                        </span>
+                        {(() => {
+                          const PENDING_STATUSES = ["PENDING", "PARTIALLY_RETURNED", "PARTIALLY_DAMAGED", "PARTIALLY_LOST"];
+                          const FINAL_RETURNED = ["RETURNED", "RETURNED_DAMAGED", "RETURNED_LOST"];
+                          const d = record.damaged_quantity ?? 0;
+                          const l = record.lost_quantity ?? 0;
+                          const orig = record.original_quantity ?? record.quantity;
+
+                          if (PENDING_STATUSES.includes(record.status)) {
+                            const colorClass =
+                              record.status === "PARTIALLY_DAMAGED"
+                                ? "border-red-400 bg-red-50 text-red-700"
+                                : record.status === "PARTIALLY_LOST"
+                                ? "border-orange-400 bg-orange-50 text-orange-700"
+                                : record.status === "PARTIALLY_RETURNED"
+                                ? "border-blue-400 bg-blue-50 text-blue-700"
+                                : "border-yellow-400 bg-yellow-100 text-yellow-800";
+                            const label =
+                              record.status === "PENDING" ? "PENDING"
+                              : record.status === "PARTIALLY_RETURNED" ? "PARTIALLY RETURNED"
+                              : record.status === "PARTIALLY_DAMAGED" ? "PARTIALLY DAMAGED"
+                              : "PARTIALLY LOST";
+                            return (
+                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded border ${colorClass}`}>
+                                {label}
+                              </span>
+                            );
+                          }
+
+                          const returnedCount = FINAL_RETURNED.includes(record.status)
+                            ? Math.max(0, orig - d - l)
+                            : 0;
+                          const hasPills = returnedCount > 0 || d > 0 || l > 0;
+
+                          if (hasPills) {
+                            return (
+                              <div className="flex flex-col gap-1">
+                                {returnedCount > 0 && (
+                                  <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-green-200 text-green-900 whitespace-nowrap">
+                                    {returnedCount} Returned
+                                  </span>
+                                )}
+                                {d > 0 && (
+                                  <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-red-200 text-red-900 whitespace-nowrap">
+                                    {d} Damaged
+                                  </span>
+                                )}
+                                {l > 0 && (
+                                  <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-[#c4a8a8] text-[#3b1f1f] whitespace-nowrap">
+                                    {l} Lost
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          const fallbackColor =
+                            record.status === "CONSUMABLE" ? "bg-purple-100 text-purple-800"
+                            : "bg-gray-100 text-gray-700";
+                          return (
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${fallbackColor}`}>
+                              {record.status || "—"}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">{record.mobile || "—"}</td>
                     </tr>

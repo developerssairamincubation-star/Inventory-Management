@@ -56,6 +56,9 @@ export async function GET(request: NextRequest) {
       .select(`
         lend_order_id,
         quantity,
+        original_quantity,
+        damaged_quantity,
+        lost_quantity,
         product_id,
         products (
           product_name
@@ -144,6 +147,9 @@ export async function GET(request: NextRequest) {
           mentor: mentorMap.get(order.mentor_staff_id) || "—",
           product_name: product?.product_name || "—",
           quantity: item?.quantity || 0,
+          original_quantity: item?.original_quantity ?? item?.quantity ?? 0,
+          damaged_quantity: item?.damaged_quantity ?? 0,
+          lost_quantity: item?.lost_quantity ?? 0,
           borrow_date: order.created_at,
           return_date: order.return_date,
           status: order.status || "PENDING",
