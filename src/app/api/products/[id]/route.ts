@@ -4,12 +4,38 @@ import { getSupabaseAdmin } from '@/lib/supabaseServer'
 export const dynamic = 'force-dynamic'
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = getSupabaseAdmin()
     const { id } = await params
+
+    // Extract period query param for lending summary filtering
+    const { searchParams } = new URL(request.url)
+    const period = searchParams.get('period') || 'monthly'
+
+    const now = new Date()
+    let fromDate: Date
+    switch (period) {
+      case 'daily':
+        fromDate = new Date(now)
+        fromDate.setHours(0, 0, 0, 0)
+        break
+      case 'weekly':
+        fromDate = new Date(now)
+        fromDate.setDate(now.getDate() - 7)
+        break
+      case 'yearly':
+        fromDate = new Date(now)
+        fromDate.setFullYear(now.getFullYear() - 1)
+        break
+      case 'monthly':
+      default:
+        fromDate = new Date(now)
+        fromDate.setMonth(now.getMonth() - 1)
+        break
+    }
 
     // Fetch product (use * to avoid errors from optional columns like image_url)
     const { data: product, error: productError } = await supabase
@@ -39,12 +65,15 @@ export async function GET(
 
     const enrichedProduct = { ...product, stocks: stockData }
 
-    // Fetch all lending items for this product to build borrow history
+    // Fetch all lending items for this product (with damaged/lost quantities)
     const { data: lendingItems } = await supabase
       .from('lending_item')
       .select(`
         lend_order_id,
-        quantity
+        quantity,
+        original_quantity,
+        damaged_quantity,
+        lost_quantity
       `)
       .eq('product_id', id)
 
@@ -54,7 +83,7 @@ export async function GET(
     let lendingSummary = { totalLent: 0, returned: 0 }
 
     if (orderIds.length > 0) {
-      // Fetch lending orders
+      // Fetch lending orders (including mentor_staff_id)
       const { data: orders } = await supabase
         .from('lending_order')
         .select(`
@@ -65,47 +94,71 @@ export async function GET(
           status,
           borrower_type,
           borrower_student_id,
-          borrower_staff_id
+          borrower_staff_id,
+          mentor_staff_id
         `)
         .in('lending_order_id', orderIds)
         .order('created_at', { ascending: false })
 
       if (orders && orders.length > 0) {
-        // Map order id -> lending item quantity
+        // Maps: order id -> lending item fields
         const qtyByOrder = new Map<string, number>()
-        lendingItems?.forEach((li: any) => qtyByOrder.set(li.lend_order_id, li.quantity))
+        const origQtyByOrder = new Map<string, number>()
+        const damagedByOrder = new Map<string, number>()
+        const lostByOrder = new Map<string, number>()
+        lendingItems?.forEach((li: any) => {
+          const currentQty = li.quantity ?? 0
+          // original_quantity may not exist if migration hasn't run — fall back to current quantity
+          const origQty = (li.original_quantity != null && li.original_quantity > 0)
+            ? li.original_quantity
+            : currentQty
+          qtyByOrder.set(li.lend_order_id, currentQty)
+          origQtyByOrder.set(li.lend_order_id, origQty)
+          damagedByOrder.set(li.lend_order_id, li.damaged_quantity ?? 0)
+          lostByOrder.set(li.lend_order_id, li.lost_quantity ?? 0)
+        })
 
-        // Lending summary
-        lendingSummary.totalLent = lendingItems?.reduce((s: number, li: any) => s + (li.quantity || 0), 0) || 0
-        lendingSummary.returned = orders
-          .filter((o: any) => o.status === 'RETURNED')
+        // Period-filtered lending summary
+        const ordersInPeriod = orders.filter((o: any) => new Date(o.created_at) >= fromDate)
+        lendingSummary.totalLent = ordersInPeriod.reduce(
+          (s: number, o: any) => s + (qtyByOrder.get(o.lending_order_id) || 0),
+          0
+        )
+        lendingSummary.returned = ordersInPeriod
+          .filter((o: any) => ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST'].includes(o.status))
           .reduce((s: number, o: any) => s + (qtyByOrder.get(o.lending_order_id) || 0), 0)
 
-        // Fetch student names
+        // Collect all person + mentor IDs
         const studentIds = [...new Set(orders
           .filter((o: any) => o.borrower_type === 'STUDENT' && o.borrower_student_id)
           .map((o: any) => o.borrower_student_id))]
-        
+
         const staffIds = [...new Set(orders
           .filter((o: any) => o.borrower_type === 'STAFF' && o.borrower_staff_id)
           .map((o: any) => o.borrower_staff_id))]
 
-        const [{ data: students }, { data: staffs }] = await Promise.all([
+        const mentorIds = [...new Set(orders
+          .filter((o: any) => o.mentor_staff_id)
+          .map((o: any) => o.mentor_staff_id))]
+
+        const allStaffIds = [...new Set([...staffIds, ...mentorIds])]
+
+        const [{ data: students }, { data: allStaffs }] = await Promise.all([
           studentIds.length > 0
             ? supabase.from('students').select('student_id, name, departments(department_name)').in('student_id', studentIds)
             : Promise.resolve({ data: [] }),
-          staffIds.length > 0
-            ? supabase.from('staffs').select('staff_id, name').in('staff_id', staffIds)
+          allStaffIds.length > 0
+            ? supabase.from('staffs').select('staff_id, name').in('staff_id', allStaffIds)
             : Promise.resolve({ data: [] }),
         ])
 
         const studentMap = new Map<string, any>((students || []).map((s: any) => [s.student_id, s]))
-        const staffMap = new Map<string, any>((staffs || []).map((s: any) => [s.staff_id, s]))
+        const staffMap = new Map<string, any>((allStaffs || []).map((s: any) => [s.staff_id, s]))
 
         borrowingHistory = orders.map((order: any, idx: number) => {
           let borrowerName = '—'
           let department = '—'
-          let borrowerType = order.borrower_type
+          const borrowerType = order.borrower_type
 
           if (order.borrower_type === 'STUDENT' && order.borrower_student_id) {
             const student = studentMap.get(order.borrower_student_id)
@@ -117,6 +170,19 @@ export async function GET(
             department = 'Staff'
           }
 
+          const mentor = order.mentor_staff_id
+            ? (staffMap.get(order.mentor_staff_id)?.name || '—')
+            : '—'
+
+          const currentQty = qtyByOrder.get(order.lending_order_id) ?? 0
+          const originalQty = origQtyByOrder.get(order.lending_order_id) ?? currentQty
+          const damagedQty = damagedByOrder.get(order.lending_order_id) || 0
+          const lostQty = lostByOrder.get(order.lending_order_id) || 0
+
+          const FINAL_STATUSES = ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST', 'DAMAGED', 'LOST', 'CONSUMABLE']
+          const isFullyReturned = FINAL_STATUSES.includes(order.status)
+          const remainingQty = isFullyReturned ? 0 : currentQty
+
           return {
             sno: idx + 1,
             lending_order_id: order.lending_order_id,
@@ -127,7 +193,11 @@ export async function GET(
             return_date: order.return_date,
             due_date: order.due_date,
             status: order.status,
-            quantity: qtyByOrder.get(order.lending_order_id) || 0,
+            quantity: remainingQty,
+            original_quantity: originalQty,
+            damaged_quantity: damagedQty,
+            lost_quantity: lostQty,
+            mentor,
           }
         })
       }

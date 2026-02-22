@@ -36,9 +36,15 @@ interface BorrowRecord {
   due_date: string | null
   status: string
   quantity: number
+  original_quantity: number
+  damaged_quantity: number
+  lost_quantity: number
+  mentor: string
 }
 
 const ROWS_PER_PAGE = 10
+
+type LendingPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly'
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return '—'
@@ -97,6 +103,84 @@ function StatusBadge({ status }: { status: string }) {
     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">
       <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
       {status}
+    </span>
+  )
+}
+
+// ─── Lending Status Display (mirrors lending page) ──────────────────────────
+function LendingStatusDisplay({ record }: { record: BorrowRecord }) {
+  const PENDING_STATUSES = ['PENDING', 'PARTIALLY_RETURNED', 'PARTIALLY_DAMAGED', 'PARTIALLY_LOST']
+  const FINAL_STATUSES = ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST', 'DAMAGED', 'LOST', 'CONSUMABLE']
+
+  if (PENDING_STATUSES.includes(record.status)) {
+    const colorClass =
+      record.status === 'PARTIALLY_DAMAGED'
+        ? 'border-red-400 bg-red-50 text-red-700'
+        : record.status === 'PARTIALLY_LOST'
+        ? 'border-orange-400 bg-orange-50 text-orange-700'
+        : record.status === 'PARTIALLY_RETURNED'
+        ? 'border-blue-400 bg-blue-50 text-blue-700'
+        : 'border-yellow-400 bg-yellow-100 text-yellow-800'
+    const label =
+      record.status === 'PENDING'
+        ? 'PENDING'
+        : record.status === 'PARTIALLY_RETURNED'
+        ? 'PARTIALLY RETURNED'
+        : record.status === 'PARTIALLY_DAMAGED'
+        ? 'PARTIALLY DAMAGED'
+        : 'PARTIALLY LOST'
+    return (
+      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded border ${colorClass}`}>
+        {label}
+      </span>
+    )
+  }
+
+  if (FINAL_STATUSES.includes(record.status)) {
+    // Use original_quantity for accurate count; fall back to current quantity
+    const orig = (record.original_quantity != null && record.original_quantity > 0)
+      ? record.original_quantity
+      : (record.quantity || 0)
+    const d = record.damaged_quantity || 0
+    const l = record.lost_quantity || 0
+    // returnedCount = whatever wasn't damaged or lost
+    const returnedCount = Math.max(0, orig - d - l)
+    const hasPills = returnedCount > 0 || d > 0 || l > 0
+
+    if (hasPills) {
+      return (
+        <div className="flex flex-col gap-1">
+          {returnedCount > 0 && (
+            <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-green-200 text-green-900 whitespace-nowrap">
+              {returnedCount} Returned
+            </span>
+          )}
+          {d > 0 && (
+            <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-red-200 text-red-900 whitespace-nowrap">
+              {d} Damaged
+            </span>
+          )}
+          {l > 0 && (
+            <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-[#c4a8a8] text-[#3b1f1f] whitespace-nowrap">
+              {l} Lost
+            </span>
+          )}
+        </div>
+      )
+    }
+
+    // Consumable or a completed item with zero breakdown data
+    const fallbackColor = record.status === 'CONSUMABLE' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-700'
+    return (
+      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${fallbackColor}`}>
+        {record.status}
+      </span>
+    )
+  }
+
+  return (
+    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-700">
+      {record.status || '—'}
     </span>
   )
 }
@@ -167,7 +251,7 @@ function EditModal({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Unit Cost (₱)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Unit Cost (₹)</label>
               <input type="number" step="0.01" min={0} value={cost as any}
                 onChange={e => setCost(e.target.value === '' ? '' : Number(e.target.value))}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-slate-800 focus:border-transparent" />
@@ -217,7 +301,9 @@ export default function ProductDetailPage() {
   const [lendingSummary, setLendingSummary] = useState<LendingSummary>({ totalLent: 0, returned: 0 })
   const [borrowingHistory, setBorrowingHistory] = useState<BorrowRecord[]>([])
   const [loading, setLoading] = useState(true)
+  const [summaryLoading, setSummaryLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [lendingPeriod, setLendingPeriod] = useState<LendingPeriod>('monthly')
 
   // UI state
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
@@ -229,14 +315,19 @@ export default function ProductDetailPage() {
 
   useEffect(() => {
     if (!id) return
-    fetchProductDetail()
+    fetchProductDetail(lendingPeriod)
   }, [id])
 
-  const fetchProductDetail = async () => {
+  useEffect(() => {
+    if (!id || loading) return
+    fetchLendingSummary(lendingPeriod)
+  }, [lendingPeriod])
+
+  const fetchProductDetail = async (period: LendingPeriod = 'monthly') => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/products/${id}`)
+      const res = await fetch(`/api/products/${id}?period=${period}`)
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.error || 'Product not found')
@@ -250,6 +341,21 @@ export default function ProductDetailPage() {
       setError(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchLendingSummary = async (period: LendingPeriod) => {
+    setSummaryLoading(true)
+    try {
+      const res = await fetch(`/api/products/${id}?period=${period}`)
+      if (res.ok) {
+        const data = await res.json()
+        setLendingSummary(data.lendingSummary)
+      }
+    } catch (err) {
+      console.error('Failed to fetch lending summary:', err)
+    } finally {
+      setSummaryLoading(false)
     }
   }
 
@@ -420,40 +526,54 @@ export default function ProductDetailPage() {
             )}
             <div className="mt-3 flex items-center gap-4 text-xs text-gray-500">
               <div>
-                <span className="font-semibold text-gray-700">{product.unit_cost != null ? `₱${Number(product.unit_cost).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}</span>
+                <span className="font-semibold text-gray-700">{product.unit_cost != null ? `₹${Number(product.unit_cost).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}</span>
                 <span className="ml-1 text-gray-400">/ unit</span>
               </div>
             </div>
           </div>
 
-          {/* Damaged & Lost Quantity */}
+          {/* Lending Summary */}
           <div className="bg-white rounded-2xl shadow p-5">
             <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-medium text-gray-500">Stock Issues</p>
-              <div className="w-8 h-8 rounded-full bg-orange-50 flex items-center justify-center">
-                <svg className="w-4 h-4 text-orange-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              <p className="text-sm font-medium text-gray-500">Lending Summary</p>
+              <div className="flex items-center gap-2">
+                <select
+                  value={lendingPeriod}
+                  onChange={e => setLendingPeriod(e.target.value as LendingPeriod)}
+                  className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 focus:outline-none focus:ring-2 focus:ring-slate-800 bg-white"
+                >
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
+                <div className="w-8 h-8 rounded-full bg-purple-50 flex items-center justify-center">
+                  <svg className="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+            {summaryLoading ? (
+              <div className="flex items-center gap-2 text-gray-400 text-sm py-2">
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
+                Loading…
               </div>
-            </div>
-            <div className="flex items-center gap-6">
-              <div>
-                <p className="text-xs text-gray-400 mb-1">Damaged</p>
-                <p className="text-3xl font-bold text-orange-600">{damaged} <span className="text-sm font-medium text-gray-400">units</span></p>
-              </div>
-              <div className="w-px h-10 bg-gray-100" />
-              <div>
-                <p className="text-xs text-gray-400 mb-1">Lost</p>
-                <p className="text-3xl font-bold text-red-600">{lost} <span className="text-sm font-medium text-gray-400">units</span></p>
-              </div>
-            </div>
-            {(damaged > 0 || lost > 0) ? (
-              <p className="mt-3 text-xs font-medium text-orange-500 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-orange-500 inline-block" />
-                {damaged > 0 && lost > 0 ? 'Damaged & lost units require attention' : damaged > 0 ? 'Needs attention from technical staff' : 'Lost units recorded'}
-              </p>
             ) : (
-              <p className="mt-3 text-xs text-gray-400">No damaged or lost units reported</p>
+              <div className="flex items-center gap-8 mt-2">
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">Total Lent</p>
+                  <p className="text-3xl font-bold text-gray-900">{lendingSummary.totalLent}</p>
+                </div>
+                <div className="w-px h-12 bg-gray-100" />
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">Returned</p>
+                  <p className="text-3xl font-bold text-gray-900">{lendingSummary.returned}</p>
+                </div>
+              </div>
             )}
           </div>
 
@@ -483,7 +603,6 @@ export default function ProductDetailPage() {
                     <span className="w-2 h-2 rounded-full bg-purple-500" />
                     Consumable Item
                   </span>
-                  <p className="text-xs text-gray-400 mt-2">This item is consumed upon use and is not returned.</p>
                 </>
               )}
               {product.returnable === null && (
@@ -492,27 +611,33 @@ export default function ProductDetailPage() {
             </div>
           </div>
 
-          {/* Lending Summary */}
+          {/* Damaged & Lost Quantity */}
           <div className="bg-white rounded-2xl shadow p-5">
             <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-medium text-gray-500">Lending Summary</p>
-              <div className="w-8 h-8 rounded-full bg-purple-50 flex items-center justify-center">
-                <svg className="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+              <p className="text-sm font-medium text-gray-500">Stock Issues</p>
+              <div className="w-8 h-8 rounded-full bg-orange-50 flex items-center justify-center">
+                <svg className="w-4 h-4 text-orange-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                 </svg>
               </div>
             </div>
-            <div className="flex items-center gap-8 mt-2">
+            <div className="flex items-center gap-6">
               <div>
-                <p className="text-xs text-gray-400 mb-1">Total Lent</p>
-                <p className="text-3xl font-bold text-gray-900">{lendingSummary.totalLent}</p>
+                <p className="text-xs text-gray-400 mb-1">Damaged</p>
+                <p className="text-3xl font-bold text-orange-600">{damaged} <span className="text-sm font-medium text-gray-400">units</span></p>
               </div>
-              <div className="w-px h-12 bg-gray-100" />
+              <div className="w-px h-10 bg-gray-100" />
               <div>
-                <p className="text-xs text-gray-400 mb-1">Returned</p>
-                <p className="text-3xl font-bold text-gray-900">{lendingSummary.returned}</p>
+                <p className="text-xs text-gray-400 mb-1">Lost</p>
+                <p className="text-3xl font-bold text-red-600">{lost} <span className="text-sm font-medium text-gray-400">units</span></p>
               </div>
             </div>
+            {(damaged > 0 || lost > 0) ? (
+              <p className="mt-3 text-xs font-medium text-orange-500 flex items-center gap-1">
+              </p>
+            ) : (
+              <p className="mt-3 text-xs text-gray-400">No damaged or lost units reported</p>
+            )}
           </div>
         </div>
       </div>
@@ -550,16 +675,21 @@ export default function ProductDetailPage() {
                 <th className="px-6 py-3 text-left">Borrower Name</th>
                 <th className="px-6 py-3 text-left">Type</th>
                 <th className="px-6 py-3 text-left">Department</th>
+                <th className="px-6 py-3 text-center">Borrowed</th>
+                <th className="px-6 py-3 text-center">Returned</th>
+                <th className="px-6 py-3 text-center">Damaged</th>
+                <th className="px-6 py-3 text-center">Lost</th>
+                <th className="px-6 py-3 text-center">Balance</th>
                 <th className="px-6 py-3 text-left">Borrow Date</th>
                 <th className="px-6 py-3 text-left">Return Date</th>
                 <th className="px-6 py-3 text-left">Status</th>
-                <th className="px-6 py-3 text-center">Action</th>
+                <th className="px-6 py-3 text-left">Mentor</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-gray-400">
+                  <td colSpan={13} className="px-6 py-12 text-center text-gray-400">
                     {searchQuery ? 'No records match your search.' : 'No borrowing history found.'}
                   </td>
                 </tr>
@@ -576,25 +706,53 @@ export default function ProductDetailPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-gray-600">{row.department}</td>
+                      {/* ── Quantity breakdown ── */}
+                      {(() => {
+                        const FULLY_RETURNED_STATUSES = ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST']
+                        const borrowed = (row.original_quantity != null && row.original_quantity > 0)
+                          ? row.original_quantity
+                          : row.quantity
+                        const damaged = row.damaged_quantity || 0
+                        const lost = row.lost_quantity || 0
+                        const isFullyReturned = FULLY_RETURNED_STATUSES.includes(row.status)
+                        const returned = isFullyReturned
+                          ? Math.max(0, borrowed - damaged - lost)
+                          : Math.max(0, borrowed - row.quantity - damaged - lost)
+                        const balance = isFullyReturned ? 0 : row.quantity
+                        return (
+                          <>
+                            <td className="px-6 py-4 text-center text-gray-700">{borrowed}</td>
+                            <td className="px-6 py-4 text-center">
+                              <span className={returned > 0 ? 'font-semibold text-green-700' : 'text-gray-300'}>
+                                {returned > 0 ? returned : '—'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <span className={damaged > 0 ? 'font-semibold text-red-600' : 'text-gray-300'}>
+                                {damaged > 0 ? damaged : '—'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <span className={lost > 0 ? 'font-semibold text-orange-600' : 'text-gray-300'}>
+                                {lost > 0 ? lost : '—'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <span className={balance > 0 ? 'font-semibold text-yellow-700' : 'text-gray-300'}>
+                                {balance > 0 ? balance : '—'}
+                              </span>
+                            </td>
+                          </>
+                        )
+                      })()}
                       <td className="px-6 py-4 text-gray-600">{formatDate(row.borrow_date)}</td>
                       <td className={`px-6 py-4 font-medium ${isOverdue ? 'text-red-500' : 'text-gray-600'}`}>
                         {row.return_date ? formatDate(row.return_date) : (row.due_date ? formatDate(row.due_date) : '—')}
                       </td>
                       <td className="px-6 py-4">
-                        <StatusBadge status={row.status} />
+                        <LendingStatusDisplay record={row} />
                       </td>
-                      <td className="px-6 py-4 text-center">
-                        <button
-                          title="View order"
-                          onClick={() => router.push(`/lending`)}
-                          className="text-blue-400 hover:text-blue-600 transition-colors"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
-                        </button>
-                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{row.mentor || '—'}</td>
                     </tr>
                   )
                 })

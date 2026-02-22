@@ -194,26 +194,40 @@ export default function Dashboard() {
           
           {/* Toggle Buttons */}
           <div className="flex gap-2 mb-3">
-            <button
-              onClick={() => setAlertTab('low-stock')}
-              className={`flex-1 py-2 px-4 rounded ${
-                alertTab === 'low-stock'
-                  ? 'bg-red-500 text-white'
-                  : 'bg-gray-300 text-gray-700'
-              }`}
-            >
-              Low stock
-            </button>
-            <button
-              onClick={() => setAlertTab('overdue')}
-              className={`flex-1 py-2 px-4 rounded ${
-                alertTab === 'overdue'
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-300 text-gray-700'
-              }`}
-            >
-              Overdue
-            </button>
+            <div className="relative flex-1">
+              <button
+                onClick={() => setAlertTab('low-stock')}
+                className={`w-full py-2 px-4 rounded font-medium ${
+                  alertTab === 'low-stock'
+                    ? 'bg-red-500 text-white'
+                    : 'bg-gray-300 text-gray-700'
+                }`}
+              >
+                Low stock
+              </button>
+              {lowStockProducts.length > 0 && (
+                <span className="absolute -top-2 -right-2 min-w-[22px] h-[22px] flex items-center justify-center rounded-full bg-yellow-400 text-black text-xs font-bold px-1 shadow">
+                  {lowStockProducts.length}
+                </span>
+              )}
+            </div>
+            <div className="relative flex-1">
+              <button
+                onClick={() => setAlertTab('overdue')}
+                className={`w-full py-2 px-4 rounded font-medium ${
+                  alertTab === 'overdue'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-300 text-gray-700'
+                }`}
+              >
+                Overdue
+              </button>
+              {overdueAlerts.filter(a => !dismissedOverdue.has(a.lending_order_id)).length > 0 && (
+                <span className="absolute -top-2 -right-2 min-w-[22px] h-[22px] flex items-center justify-center rounded-full bg-yellow-400 text-black text-xs font-bold px-1 shadow">
+                  {overdueAlerts.filter(a => !dismissedOverdue.has(a.lending_order_id)).length}
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Alert Content */}

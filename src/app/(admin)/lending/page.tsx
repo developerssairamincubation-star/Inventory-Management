@@ -860,14 +860,15 @@ export default function LendingPage() {
                         </select>
                       ) : (
                         (() => {
-                          const FINAL_RETURNED = ["RETURNED", "RETURNED_DAMAGED", "RETURNED_LOST"];
                           const d = record.damaged_quantity ?? 0;
                           const l = record.lost_quantity ?? 0;
-                          const orig = record.original_quantity ?? record.quantity;
-                          // returnedCount = items not damaged, not lost, and not still outstanding
-                          const returnedCount = FINAL_RETURNED.includes(record.status)
-                            ? Math.max(0, orig - d - l)
-                            : 0;
+                          const orig = (record.original_quantity != null && record.original_quantity > 0)
+                            ? record.original_quantity
+                            : record.quantity;
+                          // Always compute returnedCount from quantities directly —
+                          // this correctly handles DAMAGED / LOST / RETURNED_* statuses
+                          // where some items were returned before the rest were marked damaged/lost.
+                          const returnedCount = Math.max(0, orig - d - l);
 
                           const hasPills = returnedCount > 0 || d > 0 || l > 0;
 
