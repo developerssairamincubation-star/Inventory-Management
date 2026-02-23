@@ -182,12 +182,12 @@ export default function ProductsPage() {
         className="bg-slate-600 rounded-xl p-4 flex flex-col items-center shadow-md hover:shadow-lg transition-transform hover:-translate-y-1 cursor-pointer"
         onClick={handleNavigate}
       >
-        <div className="w-full bg-white rounded-md p-3 mb-4 flex items-center justify-center h-40 overflow-hidden">
+        <div className="w-full bg-white rounded-md mb-4 h-40 overflow-hidden">
           {image ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={image} alt={name || 'product'} className="max-h-full object-contain" />
+            <img src={image} alt={name || 'product'} className="w-full h-full object-cover" />
           ) : (
-            <div className="flex flex-col items-center text-slate-400">
+            <div className="h-full flex flex-col items-center justify-center text-slate-400">
               <svg className="w-12 h-12 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
@@ -277,16 +277,24 @@ export default function ProductsPage() {
                 e.preventDefault();
                 setSaving(true);
 
-                    // prepare image as data URL if provided (we don't store inline image yet)
-                    let image_url: string | undefined = undefined;
-                    if (imageFile) {
-                      image_url = await new Promise<string | undefined>((resolve) => {
-                        const fr = new FileReader();
-                        fr.onload = () => resolve(typeof fr.result === 'string' ? fr.result : undefined);
-                        fr.onerror = () => resolve(undefined);
-                        fr.readAsDataURL(imageFile);
-                      });
+                // Upload image to S3 first (if provided), then create product
+                let image_url: string | undefined = undefined;
+                if (imageFile) {
+                  try {
+                    const formData = new FormData();
+                    formData.append('file', imageFile);
+                    formData.append('folder', 'products');
+                    const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+                    if (uploadRes.ok) {
+                      const uploadData = await uploadRes.json();
+                      image_url = uploadData.url;
+                    } else {
+                      console.error('Image upload failed:', await uploadRes.text());
                     }
+                  } catch (uploadErr) {
+                    console.error('Image upload error:', uploadErr);
+                  }
+                }
 
                 const body: any = {
                   name: productName || undefined,
@@ -295,8 +303,8 @@ export default function ProductsPage() {
                   cost: cost === '' ? undefined : Number(cost),
                   low_stock_threshold: lowStockThreshold === '' ? undefined : Number(lowStockThreshold),
                   returnable: returnable === null ? undefined : !!returnable,
+                  image_url: image_url ?? undefined,
                 };
-                // do not send image inline to API yet (storage integration planned later)
 
                 try {
                   const res = await fetch('/api/products', {

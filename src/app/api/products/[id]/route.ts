@@ -37,7 +37,7 @@ export async function GET(
         break
     }
 
-    // Fetch product (use * to avoid errors from optional columns like image_url)
+    // Fetch product (exclude image_url — it lives in product_image table)
     const { data: product, error: productError } = await supabase
       .from('products')
       .select('*')
@@ -47,6 +47,13 @@ export async function GET(
     if (productError || !product) {
       return NextResponse.json({ error: productError?.message || 'Product not found' }, { status: 404 })
     }
+
+    // Fetch image_url from product_image table
+    const { data: productImage } = await supabase
+      .from('product_image')
+      .select('image_url')
+      .eq('product_id', id)
+      .maybeSingle()
 
     // Fetch stock separately so a missing column (e.g. damaged_quantity) doesn't fail the main query
     const { data: stockRow } = await supabase
@@ -63,7 +70,12 @@ export async function GET(
         }
       : { quantity: 0, damaged_quantity: 0, lost_quantity: 0 }
 
-    const enrichedProduct = { ...product, stocks: stockData }
+    // Merge image_url into product
+    const enrichedProduct = {
+      ...product,
+      image_url: productImage?.image_url ?? null,
+      stocks: stockData,
+    }
 
     // Fetch all lending items for this product (with damaged/lost quantities)
     const { data: lendingItems } = await supabase
@@ -225,7 +237,7 @@ export async function PUT(
     if (body.unit_cost !== undefined) updateData.unit_cost = body.unit_cost
     if (body.low_stock_threshold !== undefined) updateData.low_stock_threshold = body.low_stock_threshold
     if (body.returnable !== undefined) updateData.returnable = body.returnable
-    if (body.image_url !== undefined) updateData.image_url = body.image_url
+    // image_url is NOT a column on products — handled separately via product_image table
 
     const { data, error } = await supabase
       .from('products')
@@ -236,7 +248,37 @@ export async function PUT(
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    return NextResponse.json(data)
+    // Upsert image_url in product_image table if provided
+    let returnedImageUrl: string | null = null
+    if (body.image_url !== undefined) {
+      const { data: existing } = await supabase
+        .from('product_image')
+        .select('image_url')
+        .eq('product_id', id)
+        .maybeSingle()
+
+      if (existing) {
+        await supabase
+          .from('product_image')
+          .update({ image_url: body.image_url })
+          .eq('product_id', id)
+      } else {
+        await supabase
+          .from('product_image')
+          .insert([{ product_id: id, image_url: body.image_url }])
+      }
+      returnedImageUrl = body.image_url
+    } else {
+      // Fetch existing image_url to return it
+      const { data: img } = await supabase
+        .from('product_image')
+        .select('image_url')
+        .eq('product_id', id)
+        .maybeSingle()
+      returnedImageUrl = img?.image_url ?? null
+    }
+
+    return NextResponse.json({ ...data, image_url: returnedImageUrl })
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 })
   }

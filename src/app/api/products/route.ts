@@ -11,7 +11,8 @@ export async function GET() {
       .from('products')
       .select(`
         *,
-        stocks (quantity)
+        stocks (quantity),
+        product_image (image_url)
       `)
       .order('created_at', { ascending: false })
 
@@ -20,7 +21,14 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    return NextResponse.json(data)
+    // Flatten product_image into image_url field
+    const normalized = (data || []).map((p: any) => ({
+      ...p,
+      image_url: p.product_image?.[0]?.image_url ?? null,
+      product_image: undefined,
+    }))
+
+    return NextResponse.json(normalized)
   } catch (err: any) {
     console.error('Server error:', err)
     return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 })
@@ -37,8 +45,8 @@ export async function POST(req: Request) {
     const serial_number = body.sku ?? body.serial_number
     const unit_cost = body.cost ?? body.unit_cost
     const low_stock_threshold = body.low_stock_threshold ?? body.lowStockThreshold ?? null
-    // image uploads are handled later (storage); ignore any inline image data for now
-    // const image_url = body.image_url ?? body.image
+    // image_url is set after the client uploads to S3 via /api/upload
+    const image_url: string | null = body.image_url ?? null
     const returnable = typeof body.returnable === 'boolean' ? body.returnable : null
     const quantity = body.quantity ?? body.initial_quantity ?? null
 
@@ -65,7 +73,7 @@ export async function POST(req: Request) {
     }
     const product_code = `STIC${String(nextProductNumber).padStart(3, '0')}`
 
-    // Insert product row
+    // Insert product row (image_url lives in product_image table, not here)
     const { data: product, error: prodErr } = await supabaseAdmin
       .from('products')
       .insert([
@@ -75,7 +83,6 @@ export async function POST(req: Request) {
           unit_cost,
           serial_number: serial_number ?? undefined,
           low_stock_threshold: low_stock_threshold ?? undefined,
-          // image stored later via storage integration; skip image_url for now
           returnable: returnable ?? undefined,
         },
       ])
@@ -119,8 +126,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: stockErr.message || 'Failed to create stock record' }, { status: 500 })
     }
 
-    // Return combined result
-    return NextResponse.json({ product, stock }, { status: 201 })
+    // Insert into product_image table if an image_url was provided
+    if (image_url) {
+      const { error: imgErr } = await supabaseAdmin
+        .from('product_image')
+        .insert([{ product_id, image_url }])
+      if (imgErr) {
+        console.error('Supabase error (insert product_image):', imgErr)
+        // Non-fatal — product and stock already created successfully
+      }
+    }
+
+    // Return combined result (merge image_url into product for the client)
+    return NextResponse.json({ product: { ...product, image_url: image_url ?? null }, stock }, { status: 201 })
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Invalid JSON' }, { status: 400 })
   }
