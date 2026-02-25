@@ -74,17 +74,40 @@ export default function StudentsPage() {
     );
   });
 
-  if (loading) return <div className="p-6">Loading student records...</div>;
+  const th: React.CSSProperties = {
+    padding: '6px 10px',
+    textAlign: 'left',
+    fontSize: 10,
+    fontWeight: 600,
+    color: 'var(--muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    borderBottom: '1px solid var(--border)',
+    whiteSpace: 'nowrap',
+  };
+  const td: React.CSSProperties = {
+    padding: '7px 10px',
+    fontSize: 12,
+    color: 'var(--fg)',
+    borderBottom: '1px solid var(--border)',
+    whiteSpace: 'nowrap',
+  };
+
+  if (loading) return <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>Loading student records…</div>;
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-slate-800">Students records</h1>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>Student Records</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Borrowing history by students</div>
+        </div>
         <select
           value={timeFilter}
           onChange={(e) => setTimeFilter(e.target.value)}
-          className="px-4 py-2 border rounded bg-slate-600 text-white text-sm"
+          style={{ fontSize: 11, border: '1px solid var(--border)', padding: '4px 8px', color: 'var(--fg)', background: 'var(--bg)', outline: 'none' }}
         >
           <option>Daily</option>
           <option>Weekly</option>
@@ -93,216 +116,114 @@ export default function StudentsPage() {
         </select>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-lg shadow p-5 border">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-sm text-slate-500 mb-1">Total Borrowed</p>
-              <h2 className="text-3xl font-bold text-slate-800">{totalBorrowed}</h2>
-              <p className="text-xs text-green-600 mt-1">↑ 12% from last week</p>
-            </div>
-            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-            </div>
+      {/* Stats strip */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', background: '#fff', border: '1px solid var(--border)' }}>
+        {[
+          { label: 'Total Borrowed', value: totalBorrowed },
+          { label: 'Returned',       value: returned },
+          { label: 'Pending',        value: pending },
+        ].map((s, i, arr) => (
+          <div key={s.label} style={{ padding: '14px 16px', borderRight: i < arr.length - 1 ? '1px solid var(--border)' : 'none' }}>
+            <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.02em', lineHeight: 1 }}>{s.value}</div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.label}</div>
           </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-5 border">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-sm text-slate-500 mb-1">Returned</p>
-              <h2 className="text-3xl font-bold text-slate-800">{returned}</h2>
-              <p className="text-xs text-red-600 mt-1">↓ 5% from last week</p>
-            </div>
-            <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-              <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-5 border">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-sm text-slate-500 mb-1">Pending</p>
-              <h2 className="text-3xl font-bold text-slate-800">{pending}</h2>
-              <p className="text-xs text-yellow-600 mt-1">→ No change</p>
-            </div>
-            <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center">
-              <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-          </div>
-        </div>
+        ))}
       </div>
 
-      {/* Search and Actions */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex-1">
-          <input
-            type="text"
-            placeholder="Search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full px-4 py-2 border rounded text-sm text-slate-900 placeholder:text-slate-500"
-          />
-        </div>
-        <button className="flex items-center gap-2 px-4 py-2 border rounded bg-white text-slate-700 text-sm hover:bg-slate-50">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
-          </svg>
-          Sort
-        </button>
-        <div className="flex border rounded">
-          <button className="p-2 bg-slate-600 text-white">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-            </svg>
-          </button>
-          <button className="p-2 bg-white text-slate-600 hover:bg-slate-50">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-            </svg>
-          </button>
-        </div>
-        <button className="flex items-center gap-2 px-4 py-2 border rounded bg-white text-slate-700 text-sm hover:bg-slate-50">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-          </svg>
-          Filter
-        </button>
+      {/* Search */}
+      <div>
+        <input
+          type="text"
+          placeholder="Search by name, department, product, mobile…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{
+            width: '100%',
+            padding: '6px 10px',
+            fontSize: 12,
+            border: '1px solid var(--border)',
+            color: 'var(--fg)',
+            background: 'var(--bg)',
+            outline: 'none',
+            boxSizing: 'border-box',
+          }}
+        />
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead className="bg-slate-100 border-b">
+      <div style={{ background: '#fff', border: '1px solid var(--border)', overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
+          <thead>
+            <tr style={{ background: 'var(--surface)' }}>
+              <th style={th}>#</th>
+              <th style={th}>Student Name</th>
+              <th style={th}>Dept</th>
+              <th style={th}>Mentor</th>
+              <th style={th}>Product</th>
+              <th style={th}>Qty</th>
+              <th style={th}>Borrow Date</th>
+              <th style={th}>Return Date</th>
+              <th style={th}>Status</th>
+              <th style={th}>Mobile</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRecords.length === 0 ? (
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">S.No</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Student Name</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Dept</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Mentor</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Product Name</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Qty</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Borrow Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Return Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Mobile</th>
+                <td colSpan={10} style={{ ...td, textAlign: 'center', color: 'var(--muted)', padding: '24px 10px' }}>
+                  No student records found
+                </td>
               </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredRecords.length === 0 ? (
-                <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
-                    No student records found
-                  </td>
-                </tr>
-              ) : (
-                filteredRecords.map((record, idx) => {
-                  const initials = record.student_name
-                    ?.split(' ')
-                    .map(n => n[0])
-                    .join('')
-                    .toUpperCase()
-                    .slice(0, 2) || '?';
-                  
-                  return (
-                    <tr key={idx} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 text-sm text-slate-700">{idx + 1}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs font-semibold">
-                            {initials}
-                          </div>
-                          <span className="text-sm font-medium text-slate-900">{record.student_name || "—"}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{record.department || "—"}</td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{record.mentor || "—"}</td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{record.product_name || "—"}</td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{record.quantity || 0}</td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{formatDate(record.borrow_date)}</td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{formatDate(record.return_date)}</td>
-                      <td className="px-4 py-3">
-                        {(() => {
-                          const PENDING_STATUSES = ["PENDING", "PARTIALLY_RETURNED", "PARTIALLY_DAMAGED", "PARTIALLY_LOST"];
-                          const FINAL_RETURNED = ["RETURNED", "RETURNED_DAMAGED", "RETURNED_LOST"];
-                          const d = record.damaged_quantity ?? 0;
-                          const l = record.lost_quantity ?? 0;
-                          const orig = record.original_quantity ?? record.quantity;
+            ) : (
+              filteredRecords.map((record, idx) => {
+                const PENDING_STATUSES = ["PENDING", "PARTIALLY_RETURNED", "PARTIALLY_DAMAGED", "PARTIALLY_LOST"];
+                const FINAL_RETURNED = ["RETURNED", "RETURNED_DAMAGED", "RETURNED_LOST"];
+                const d = record.damaged_quantity ?? 0;
+                const l = record.lost_quantity ?? 0;
+                const orig = record.original_quantity ?? record.quantity;
 
-                          if (PENDING_STATUSES.includes(record.status)) {
-                            const colorClass =
-                              record.status === "PARTIALLY_DAMAGED"
-                                ? "border-red-400 bg-red-50 text-red-700"
-                                : record.status === "PARTIALLY_LOST"
-                                ? "border-orange-400 bg-orange-50 text-orange-700"
-                                : record.status === "PARTIALLY_RETURNED"
-                                ? "border-blue-400 bg-blue-50 text-blue-700"
-                                : "border-yellow-400 bg-yellow-100 text-yellow-800";
-                            const label =
-                              record.status === "PENDING" ? "PENDING"
-                              : record.status === "PARTIALLY_RETURNED" ? "PARTIALLY RETURNED"
-                              : record.status === "PARTIALLY_DAMAGED" ? "PARTIALLY DAMAGED"
-                              : "PARTIALLY LOST";
-                            return (
-                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded border ${colorClass}`}>
-                                {label}
-                              </span>
-                            );
-                          }
+                const statusCell = (() => {
+                  if (PENDING_STATUSES.includes(record.status)) {
+                    const color =
+                      record.status === "PARTIALLY_DAMAGED" ? { background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5' }
+                      : record.status === "PARTIALLY_LOST"   ? { background: '#fff7ed', color: '#c2410c', border: '1px solid #fdba74' }
+                      : record.status === "PARTIALLY_RETURNED"? { background: '#eff6ff', color: '#1d4ed8', border: '1px solid #93c5fd' }
+                      : { background: '#fefce8', color: '#854d0e', border: '1px solid #fde68a' };
+                    const label = record.status.replace(/_/g, ' ');
+                    return <span style={{ ...color, padding: '2px 7px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>{label}</span>;
+                  }
+                  const returnedCount = Math.max(0, orig - d - l);
+                  const hasPills = returnedCount > 0 || d > 0 || l > 0;
+                  if (hasPills) {
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {returnedCount > 0 && <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 7px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>{returnedCount} Returned</span>}
+                        {d > 0 && <span style={{ background: '#fee2e2', color: '#991b1b', padding: '2px 7px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>{d} Damaged</span>}
+                        {l > 0 && <span style={{ background: '#fef9c3', color: '#713f12', padding: '2px 7px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>{l} Lost</span>}
+                      </div>
+                    );
+                  }
+                  return <span style={{ background: 'var(--surface)', color: 'var(--muted)', padding: '2px 7px', fontSize: 10, fontWeight: 600, border: '1px solid var(--border)' }}>{record.status || '—'}</span>;
+                })();
 
-                          const returnedCount = FINAL_RETURNED.includes(record.status)
-                            ? Math.max(0, orig - d - l)
-                            : 0;
-                          const hasPills = returnedCount > 0 || d > 0 || l > 0;
-
-                          if (hasPills) {
-                            return (
-                              <div className="flex flex-col gap-1">
-                                {returnedCount > 0 && (
-                                  <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-green-200 text-green-900 whitespace-nowrap">
-                                    {returnedCount} Returned
-                                  </span>
-                                )}
-                                {d > 0 && (
-                                  <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-red-200 text-red-900 whitespace-nowrap">
-                                    {d} Damaged
-                                  </span>
-                                )}
-                                {l > 0 && (
-                                  <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-[#c4a8a8] text-[#3b1f1f] whitespace-nowrap">
-                                    {l} Lost
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          }
-
-                          const fallbackColor =
-                            record.status === "CONSUMABLE" ? "bg-purple-100 text-purple-800"
-                            : "bg-gray-100 text-gray-700";
-                          return (
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${fallbackColor}`}>
-                              {record.status || "—"}
-                            </span>
-                          );
-                        })()}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{record.mobile || "—"}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                return (
+                  <tr key={idx}>
+                    <td style={td}>{idx + 1}</td>
+                    <td style={{ ...td, fontWeight: 500 }}>{record.student_name || '—'}</td>
+                    <td style={td}>{record.department || '—'}</td>
+                    <td style={td}>{record.mentor || '—'}</td>
+                    <td style={td}>{record.product_name || '—'}</td>
+                    <td style={td}>{record.quantity || 0}</td>
+                    <td style={td}>{formatDate(record.borrow_date)}</td>
+                    <td style={td}>{formatDate(record.return_date)}</td>
+                    <td style={{ ...td, whiteSpace: 'normal' }}>{statusCell}</td>
+                    <td style={td}>{record.mobile || '—'}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

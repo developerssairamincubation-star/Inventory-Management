@@ -1,50 +1,87 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  LayoutDashboard,
+  Box,
+  NotepadText,
+  Users,
+  UserPen,
+  ReceiptIndianRupee,
+  User,
+} from "lucide-react";
+import { LucideIcon } from "lucide-react";
 
-type NavItem = { label: string; href: string; icon?: string };
+type NavItem = { label: string; href: string; icon: LucideIcon };
 
-function Icon({ src, label }: { src?: string; label: string }) {
-  if (!src) {
-    return <span className="w-6 h-6 bg-slate-100 rounded inline-block" aria-hidden />;
-  }
-
-  return (
-    <img
-      src={src}
-      alt={`${label} icon`}
-      className="w-6 h-6 rounded flex-shrink-0"
-      draggable={false}
-    />
-  );
-}
+const nav: NavItem[] = [
+  { label: "Dashboard",          href: "/dashboard", icon: LayoutDashboard      },
+  { label: "Product Management", href: "/products",  icon: Box                  },
+  { label: "Lending Management", href: "/lending",   icon: NotepadText          },
+  { label: "Student Management", href: "/students",  icon: Users                },
+  { label: "Staff Management",   href: "/staffs",    icon: UserPen              },
+  { label: "Invoice Details",    href: "/billing",   icon: ReceiptIndianRupee   },
+  { label: "User Management",    href: "/users",     icon: User                 },
+];
 
 export default function Sidebar() {
-  const nav: NavItem[] = [
-    { label: "Dashboard", href: "/dashboard", icon: "/icons/dashboard.svg" },
-    { label: "Product Management", href: "/products", icon: "/icons/products.svg" },
-    { label: "Lending Management", href: "/lending", icon: "/icons/lending.svg" },
-    { label: "Student Management", href: "/students", icon: "/icons/students.svg" },
-    { label: "Staff Management", href: "/staffs", icon: "/icons/staffs.svg" },
-    
-    { label: "Invoice Details", href: "/billing", icon: "/icons/billing.svg" },
-    { label: "User Management", href: "/users", icon: "/icons/users.svg" },
-  ];
+  const pathname = usePathname();
 
   return (
-    <aside className="w-72 bg-white border-r min-h-screen p-6">
+    <aside
+      style={{
+        width: 196,
+        minWidth: 196,
+        height: '100vh',
+        overflowY: 'auto',
+        background: 'var(--bg)',
+        borderRight: '1px solid var(--border)',
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '24px 0 16px',
+      }}
+    >
+      {/* Logo */}
+      <div style={{ padding: '0 20px 20px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--fg)', letterSpacing: '-0.01em', lineHeight: 1.2 }}>
+          Lab Inventory
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3, letterSpacing: '0.03em', textTransform: 'uppercase' }}>
+          Management System
+        </div>
+      </div>
 
-      <nav className="space-y-2">
-        {nav.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className="flex items-center gap-4 px-4 py-3 rounded hover:bg-slate-50 text-slate-700"
-          >
-            <Icon src={item.icon} label={item.label} />
-            <span className="text-base font-semibold text-slate-800">{item.label}</span>
-          </Link>
-        ))}
+      {/* Nav */}
+      <nav style={{ flex: 1, padding: '8px 0', marginTop: 4 }}>
+        {nav.map((item) => {
+          const active = pathname === item.href || pathname.startsWith(item.href + '/');
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 9,
+                padding: '7px 20px',
+                fontSize: 12,
+                fontWeight: active ? 600 : 400,
+                color: active ? 'var(--accent)' : 'var(--fg)',
+                background: active ? '#eff6ff' : 'transparent',
+                borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent',
+                textDecoration: 'none',
+                whiteSpace: 'nowrap',
+                letterSpacing: '0.01em',
+                transition: 'background 0.1s, color 0.1s',
+              }}
+            >
+              <Icon size={14} strokeWidth={active ? 2.5 : 1.75} />
+              {item.label}
+            </Link>
+          );
+        })}
       </nav>
     </aside>
   );

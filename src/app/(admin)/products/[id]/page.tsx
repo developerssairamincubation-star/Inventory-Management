@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -47,7 +47,7 @@ const ROWS_PER_PAGE = 10
 type LendingPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly'
 
 function formatDate(dateStr: string | null) {
-  if (!dateStr) return '—'
+  if (!dateStr) return 'â€”'
   const d = new Date(dateStr)
   const month = d.toLocaleString('en-US', { month: 'short' })
   const day = String(d.getDate()).padStart(2, '0')
@@ -107,85 +107,71 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-// ─── Lending Status Display (mirrors lending page) ──────────────────────────
+// â”€â”€â”€ Lending Status Display (mirrors lending page) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function LendingStatusDisplay({ record }: { record: BorrowRecord }) {
   const PENDING_STATUSES = ['PENDING', 'PARTIALLY_RETURNED', 'PARTIALLY_DAMAGED', 'PARTIALLY_LOST']
   const FINAL_STATUSES = ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST', 'DAMAGED', 'LOST', 'CONSUMABLE']
 
   if (PENDING_STATUSES.includes(record.status)) {
-    const colorClass =
-      record.status === 'PARTIALLY_DAMAGED'
-        ? 'border-red-400 bg-red-50 text-red-700'
-        : record.status === 'PARTIALLY_LOST'
-        ? 'border-orange-400 bg-orange-50 text-orange-700'
-        : record.status === 'PARTIALLY_RETURNED'
-        ? 'border-blue-400 bg-blue-50 text-blue-700'
-        : 'border-yellow-400 bg-yellow-100 text-yellow-800'
     const label =
-      record.status === 'PENDING'
-        ? 'PENDING'
-        : record.status === 'PARTIALLY_RETURNED'
-        ? 'PARTIALLY RETURNED'
-        : record.status === 'PARTIALLY_DAMAGED'
-        ? 'PARTIALLY DAMAGED'
-        : 'PARTIALLY LOST'
+      record.status === 'PENDING' ? 'PENDING'
+      : record.status === 'PARTIALLY_RETURNED' ? 'PARTIALLY RETURNED'
+      : record.status === 'PARTIALLY_DAMAGED' ? 'PARTIALLY DAMAGED'
+      : 'PARTIALLY LOST'
+    const bg =
+      record.status === 'PARTIALLY_DAMAGED' ? '#fee2e2' :
+      record.status === 'PARTIALLY_LOST' ? '#fef3c7' :
+      record.status === 'PARTIALLY_RETURNED' ? '#dbeafe' : '#fef9c3'
+    const color =
+      record.status === 'PARTIALLY_DAMAGED' ? '#991b1b' :
+      record.status === 'PARTIALLY_LOST' ? '#92400e' :
+      record.status === 'PARTIALLY_RETURNED' ? '#1e40af' : '#92400e'
     return (
-      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded border ${colorClass}`}>
+      <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: bg, color, whiteSpace: 'nowrap' }}>
         {label}
       </span>
     )
   }
 
   if (FINAL_STATUSES.includes(record.status)) {
-    // Use original_quantity for accurate count; fall back to current quantity
     const orig = (record.original_quantity != null && record.original_quantity > 0)
-      ? record.original_quantity
-      : (record.quantity || 0)
+      ? record.original_quantity : (record.quantity || 0)
     const d = record.damaged_quantity || 0
     const l = record.lost_quantity || 0
-    // returnedCount = whatever wasn't damaged or lost
     const returnedCount = Math.max(0, orig - d - l)
     const hasPills = returnedCount > 0 || d > 0 || l > 0
 
     if (hasPills) {
       return (
-        <div className="flex flex-col gap-1">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           {returnedCount > 0 && (
-            <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-green-200 text-green-900 whitespace-nowrap">
-              {returnedCount} Returned
-            </span>
+            <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: '#dcfce7', color: '#166534', whiteSpace: 'nowrap' }}>{returnedCount} Returned</span>
           )}
           {d > 0 && (
-            <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-red-200 text-red-900 whitespace-nowrap">
-              {d} Damaged
-            </span>
+            <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: '#fee2e2', color: '#991b1b', whiteSpace: 'nowrap' }}>{d} Damaged</span>
           )}
           {l > 0 && (
-            <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-[#c4a8a8] text-[#3b1f1f] whitespace-nowrap">
-              {l} Lost
-            </span>
+            <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: '#fef3c7', color: '#92400e', whiteSpace: 'nowrap' }}>{l} Lost</span>
           )}
         </div>
       )
     }
-
-    // Consumable or a completed item with zero breakdown data
-    const fallbackColor = record.status === 'CONSUMABLE' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-700'
+    const isConsumable = record.status === 'CONSUMABLE'
     return (
-      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${fallbackColor}`}>
+      <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: isConsumable ? '#ede9fe' : 'var(--surface)', color: isConsumable ? '#6d28d9' : 'var(--muted)' }}>
         {record.status}
       </span>
     )
   }
 
   return (
-    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-700">
-      {record.status || '—'}
+    <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: 'var(--surface)', color: 'var(--muted)' }}>
+      {record.status || 'â€”'}
     </span>
   )
 }
 
-// ─── Edit Modal ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ Edit Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function EditModal({
   product,
   onClose,
@@ -249,73 +235,61 @@ function EditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-2xl p-6 w-[90%] max-w-lg shadow-xl">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-xl font-bold text-gray-900">Edit Product</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }}>
+      <div style={{ background: '#fff', border: '1px solid var(--border)', padding: 24, width: '90%', maxWidth: 480 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Edit Product</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>âœ•</button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Product Name</label>
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Product Name</div>
             <input required value={name} onChange={e => setName(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-slate-800 focus:border-transparent" />
+              style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Serial Number / SKU</label>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Serial Number / SKU</div>
             <input value={serial} onChange={e => setSerial(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-slate-800 focus:border-transparent" />
+              style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Unit Cost (₹)</label>
-              <input type="number" step="0.01" min={0} value={cost as any}
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Unit Cost (â‚¹)</div>
+              <input type="number" step="0.01" min={0} value={cost as number | ''}
                 onChange={e => setCost(e.target.value === '' ? '' : Number(e.target.value))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-slate-800 focus:border-transparent" />
+                style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Low Stock Threshold</label>
-              <input type="number" min={0} value={threshold as any}
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Low Stock Threshold</div>
+              <input type="number" min={0} value={threshold as number | ''}
                 onChange={e => setThreshold(e.target.value === '' ? '' : Number(e.target.value))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-slate-800 focus:border-transparent" />
+                style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
             </div>
           </div>
-          <div>
-            <p className="text-sm font-medium text-gray-700 mb-2">Product Type</p>
-            <div className="flex gap-6">
-              <label className="inline-flex items-center gap-2 cursor-pointer">
-                <input type="radio" name="returnable" checked={returnable === true} onChange={() => setReturnable(true)} className="accent-slate-800" />
-                <span className="text-sm text-gray-800">Returnable</span>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Product Type</div>
+            <div style={{ display: 'flex', gap: 20 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', color: 'var(--fg)' }}>
+                <input type="radio" name="returnable" checked={returnable === true} onChange={() => setReturnable(true)} />
+                Returnable
               </label>
-              <label className="inline-flex items-center gap-2 cursor-pointer">
-                <input type="radio" name="returnable" checked={returnable === false} onChange={() => setReturnable(false)} className="accent-slate-800" />
-                <span className="text-sm text-gray-800">Consumable</span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', color: 'var(--fg)' }}>
+                <input type="radio" name="returnable" checked={returnable === false} onChange={() => setReturnable(false)} />
+                Consumable
               </label>
             </div>
           </div>
-
-          {/* Product Image Upload */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Product Photo</label>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Product Photo</div>
             {imagePreview && (
-              <div className="mb-2">
+              <div style={{ marginBottom: 8 }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={imagePreview} alt="product preview" className="h-28 w-28 object-contain rounded border border-gray-200" />
+                <img src={imagePreview} alt="product preview" style={{ height: 96, width: 96, objectFit: 'contain', border: '1px solid var(--border)' }} />
               </div>
             )}
-            <label className="inline-flex items-center gap-2 cursor-pointer px-3 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              </svg>
-              <span className="text-sm text-gray-700">{imageFile ? imageFile.name : 'Change photo'}</span>
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg)', cursor: 'pointer', padding: '4px 10px', border: '1px solid var(--border)', background: 'var(--surface)' }}>
+              {imageFile ? imageFile.name : 'Change photo'}
+              <input type="file" accept="image/*" style={{ display: 'none' }}
                 onChange={(e) => {
                   const f = e.target.files?.[0] ?? null
                   setImageFile(f)
@@ -328,15 +302,12 @@ function EditModal({
               />
             </label>
           </div>
-
-          <div className="flex justify-end gap-3 pt-2">
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
             <button type="button" onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
-              Cancel
-            </button>
+              style={{ padding: '5px 16px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
             <button type="submit" disabled={saving}
-              className="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm hover:bg-slate-900 disabled:opacity-50">
-              {saving ? 'Saving…' : 'Save Changes'}
+              style={{ padding: '5px 16px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', opacity: saving ? 0.5 : 1 }}>
+              {saving ? 'Savingâ€¦' : 'Save Changes'}
             </button>
           </div>
         </form>
@@ -344,8 +315,7 @@ function EditModal({
     </div>
   )
 }
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Main Page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
@@ -439,21 +409,21 @@ export default function ProductDetailPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE))
   const pageRows = filtered.slice((currentPage - 1) * ROWS_PER_PAGE, currentPage * ROWS_PER_PAGE)
 
-  // ── Loading / Error ──────────────────────────────────────────────────────
+  // â”€â”€ Loading / Error â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (loading) return (
     <div className="p-8 flex items-center gap-3 text-gray-500">
       <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
       </svg>
-      Loading product details…
+      Loading product detailsâ€¦
     </div>
   )
 
   if (error || !product) return (
     <div className="p-8">
       <p className="text-red-600 mb-4">{error || 'Product not found.'}</p>
-      <button onClick={() => router.push('/products')} className="text-slate-800 underline text-sm">← Back to Product List</button>
+      <button onClick={() => router.push('/products')} className="text-slate-800 underline text-sm">â† Back to Product List</button>
     </div>
   )
 
@@ -468,326 +438,178 @@ export default function ProductDetailPage() {
   const stockBarPct = Math.min(100, (stock / barMax) * 100)
 
   return (
-    <div className="bg-gray-50 -m-6 p-6 min-h-full">
-      {/* ── Header ── */}
-      <button
-        onClick={() => router.push('/products')}
-        className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 mb-4 font-medium"
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-        </svg>
-        Back to Product List
+    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 28px' }}>
+      {/* Back + Header */}
+      <button onClick={() => router.push('/products')}
+        style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, marginBottom: 16, padding: 0 }}>
+        â† Back to Product List
       </button>
 
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 12 }}>
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">{product.product_name}</h1>
-          <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-            <span className="text-sm text-gray-500">SKU: {product.product_code}</span>
-            {product.serial_number && (
-              <span className="text-sm text-gray-500">S/N: {product.serial_number}</span>
-            )}
-            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${isLow ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>{product.product_name}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
+            SKU: {product.product_code}
+            {product.serial_number && <span style={{ marginLeft: 12 }}>S/N: {product.serial_number}</span>}
+            <span style={{ marginLeft: 12, fontWeight: 600, color: isLow ? '#dc2626' : '#16a34a' }}>
               {isLow ? 'Low Stock' : 'Active Stock'}
             </span>
           </div>
         </div>
-
-        <div className="flex items-center gap-3 shrink-0">
-          <button
-            onClick={() => setEditOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-            </svg>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setEditOpen(true)}
+            style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>
             Edit Product
           </button>
-          <button
-            onClick={() => setDeleteConfirm(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 shadow-sm"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
+          <button onClick={() => setDeleteConfirm(true)}
+            style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, border: 'none', background: '#dc2626', color: '#fff', cursor: 'pointer' }}>
             Delete
           </button>
         </div>
       </div>
 
-      {/* ── Info Cards Row ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
-        {/* Product Image */}
-        <div className="bg-white rounded-2xl shadow overflow-hidden self-start">
-          <div className="w-full h-[220px] bg-gray-50 overflow-hidden">
-            {selectedImage ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={selectedImage} alt={product.product_name} className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center text-gray-300 gap-3">
-                <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-                <span className="text-sm text-gray-400">No image available</span>
+      {/* Info Strip */}
+      <div style={{ display: 'flex', border: '1px solid var(--border)', background: '#fff', marginBottom: 20 }}>
+        {/* Image */}
+        <div style={{ width: 160, minHeight: 120, borderRight: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+          {selectedImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={selectedImage} alt={product.product_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : (
+            <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', padding: 8 }}>No image</div>
+          )}
+        </div>
+        {/* Current Stock */}
+        <div style={{ flex: 1, padding: '14px 18px', borderRight: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Current Stock</div>
+          <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--fg)', marginTop: 4 }}>{stock} <span style={{ fontSize: 12, color: 'var(--muted)' }}>units</span></div>
+          {threshold > 0 && (
+            <div style={{ marginTop: 6 }}>
+              <div style={{ width: '100%', height: 4, background: 'var(--surface)', borderRadius: 2 }}>
+                <div style={{ width: `${stockBarPct}%`, height: 4, background: isLow ? '#dc2626' : 'var(--accent)', borderRadius: 2 }} />
               </div>
-            )}
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>Threshold: {threshold}</div>
+            </div>
+          )}
+          {product.unit_cost != null && (
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+              â‚¹{Number(product.unit_cost).toLocaleString('en-US', { minimumFractionDigits: 2 })} / unit
+            </div>
+          )}
+        </div>
+        {/* Lending Summary */}
+        <div style={{ flex: 1, padding: '14px 18px', borderRight: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Lending Summary</div>
+            <select value={lendingPeriod} onChange={e => setLendingPeriod(e.target.value as LendingPeriod)}
+              style={{ fontSize: 10, padding: '2px 6px', border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          </div>
+          {summaryLoading ? (
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>Loadingâ€¦</div>
+          ) : (
+            <div style={{ display: 'flex', gap: 20 }}>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--muted)' }}>Total Lent</div>
+                <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--fg)', marginTop: 2 }}>{lendingSummary.totalLent}</div>
+              </div>
+              <div style={{ width: 1, background: 'var(--border)' }} />
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--muted)' }}>Returned</div>
+                <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--fg)', marginTop: 2 }}>{lendingSummary.returned}</div>
+              </div>
+            </div>
+          )}
+        </div>
+        {/* Stock Issues */}
+        <div style={{ flex: 1, padding: '14px 18px', borderRight: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Stock Issues</div>
+          <div style={{ display: 'flex', gap: 20 }}>
+            <div>
+              <div style={{ fontSize: 10, color: 'var(--muted)' }}>Damaged</div>
+              <div style={{ fontSize: 22, fontWeight: 600, color: damaged > 0 ? '#d97706' : 'var(--fg)', marginTop: 2 }}>{damaged}</div>
+            </div>
+            <div style={{ width: 1, background: 'var(--border)' }} />
+            <div>
+              <div style={{ fontSize: 10, color: 'var(--muted)' }}>Lost</div>
+              <div style={{ fontSize: 22, fontWeight: 600, color: lost > 0 ? '#dc2626' : 'var(--fg)', marginTop: 2 }}>{lost}</div>
+            </div>
           </div>
         </div>
-
-        {/* Right col: 4 cards in 2×2 */}
-        <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Current Stock */}
-          <div className="bg-white rounded-2xl shadow p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-medium text-gray-500">Current Stock</p>
-              <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center">
-                <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                </svg>
-              </div>
-            </div>
-            <p className="text-4xl font-bold text-gray-900">{stock} <span className="text-lg font-medium text-gray-400">units</span></p>
-            {threshold > 0 && (
-              <div className="mt-3">
-                <div className="w-full bg-gray-100 rounded-full h-2">
-                  <div
-                    className={`h-2 rounded-full transition-all ${isLow ? 'bg-red-500' : 'bg-blue-500'}`}
-                    style={{ width: `${stockBarPct}%` }}
-                  />
-                </div>
-                <p className="text-xs text-gray-400 mt-1">Threshold: {threshold} units</p>
-              </div>
-            )}
-            <div className="mt-3 flex items-center gap-4 text-xs text-gray-500">
-              <div>
-                <span className="font-semibold text-gray-700">{product.unit_cost != null ? `₹${Number(product.unit_cost).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}</span>
-                <span className="ml-1 text-gray-400">/ unit</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Lending Summary */}
-          <div className="bg-white rounded-2xl shadow p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-medium text-gray-500">Lending Summary</p>
-              <div className="flex items-center gap-2">
-                <select
-                  value={lendingPeriod}
-                  onChange={e => setLendingPeriod(e.target.value as LendingPeriod)}
-                  className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 focus:outline-none focus:ring-2 focus:ring-slate-800 bg-white"
-                >
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                  <option value="yearly">Yearly</option>
-                </select>
-                <div className="w-8 h-8 rounded-full bg-purple-50 flex items-center justify-center">
-                  <svg className="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-            {summaryLoading ? (
-              <div className="flex items-center gap-2 text-gray-400 text-sm py-2">
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                </svg>
-                Loading…
-              </div>
-            ) : (
-              <div className="flex items-center gap-8 mt-2">
-                <div>
-                  <p className="text-xs text-gray-400 mb-1">Total Lent</p>
-                  <p className="text-3xl font-bold text-gray-900">{lendingSummary.totalLent}</p>
-                </div>
-                <div className="w-px h-12 bg-gray-100" />
-                <div>
-                  <p className="text-xs text-gray-400 mb-1">Returned</p>
-                  <p className="text-3xl font-bold text-gray-900">{lendingSummary.returned}</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Policy Status */}
-          <div className="bg-white rounded-2xl shadow p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-medium text-gray-500">Policy Status</p>
-              <div className="w-8 h-8 rounded-full bg-green-50 flex items-center justify-center">
-                <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                </svg>
-              </div>
-            </div>
-            <div className="mt-1">
-              {product.returnable === true && (
-                <>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-green-100 text-green-700">
-                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                    Returnable Item
-                  </span>
-                  <p className="text-xs text-gray-400 mt-2">Standard 14-day borrowing period applies to students and staff.</p>
-                </>
-              )}
-              {product.returnable === false && (
-                <>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-purple-100 text-purple-700">
-                    <span className="w-2 h-2 rounded-full bg-purple-500" />
-                    Consumable Item
-                  </span>
-                </>
-              )}
-              {product.returnable === null && (
-                <span className="text-sm text-gray-400">Policy not set</span>
-              )}
-            </div>
-          </div>
-
-          {/* Damaged & Lost Quantity */}
-          <div className="bg-white rounded-2xl shadow p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-medium text-gray-500">Stock Issues</p>
-              <div className="w-8 h-8 rounded-full bg-orange-50 flex items-center justify-center">
-                <svg className="w-4 h-4 text-orange-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-              </div>
-            </div>
-            <div className="flex items-center gap-6">
-              <div>
-                <p className="text-xs text-gray-400 mb-1">Damaged</p>
-                <p className="text-3xl font-bold text-orange-600">{damaged} <span className="text-sm font-medium text-gray-400">units</span></p>
-              </div>
-              <div className="w-px h-10 bg-gray-100" />
-              <div>
-                <p className="text-xs text-gray-400 mb-1">Lost</p>
-                <p className="text-3xl font-bold text-red-600">{lost} <span className="text-sm font-medium text-gray-400">units</span></p>
-              </div>
-            </div>
-            {(damaged > 0 || lost > 0) ? (
-              <p className="mt-3 text-xs font-medium text-orange-500 flex items-center gap-1">
-              </p>
-            ) : (
-              <p className="mt-3 text-xs text-gray-400">No damaged or lost units reported</p>
-            )}
-          </div>
+        {/* Policy */}
+        <div style={{ flex: 1, padding: '14px 18px' }}>
+          <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Policy</div>
+          {product.returnable === true && (
+            <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', background: '#dcfce7', color: '#166534' }}>Returnable</span>
+          )}
+          {product.returnable === false && (
+            <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', background: '#ede9fe', color: '#6d28d9' }}>Consumable</span>
+          )}
+          {product.returnable === null && (
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Not set</span>
+          )}
         </div>
       </div>
 
-      {/* ── Borrowing History ── */}
-      <div className="bg-white rounded-2xl shadow">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between px-6 py-4 border-b border-gray-100 gap-3">
-          <h2 className="text-lg font-bold text-gray-900">Borrowing History</h2>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                type="text"
-                placeholder="Search history..."
-                value={searchQuery}
-                onChange={e => { setSearchQuery(e.target.value); setCurrentPage(1) }}
-                className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-slate-800 w-52"
-              />
-            </div>
-            <button className="p-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-500">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 010 2H4a1 1 0 01-1-1zm3 4a1 1 0 011-1h10a1 1 0 010 2H7a1 1 0 01-1-1zm3 4a1 1 0 011-1h4a1 1 0 010 2h-4a1 1 0 01-1-1z" />
-              </svg>
-            </button>
-          </div>
+      {/* Borrowing History */}
+      <div style={{ background: '#fff', border: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Borrowing History</div>
+          <input type="text" placeholder="Search name, dept, status..." value={searchQuery}
+            onChange={e => { setSearchQuery(e.target.value); setCurrentPage(1) }}
+            style={{ padding: '5px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: '#fff', width: 220, outline: 'none' }} />
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr className="text-xs font-semibold text-gray-400 tracking-wide uppercase border-b border-gray-100">
-                <th className="px-6 py-3 text-left w-16">S.No</th>
-                <th className="px-6 py-3 text-left">Borrower Name</th>
-                <th className="px-6 py-3 text-left">Type</th>
-                <th className="px-6 py-3 text-left">Department</th>
-                <th className="px-6 py-3 text-center">Borrowed</th>
-                <th className="px-6 py-3 text-center">Returned</th>
-                <th className="px-6 py-3 text-center">Damaged</th>
-                <th className="px-6 py-3 text-center">Lost</th>
-                <th className="px-6 py-3 text-center">Balance</th>
-                <th className="px-6 py-3 text-left">Borrow Date</th>
-                <th className="px-6 py-3 text-left">Return Date</th>
-                <th className="px-6 py-3 text-left">Status</th>
-                <th className="px-6 py-3 text-left">Mentor</th>
+              <tr style={{ background: 'var(--surface)' }}>
+                {['#', 'Borrower Name', 'Type', 'Department', 'Borrowed', 'Returned', 'Damaged', 'Lost', 'Balance', 'Borrow Date', 'Return Date', 'Status', 'Mentor'].map(h => (
+                  <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: h === 'Borrower Name' || h === '#' || h === 'Type' || h === 'Department' || h === 'Borrow Date' || h === 'Return Date' || h === 'Status' || h === 'Mentor' ? 'left' : 'center', whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody>
               {pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-6 py-12 text-center text-gray-400">
+                  <td colSpan={13} style={{ padding: '32px 10px', textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
                     {searchQuery ? 'No records match your search.' : 'No borrowing history found.'}
                   </td>
                 </tr>
               ) : (
                 pageRows.map((row) => {
-                  const isOverdue = row.status?.toUpperCase() === 'OVERDUE'
+                  const FULLY_RETURNED_STATUSES = ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST']
+                  const borrowed = (row.original_quantity != null && row.original_quantity > 0) ? row.original_quantity : row.quantity
+                  const dmg = row.damaged_quantity || 0
+                  const lst = row.lost_quantity || 0
+                  const isFullyReturned = FULLY_RETURNED_STATUSES.includes(row.status)
+                  const retd = isFullyReturned ? Math.max(0, borrowed - dmg - lst) : Math.max(0, borrowed - row.quantity - dmg - lst)
+                  const bal = isFullyReturned ? 0 : row.quantity
                   return (
-                    <tr key={row.lending_order_id} className="hover:bg-gray-50/60 transition-colors">
-                      <td className="px-6 py-4 text-gray-400">{String(row.sno).padStart(2, '0')}</td>
-                      <td className="px-6 py-4 font-semibold text-gray-900">{row.borrower_name}</td>
-                      <td className="px-6 py-4">
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded ${row.borrower_type === 'STUDENT' ? 'text-blue-600 bg-blue-50' : 'text-green-600 bg-green-50'}`}>
+                    <tr key={row.lending_order_id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '7px 10px', color: 'var(--muted)' }}>{String(row.sno).padStart(2, '0')}</td>
+                      <td style={{ padding: '7px 10px', fontWeight: 500, color: 'var(--fg)', whiteSpace: 'nowrap' }}>{row.borrower_name}</td>
+                      <td style={{ padding: '7px 10px' }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 6px', background: row.borrower_type === 'STUDENT' ? '#dbeafe' : '#dcfce7', color: row.borrower_type === 'STUDENT' ? '#1e40af' : '#166534' }}>
                           {row.borrower_type}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-gray-600">{row.department}</td>
-                      {/* ── Quantity breakdown ── */}
-                      {(() => {
-                        const FULLY_RETURNED_STATUSES = ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST']
-                        const borrowed = (row.original_quantity != null && row.original_quantity > 0)
-                          ? row.original_quantity
-                          : row.quantity
-                        const damaged = row.damaged_quantity || 0
-                        const lost = row.lost_quantity || 0
-                        const isFullyReturned = FULLY_RETURNED_STATUSES.includes(row.status)
-                        const returned = isFullyReturned
-                          ? Math.max(0, borrowed - damaged - lost)
-                          : Math.max(0, borrowed - row.quantity - damaged - lost)
-                        const balance = isFullyReturned ? 0 : row.quantity
-                        return (
-                          <>
-                            <td className="px-6 py-4 text-center text-gray-700">{borrowed}</td>
-                            <td className="px-6 py-4 text-center">
-                              <span className={returned > 0 ? 'font-semibold text-green-700' : 'text-gray-300'}>
-                                {returned > 0 ? returned : '—'}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <span className={damaged > 0 ? 'font-semibold text-red-600' : 'text-gray-300'}>
-                                {damaged > 0 ? damaged : '—'}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <span className={lost > 0 ? 'font-semibold text-orange-600' : 'text-gray-300'}>
-                                {lost > 0 ? lost : '—'}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <span className={balance > 0 ? 'font-semibold text-yellow-700' : 'text-gray-300'}>
-                                {balance > 0 ? balance : '—'}
-                              </span>
-                            </td>
-                          </>
-                        )
-                      })()}
-                      <td className="px-6 py-4 text-gray-600">{formatDate(row.borrow_date)}</td>
-                      <td className={`px-6 py-4 font-medium ${isOverdue ? 'text-red-500' : 'text-gray-600'}`}>
-                        {row.return_date ? formatDate(row.return_date) : (row.due_date ? formatDate(row.due_date) : '—')}
+                      <td style={{ padding: '7px 10px', color: 'var(--fg)' }}>{row.department}</td>
+                      <td style={{ padding: '7px 10px', textAlign: 'center', color: 'var(--fg)' }}>{borrowed}</td>
+                      <td style={{ padding: '7px 10px', textAlign: 'center', color: retd > 0 ? '#16a34a' : 'var(--muted)', fontWeight: retd > 0 ? 600 : 400 }}>{retd > 0 ? retd : 'â€”'}</td>
+                      <td style={{ padding: '7px 10px', textAlign: 'center', color: dmg > 0 ? '#dc2626' : 'var(--muted)', fontWeight: dmg > 0 ? 600 : 400 }}>{dmg > 0 ? dmg : 'â€”'}</td>
+                      <td style={{ padding: '7px 10px', textAlign: 'center', color: lst > 0 ? '#d97706' : 'var(--muted)', fontWeight: lst > 0 ? 600 : 400 }}>{lst > 0 ? lst : 'â€”'}</td>
+                      <td style={{ padding: '7px 10px', textAlign: 'center', color: bal > 0 ? '#92400e' : 'var(--muted)', fontWeight: bal > 0 ? 600 : 400 }}>{bal > 0 ? bal : 'â€”'}</td>
+                      <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>{formatDate(row.borrow_date)}</td>
+                      <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>
+                        {row.return_date ? formatDate(row.return_date) : (row.due_date ? formatDate(row.due_date) : 'â€”')}
                       </td>
-                      <td className="px-6 py-4">
-                        <LendingStatusDisplay record={row} />
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-700">{row.mentor || '—'}</td>
+                      <td style={{ padding: '7px 10px' }}><LendingStatusDisplay record={row} /></td>
+                      <td style={{ padding: '7px 10px', color: 'var(--fg)' }}>{row.mentor || 'â€”'}</td>
                     </tr>
                   )
                 })
@@ -797,43 +619,34 @@ export default function ProductDetailPage() {
         </div>
 
         {/* Pagination */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100">
-          <p className="text-sm text-gray-500">
-            Showing {filtered.length === 0 ? 0 : (currentPage - 1) * ROWS_PER_PAGE + 1}–{Math.min(currentPage * ROWS_PER_PAGE, filtered.length)} of {filtered.length} records
-          </p>
-          <div className="flex items-center gap-1">
-            <button
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage(p => p - 1)}
-              className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50 text-gray-700"
-            >
-              Previous
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+            Showing {filtered.length === 0 ? 0 : (currentPage - 1) * ROWS_PER_PAGE + 1}â€“{Math.min(currentPage * ROWS_PER_PAGE, filtered.length)} of {filtered.length}
+          </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}
+              style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: '#fff', color: currentPage === 1 ? 'var(--muted)' : 'var(--fg)', cursor: currentPage === 1 ? 'default' : 'pointer' }}>
+              Prev
             </button>
             {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
               const page = totalPages <= 5 ? i + 1 : currentPage <= 3 ? i + 1 : currentPage + i - 2
               if (page < 1 || page > totalPages) return null
               return (
-                <button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`w-9 h-9 text-sm rounded-lg font-medium ${currentPage === page ? 'bg-slate-800 text-white' : 'border border-gray-200 text-gray-700 hover:bg-gray-50'}`}
-                >
+                <button key={page} onClick={() => setCurrentPage(page)}
+                  style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: currentPage === page ? 'var(--accent)' : '#fff', color: currentPage === page ? '#fff' : 'var(--fg)', cursor: 'pointer', fontWeight: currentPage === page ? 600 : 400 }}>
                   {page}
                 </button>
               )
             })}
-            <button
-              disabled={currentPage === totalPages}
-              onClick={() => setCurrentPage(p => p + 1)}
-              className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50 text-gray-700"
-            >
+            <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}
+              style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: '#fff', color: currentPage === totalPages ? 'var(--muted)' : 'var(--fg)', cursor: currentPage === totalPages ? 'default' : 'pointer' }}>
               Next
             </button>
           </div>
         </div>
       </div>
 
-      {/* ── Edit Modal ── */}
+      {/* Edit Modal */}
       {editOpen && product && (
         <EditModal
           product={product}
@@ -845,33 +658,20 @@ export default function ProductDetailPage() {
         />
       )}
 
-      {/* ── Delete Confirm Modal ── */}
+      {/* Delete Confirm Modal */}
       {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-2xl p-6 w-[90%] max-w-sm shadow-xl text-center">
-            <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-              <svg className="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }}>
+          <div style={{ background: '#fff', border: '1px solid var(--border)', padding: 24, width: 360, maxWidth: '90vw', textAlign: 'center' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)', marginBottom: 8 }}>Delete Product?</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 20 }}>
+              This will permanently delete <strong style={{ color: 'var(--fg)' }}>{product.product_name}</strong> and all related records. This cannot be undone.
             </div>
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Delete Product?</h3>
-            <p className="text-sm text-gray-500 mb-6">
-              This will permanently delete <strong>{product.product_name}</strong> and all related stock and lending records. This action cannot be undone.
-            </p>
-            <div className="flex gap-3 justify-center">
-              <button
-                onClick={() => setDeleteConfirm(false)}
-                disabled={deleting}
-                className="px-5 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="px-5 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
-              >
-                {deleting ? 'Deleting…' : 'Yes, Delete'}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <button onClick={() => setDeleteConfirm(false)} disabled={deleting}
+                style={{ padding: '5px 18px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={handleDelete} disabled={deleting}
+                style={{ padding: '5px 18px', fontSize: 12, fontWeight: 600, background: '#dc2626', color: '#fff', border: 'none', cursor: 'pointer', opacity: deleting ? 0.5 : 1 }}>
+                {deleting ? 'Deletingâ€¦' : 'Yes, Delete'}
               </button>
             </div>
           </div>

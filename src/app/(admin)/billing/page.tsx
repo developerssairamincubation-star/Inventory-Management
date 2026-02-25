@@ -1,10 +1,10 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 
 // Utility function to format date as DD/MM/YYYY
 const formatDate = (dateString: string | null): string => {
-  if (!dateString) return "—";
+  if (!dateString) return "â€”";
   const date = new Date(dateString);
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -28,7 +28,7 @@ type Product = {
 
 type Invoice = {
   invoice_id: string;
-  invoice_no: string;
+  invoice_number: string;
   supplier_name: string;
   received_date: string;
   total_amount: number;
@@ -276,390 +276,258 @@ export default function BillingPage() {
     }
   };
 
-  if (loading) return <div className="p-6">Loading invoices...</div>;
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '5px 8px', fontSize: 12, border: '1px solid var(--border)',
+    color: 'var(--fg)', background: 'var(--bg)', outline: 'none', boxSizing: 'border-box',
+  };
+  const labelStyle: React.CSSProperties = {
+    display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--muted)',
+    textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4,
+  };
+  const th: React.CSSProperties = {
+    padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)',
+    textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
+  };
+  const td: React.CSSProperties = { padding: '7px 10px', fontSize: 12, color: 'var(--fg)', borderBottom: '1px solid var(--border)' };
+
+  if (loading) return <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>Loading invoicesâ€¦</div>;
+
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-slate-800">Invoice Details</h1>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>Billing / Invoices</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Manage purchase invoices</div>
+        </div>
         <button
           onClick={handleOpenModal}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded hover:bg-slate-800 text-sm font-medium"
+          style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Create Invoice
+          + Create Invoice
         </button>
       </div>
 
       {/* Search */}
-      <div className="mb-4">
-        <input
-          type="text"
-          placeholder="Search by invoice number or supplier..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full px-4 py-2 border rounded text-sm text-slate-900 placeholder:text-slate-500"
-        />
-      </div>
+      <input
+        type="text"
+        placeholder="Search by invoice number or supplierâ€¦"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        style={{ padding: '6px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: 'var(--bg)', outline: 'none', width: '100%', boxSizing: 'border-box' }}
+      />
 
       {/* Invoices Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead className="bg-slate-700 text-white">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">S.No</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Invoice No</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Supplier Name</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Received Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Items</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Total Amount</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredInvoices.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
-                    No invoices found
+      <div style={{ background: '#fff', border: '1px solid var(--border)', overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ background: 'var(--surface)' }}>
+              <th style={th}>#</th>
+              <th style={th}>Invoice No</th>
+              <th style={th}>Supplier</th>
+              <th style={th}>Received Date</th>
+              <th style={th}>Items</th>
+              <th style={{ ...th, textAlign: 'right' }}>Total</th>
+              <th style={th}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredInvoices.length === 0 ? (
+              <tr><td colSpan={7} style={{ ...td, textAlign: 'center', color: 'var(--muted)', padding: '24px 10px' }}>No invoices found</td></tr>
+            ) : (
+              filteredInvoices.map((invoice, idx) => (
+                <tr key={invoice.invoice_id}>
+                  <td style={td}>{idx + 1}</td>
+                  <td style={{ ...td, fontWeight: 600 }}>{invoice.invoice_number}</td>
+                  <td style={td}>{invoice.supplier_name}</td>
+                  <td style={td}>{formatDate(invoice.received_date)}</td>
+                  <td style={td}>{invoice.items_count || 0}</td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>â‚¹{invoice.total_amount?.toFixed(2) || '0.00'}</td>
+                  <td style={td}>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        onClick={() => fetchInvoiceDetails(invoice.invoice_id)}
+                        style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--accent)', cursor: 'pointer' }}
+                      >
+                        View
+                      </button>
+                      <button
+                        onClick={() => handleDeleteInvoice(invoice.invoice_id)}
+                        style={{ padding: '3px 10px', fontSize: 11, border: '1px solid #fca5a5', background: '#fef2f2', color: '#b91c1c', cursor: 'pointer' }}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
-              ) : (
-                filteredInvoices.map((invoice, idx) => (
-                  <tr key={invoice.invoice_id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-sm text-slate-700">{idx + 1}</td>
-                    <td className="px-4 py-3 text-sm font-medium text-slate-900">{invoice.invoice_number}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{invoice.supplier_name}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{formatDate(invoice.received_date)}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{invoice.items_count || 0}</td>
-                    <td className="px-4 py-3 text-sm font-semibold text-slate-900">₹{invoice.total_amount?.toFixed(2) || "0.00"}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => fetchInvoiceDetails(invoice.invoice_id)}
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
-                          title="Preview Invoice"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteInvoice(invoice.invoice_id)}
-                          className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-                          title="Delete Invoice"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
 
       {/* Create Invoice Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-900">Create New Invoice</h2>
-              <button
-                onClick={() => { setIsModalOpen(false); resetModal(); }}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', padding: 16 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: 760, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Create New Invoice</div>
+              <button onClick={() => { setIsModalOpen(false); resetModal(); }} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>Ã—</button>
             </div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              <form onSubmit={handleSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {/* Invoice header fields */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={labelStyle}>Invoice No</label>
+                    <input type="text" readOnly value={invoiceNo} style={{ ...inputStyle, background: 'var(--surface)', color: 'var(--muted)', cursor: 'not-allowed' }} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Supplier Name</label>
+                    <input type="text" required value={supplierName} onChange={(e) => setSupplierName(e.target.value)} style={inputStyle} placeholder="Enter supplier name" />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Delivered On</label>
+                    <input type="date" required value={receivedDate} onChange={(e) => setReceivedDate(e.target.value)} style={inputStyle} />
+                  </div>
+                </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              {/* Invoice Details */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-900 mb-2">Invoice No</label>
-                  <input
-                    type="text"
-                    readOnly
-                    value={invoiceNo}
-                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 bg-slate-100 cursor-not-allowed"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-900 mb-2">Supplier Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={supplierName}
-                    onChange={(e) => setSupplierName(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
-                    placeholder="Enter supplier name"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-900 mb-2">Delivered On</label>
-                  <input
-                    type="date"
-                    required
-                    value={receivedDate}
-                    onChange={(e) => setReceivedDate(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
-                  />
-                </div>
-              </div>
-
-              {/* Invoice Items */}
-              <div className="border-t pt-4">
-                <label className="block text-sm font-medium text-slate-900 mb-3">Invoice Items</label>
-                {/* Column Headers */}
-                <div className="grid grid-cols-12 gap-3 mb-2">
-                  <div className="col-span-4">
-                    <span className="text-xs font-semibold text-slate-600 uppercase">Product Name</span>
+                {/* Items */}
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Invoice Items</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 1fr 1fr auto', gap: 6, marginBottom: 4 }}>
+                    {['Product', 'Qty', 'Unit Cost', 'Total', ''].map((h) => (
+                      <div key={h} style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</div>
+                    ))}
                   </div>
-                  <div className="col-span-2">
-                    <span className="text-xs font-semibold text-slate-600 uppercase">Quantity</span>
-                  </div>
-                  <div className="col-span-2">
-                    <span className="text-xs font-semibold text-slate-600 uppercase">Unit Cost</span>
-                  </div>
-                  <div className="col-span-2">
-                    <span className="text-xs font-semibold text-slate-600 uppercase">Total Cost</span>
-                  </div>
-                  <div className="col-span-2">
-                    <span className="text-xs font-semibold text-slate-600 uppercase">Action</span>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  {invoiceItems.map((item, index) => (
-                    <div key={index} className="grid grid-cols-12 gap-3 items-start">
-                      {/* Product Name */}
-                      <div className="col-span-4 relative">
-                        <input
-                          type="text"
-                          placeholder="🔍 Search product"
-                          value={item.product_name}
-                          onChange={(e) => handleProductSearch(index, e.target.value)}
-                          onFocus={() => {
-                            if (item.product_name) handleProductSearch(index, item.product_name);
-                          }}
-                          className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
-                        />
-                        {showProductDropdown === index && filteredProducts.length > 0 && (
-                          <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                            {filteredProducts.map((product) => (
-                              <button
-                                key={product.product_id}
-                                type="button"
-                                onClick={() => selectProduct(index, product)}
-                                className="w-full px-3 py-2 text-left text-sm text-slate-900 hover:bg-slate-100 border-b last:border-b-0"
-                              >
-                                <div className="font-medium">{product.product_name}</div>
-                                <div className="text-xs text-slate-500">Unit Cost: ₹{product.unit_cost}</div>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Quantity */}
-                      <div className="col-span-2">
-                        <input
-                          type="number"
-                          min="1"
-                          placeholder="Qty"
-                          value={item.quantity}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {invoiceItems.map((item, index) => (
+                      <div key={index} style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 1fr 1fr auto', gap: 6, alignItems: 'start' }}>
+                        <div style={{ position: 'relative' }}>
+                          <input
+                            type="text"
+                            placeholder="Search productâ€¦"
+                            value={item.product_name}
+                            onChange={(e) => handleProductSearch(index, e.target.value)}
+                            onFocus={() => { if (item.product_name) handleProductSearch(index, item.product_name); }}
+                            style={inputStyle}
+                          />
+                          {showProductDropdown === index && filteredProducts.length > 0 && (
+                            <div style={{ position: 'absolute', zIndex: 10, width: '100%', background: '#fff', border: '1px solid var(--border)', maxHeight: 180, overflowY: 'auto', top: '100%', left: 0 }}>
+                              {filteredProducts.map((p) => (
+                                <button key={p.product_id} type="button" onClick={() => selectProduct(index, p)}
+                                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', fontSize: 12, color: 'var(--fg)', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}>
+                                  <div style={{ fontWeight: 500 }}>{p.product_name}</div>
+                                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>â‚¹{p.unit_cost}</div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <input type="number" min="1" value={item.quantity}
                           onChange={(e) => {
                             const qty = parseInt(e.target.value) || 1;
                             const updated = [...invoiceItems];
-                            updated[index] = { 
-                              ...updated[index], 
-                              quantity: qty,
-                              total_cost: qty * updated[index].unit_cost
-                            };
+                            updated[index] = { ...updated[index], quantity: qty, total_cost: qty * updated[index].unit_cost };
                             setInvoiceItems(updated);
                           }}
-                          className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
-                        />
-                      </div>
-
-                      {/* Unit Cost */}
-                      <div className="col-span-2">
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Unit Cost"
-                          value={item.unit_cost}
-                          readOnly
-                          className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 bg-slate-50"
-                        />
-                      </div>
-
-                      {/* Total Cost */}
-                      <div className="col-span-2">
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Total"
-                          value={item.total_cost.toFixed(2)}
-                          readOnly
-                          className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 bg-slate-50"
-                        />
-                      </div>
-
-                      {/* Delete Button */}
-                      <div className="col-span-2">
-                        <button
-                          type="button"
-                          onClick={() => removeInvoiceItem(index)}
-                          disabled={invoiceItems.length === 1}
-                          className={`w-full px-3 py-2 border rounded text-sm font-medium ${
-                            invoiceItems.length === 1
-                              ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-                              : "bg-white text-red-600 border-red-300 hover:bg-red-50"
-                          }`}
-                        >
-                          Delete
+                          style={inputStyle} />
+                        <input type="number" step="0.01" value={item.unit_cost} readOnly style={{ ...inputStyle, background: 'var(--surface)', color: 'var(--muted)' }} />
+                        <input type="number" step="0.01" value={item.total_cost.toFixed(2)} readOnly style={{ ...inputStyle, background: 'var(--surface)', color: 'var(--muted)' }} />
+                        <button type="button" onClick={() => removeInvoiceItem(index)} disabled={invoiceItems.length === 1}
+                          style={{ padding: '5px 8px', fontSize: 11, border: '1px solid var(--border)', background: 'none', color: invoiceItems.length === 1 ? 'var(--muted)' : '#b91c1c', cursor: invoiceItems.length === 1 ? 'not-allowed' : 'pointer' }}>
+                          Ã—
                         </button>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                  <button type="button" onClick={addInvoiceItem}
+                    style={{ marginTop: 8, fontSize: 12, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                    + Add item
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={addInvoiceItem}
-                  className="mt-3 text-sm text-slate-900 hover:text-slate-700 font-medium flex items-center gap-1"
-                >
-                  <span className="text-lg">+</span> Add item
-                </button>
-              </div>
 
-              {/* Grand Total */}
-              <div className="border-t pt-4">
-                <div className="flex justify-end items-center gap-3">
-                  <span className="text-lg font-semibold text-slate-900">Grand Total:</span>
-                  <span className="text-2xl font-bold text-slate-900">₹{calculateGrandTotal().toFixed(2)}</span>
+                {/* Grand total */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                  <span style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Grand Total</span>
+                  <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--fg)' }}>â‚¹{calculateGrandTotal().toFixed(2)}</span>
                 </div>
-              </div>
 
-              {/* Actions */}
-              <div className="flex justify-end gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => { setIsModalOpen(false); resetModal(); }}
-                  disabled={isSubmitting}
-                  className="px-6 py-2 border border-slate-300 rounded text-slate-900 hover:bg-slate-50 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-6 py-2 bg-slate-700 text-white rounded hover:bg-slate-800 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {isSubmitting && (
-                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                  )}
-                  {isSubmitting ? "Creating..." : "Create Invoice"}
-                </button>
-              </div>
-            </form>
+                {/* Actions */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button type="button" onClick={() => { setIsModalOpen(false); resetModal(); }} disabled={isSubmitting}
+                    style={{ padding: '5px 14px', fontSize: 12, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--fg)', cursor: 'pointer' }}>
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={isSubmitting}
+                    style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                    {isSubmitting ? 'Creatingâ€¦' : 'Create Invoice'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}
 
       {/* Preview Invoice Modal */}
       {isPreviewOpen && selectedInvoice && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-900">Invoice Details</h2>
-              <button
-                onClick={() => { setIsPreviewOpen(false); setSelectedInvoice(null); }}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', padding: 16 }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: 680, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Invoice â€” {selectedInvoice.invoice_number}</div>
+              <button onClick={() => { setIsPreviewOpen(false); setSelectedInvoice(null); }} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>Ã—</button>
             </div>
-
-            <div className="p-6 space-y-6">
-              {/* Invoice Header */}
-              <div className="grid grid-cols-2 gap-6 pb-6 border-b">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Invoice Number</label>
-                  <p className="text-lg font-bold text-slate-900">{selectedInvoice.invoice_number}</p>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Supplier Name</label>
-                  <p className="text-lg font-semibold text-slate-900">{selectedInvoice.supplier_name}</p>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Created Date</label>
-                  <p className="text-sm text-slate-700">{formatDate(selectedInvoice.created_at)}</p>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Delivered Date</label>
-                  <p className="text-sm text-slate-700">{formatDate(selectedInvoice.received_date)}</p>
-                </div>
+            <div style={{ overflowY: 'auto', flex: 1, padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Meta */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                {[
+                  { label: 'Invoice Number', value: selectedInvoice.invoice_number },
+                  { label: 'Supplier',       value: selectedInvoice.supplier_name },
+                  { label: 'Created',        value: formatDate(selectedInvoice.created_at) },
+                  { label: 'Delivered',      value: formatDate(selectedInvoice.received_date) },
+                ].map((m) => (
+                  <div key={m.label}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>{m.label}</div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg)' }}>{m.value}</div>
+                  </div>
+                ))}
               </div>
-
-              {/* Invoice Items */}
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900 mb-4">Invoice Items</h3>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full border border-slate-200">
-                    <thead className="bg-slate-100">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">S.No</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">Product Name</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase tracking-wider">Quantity</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase tracking-wider">Unit Cost</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase tracking-wider">Total Cost</th>
+              {/* Items table */}
+              <div style={{ border: '1px solid var(--border)', overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--surface)' }}>
+                      <th style={th}>#</th>
+                      <th style={th}>Product</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Qty</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Unit Cost</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedInvoice.items.map((item, idx) => (
+                      <tr key={idx}>
+                        <td style={td}>{idx + 1}</td>
+                        <td style={{ ...td, fontWeight: 500 }}>{item.product_name}</td>
+                        <td style={{ ...td, textAlign: 'right' }}>{item.quantity}</td>
+                        <td style={{ ...td, textAlign: 'right' }}>â‚¹{item.unit_cost.toFixed(2)}</td>
+                        <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>â‚¹{item.total_cost.toFixed(2)}</td>
                       </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-slate-200">
-                      {selectedInvoice.items.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50">
-                          <td className="px-4 py-3 text-sm text-slate-700">{idx + 1}</td>
-                          <td className="px-4 py-3 text-sm font-medium text-slate-900">{item.product_name}</td>
-                          <td className="px-4 py-3 text-sm text-slate-700 text-right">{item.quantity}</td>
-                          <td className="px-4 py-3 text-sm text-slate-700 text-right">₹{item.unit_cost.toFixed(2)}</td>
-                          <td className="px-4 py-3 text-sm font-semibold text-slate-900 text-right">₹{item.total_cost.toFixed(2)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-
-              {/* Total Amount */}
-              <div className="border-t pt-4">
-                <div className="flex justify-end items-center gap-4">
-                  <span className="text-lg font-semibold text-slate-900">Total Amount:</span>
-                  <span className="text-2xl font-bold text-slate-900">₹{selectedInvoice.total_amount.toFixed(2)}</span>
-                </div>
+              {/* Total */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                <span style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Amount</span>
+                <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--fg)' }}>â‚¹{selectedInvoice.total_amount.toFixed(2)}</span>
               </div>
-
-              {/* Close Button */}
-              <div className="flex justify-end pt-4">
-                <button
-                  onClick={() => { setIsPreviewOpen(false); setSelectedInvoice(null); }}
-                  className="px-6 py-2 bg-slate-700 text-white rounded hover:bg-slate-800 text-sm font-medium"
-                >
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={() => { setIsPreviewOpen(false); setSelectedInvoice(null); }}
+                  style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: 'var(--fg)', color: '#fff', border: 'none', cursor: 'pointer' }}>
                   Close
                 </button>
               </div>
@@ -670,3 +538,4 @@ export default function BillingPage() {
     </div>
   );
 }
+      {/* Header */}

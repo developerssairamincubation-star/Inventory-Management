@@ -1,7 +1,7 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
 
 interface DashboardStats {
   totalProducts: number
@@ -41,6 +41,33 @@ interface TopLentProduct {
   product_id: string
   product_name: string
   total_lent: number
+}
+
+const S = {
+  panel: {
+    background: '#fff',
+    border: '1px solid var(--border)',
+    padding: '16px',
+  } as React.CSSProperties,
+  panelTitle: {
+    fontSize: 11,
+    fontWeight: 600,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.07em',
+    color: 'var(--muted)',
+    marginBottom: 12,
+  } as React.CSSProperties,
+  tab: (active: boolean): React.CSSProperties => ({
+    padding: '5px 12px',
+    fontSize: 11,
+    fontWeight: active ? 600 : 400,
+    color: active ? '#fff' : 'var(--muted)',
+    background: active ? 'var(--fg)' : 'transparent',
+    border: '1px solid var(--border)',
+    cursor: 'pointer',
+    letterSpacing: '0.03em',
+    transition: 'background 0.1s',
+  }),
 }
 
 export default function Dashboard() {
@@ -115,248 +142,275 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="p-6">
-        <div className="text-gray-600">Loading dashboard...</div>
+      <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>
+        Loading dashboard…
       </div>
     )
   }
 
   if (!stats) {
     return (
-      <div className="p-6">
-        <div className="text-red-600">Failed to load dashboard data</div>
+      <div style={{ padding: 20, fontSize: 12, color: 'var(--danger)' }}>
+        Failed to load dashboard data.
       </div>
     )
   }
 
-  // Prepare data for donut chart
   const grandTotal = stats.stockDistribution.total || 1
   const chartData = [
-    {
-      name: 'Available',
-      value: stats.stockDistribution.available,
-      percentage: parseFloat(((stats.stockDistribution.available / grandTotal) * 100).toFixed(1)),
-    },
-    {
-      name: 'Lent',
-      value: stats.stockDistribution.lent,
-      percentage: parseFloat(((stats.stockDistribution.lent / grandTotal) * 100).toFixed(1)),
-    },
-    {
-      name: 'Damaged',
-      value: stats.stockDistribution.lostDamaged,
-      percentage: parseFloat(((stats.stockDistribution.lostDamaged / grandTotal) * 100).toFixed(1)),
-    },
-    {
-      name: 'Lost',
-      value: stats.stockDistribution.lost,
-      percentage: parseFloat(((stats.stockDistribution.lost / grandTotal) * 100).toFixed(1)),
-    },
-  ].filter(item => item.value > 0) // Only show non-zero values
+    { name: 'Available', value: stats.stockDistribution.available, pct: +((stats.stockDistribution.available / grandTotal) * 100).toFixed(1) },
+    { name: 'Lent',      value: stats.stockDistribution.lent,      pct: +((stats.stockDistribution.lent / grandTotal) * 100).toFixed(1) },
+    { name: 'Damaged',   value: stats.stockDistribution.lostDamaged, pct: +((stats.stockDistribution.lostDamaged / grandTotal) * 100).toFixed(1) },
+    { name: 'Lost',      value: stats.stockDistribution.lost,      pct: +((stats.stockDistribution.lost / grandTotal) * 100).toFixed(1) },
+  ].filter(d => d.value > 0)
 
-  const COLORS = {
-    'Available': '#3b82f6', // blue
-    'Lent': '#6b7280',     // gray
-    'Damaged': '#ef4444',  // red
-    'Lost': '#f97316',     // orange
+  const COLORS: Record<string, string> = {
+    Available: '#1a56db',
+    Lent:      '#6b7280',
+    Damaged:   '#dc2626',
+    Lost:      '#d97706',
   }
 
+  const visibleOverdue = overdueAlerts.filter(a => !dismissedOverdue.has(a.lending_order_id))
+
+  const statItems = [
+    { label: 'Total Products',    value: stats.totalProducts },
+    { label: 'Total Stock',       value: stats.totalStockQuantity },
+    { label: 'Low Stock',         value: stats.lowStockCount,           color: stats.lowStockCount > 0 ? 'var(--danger)' : undefined },
+    { label: 'Available',         value: stats.stockDistribution.available },
+    { label: 'Currently Lent',    value: stats.stockDistribution.lent },
+    { label: 'Overdue',           value: visibleOverdue.length,         color: visibleOverdue.length > 0 ? 'var(--warn)' : undefined },
+  ]
+
   return (
-    <div className="p-4 bg-gray-50 h-full overflow-hidden flex flex-col">
-      <h1 className="text-2xl font-bold mb-3 text-gray-900">Dashboard</h1>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minHeight: '100%' }}>
 
-      {/* Top Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
-        {/* Total Products at Stock */}
-        <div className="bg-gray-200 rounded-lg p-6 shadow">
-          <h3 className="text-blue-600 text-sm font-medium mb-2">Total products at stock</h3>
-          <p className="text-blue-600 text-4xl font-bold">{stats.totalProducts}</p>
-        </div>
-
-        {/* Total Stock Quantity */}
-        <div className="bg-gray-200 rounded-lg p-6 shadow">
-          <h3 className="text-blue-600 text-sm font-medium mb-2">Total Stock quantity</h3>
-          <p className="text-blue-600 text-4xl font-bold">{stats.totalStockQuantity}</p>
-        </div>
-
-        {/* Low Stock Products */}
-        <div className="bg-gray-200 rounded-lg p-6 shadow">
-          <h3 className="text-blue-600 text-sm font-medium mb-2">Low stock products</h3>
-          <p className="text-blue-600 text-4xl font-bold">{stats.lowStockCount}</p>
+      {/* ── Page title bar ── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.01em' }}>
+            Dashboard
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+            Overview of current inventory status
+          </div>
         </div>
       </div>
 
-      {/* Second Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-0">
-        {/* Alerts Box */}
-        <div className="bg-gray-200 rounded-lg p-4 shadow flex flex-col min-h-0">
-          <h3 className="text-gray-900 text-lg font-semibold mb-3">Alerts</h3>
-          
-          {/* Toggle Buttons */}
-          <div className="flex gap-2 mb-3">
-            <div className="relative flex-1">
+      {/* ── Stat strip ── */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(6, 1fr)',
+          background: '#fff',
+          border: '1px solid var(--border)',
+        }}
+      >
+        {statItems.map((s, i) => (
+          <div
+            key={s.label}
+            style={{
+              padding: '14px 16px',
+              borderRight: i < statItems.length - 1 ? '1px solid var(--border)' : 'none',
+            }}
+          >
+            <div
+              style={{
+                fontSize: 24,
+                fontWeight: 600,
+                color: s.color ?? 'var(--fg)',
+                letterSpacing: '-0.02em',
+                lineHeight: 1,
+              }}
+            >
+              {s.value}
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                color: 'var(--muted)',
+                marginTop: 5,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+              }}
+            >
+              {s.label}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Main grid ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, flex: 1 }}>
+
+        {/* Alerts */}
+        <div style={{ ...S.panel, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <span style={S.panelTitle as any}>Alerts</span>
+            <div style={{ display: 'flex', gap: 4 }}>
               <button
                 onClick={() => setAlertTab('low-stock')}
-                className={`w-full py-2 px-4 rounded font-medium ${
-                  alertTab === 'low-stock'
-                    ? 'bg-red-500 text-white'
-                    : 'bg-gray-300 text-gray-700'
-                }`}
+                style={S.tab(alertTab === 'low-stock')}
               >
-                Low stock
+                Low Stock
+                {lowStockProducts.length > 0 && (
+                  <span style={{ marginLeft: 5, background: 'var(--danger)', color: '#fff', borderRadius: 20, padding: '0 5px', fontSize: 10, fontWeight: 700 }}>
+                    {lowStockProducts.length}
+                  </span>
+                )}
               </button>
-              {lowStockProducts.length > 0 && (
-                <span className="absolute -top-2 -right-2 min-w-[22px] h-[22px] flex items-center justify-center rounded-full bg-yellow-400 text-black text-xs font-bold px-1 shadow">
-                  {lowStockProducts.length}
-                </span>
-              )}
-            </div>
-            <div className="relative flex-1">
               <button
                 onClick={() => setAlertTab('overdue')}
-                className={`w-full py-2 px-4 rounded font-medium ${
-                  alertTab === 'overdue'
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-gray-300 text-gray-700'
-                }`}
+                style={S.tab(alertTab === 'overdue')}
               >
                 Overdue
+                {visibleOverdue.length > 0 && (
+                  <span style={{ marginLeft: 5, background: 'var(--warn)', color: '#fff', borderRadius: 20, padding: '0 5px', fontSize: 10, fontWeight: 700 }}>
+                    {visibleOverdue.length}
+                  </span>
+                )}
               </button>
-              {overdueAlerts.filter(a => !dismissedOverdue.has(a.lending_order_id)).length > 0 && (
-                <span className="absolute -top-2 -right-2 min-w-[22px] h-[22px] flex items-center justify-center rounded-full bg-yellow-400 text-black text-xs font-bold px-1 shadow">
-                  {overdueAlerts.filter(a => !dismissedOverdue.has(a.lending_order_id)).length}
-                </span>
-              )}
             </div>
           </div>
 
-          {/* Alert Content */}
-          <div className="flex-1 min-h-0 overflow-y-auto">
+          <div style={{ flex: 1, overflowY: 'auto' }}>
             {alertTab === 'low-stock' ? (
-              <div className="space-y-2">
-                {lowStockProducts.length > 0 ? (
-                  lowStockProducts.map((product) => (
-                    <div 
-                      key={product.product_id} 
-                      className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm"
-                    >
-                      <div className="flex items-start gap-2">
-                        <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                        </svg>
-                        <div className="flex-1">
-                          <p className="text-red-800 font-medium">
-                            {product.product_name} is on low stock
-                          </p>
-                          <p className="text-red-600 text-xs mt-1">
-                            Current: {product.current_stock} units (Threshold: {product.threshold})
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-gray-500 text-sm py-4 text-center">
-                    No low stock alerts
-                  </div>
-                )}
-              </div>
+              lowStockProducts.length > 0 ? (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                      <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Product</th>
+                      <th style={{ padding: '4px 8px', textAlign: 'right', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Stock</th>
+                      <th style={{ padding: '4px 8px', textAlign: 'right', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Min</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lowStockProducts.map((p) => (
+                      <tr key={p.product_id} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '6px 8px', fontSize: 12, color: 'var(--fg)' }}>{p.product_name}</td>
+                        <td style={{ padding: '6px 8px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--danger)' }}>{p.current_stock}</td>
+                        <td style={{ padding: '6px 8px', textAlign: 'right', fontSize: 12, color: 'var(--muted)' }}>{p.threshold}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 12, color: 'var(--muted)' }}>
+                  No low stock alerts
+                </div>
+              )
             ) : (
-              <div className="space-y-2">
-                {overdueAlerts.filter(a => !dismissedOverdue.has(a.lending_order_id)).length > 0 ? (
-                  overdueAlerts
-                    .filter(a => !dismissedOverdue.has(a.lending_order_id))
-                    .map((alert, index) => (
-                    <div
-                      key={`${alert.lending_order_id}-${index}`}
-                      className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm"
-                    >
-                      <div className="flex items-start gap-2">
-                        <svg className="w-5 h-5 text-orange-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                        </svg>
-                        <div className="flex-1">
-                          <p className="text-orange-800 font-medium">
-                            {alert.borrower_name} did not return {alert.product_name} within {(() => { const d = new Date(alert.due_date); const day = String(d.getDate()).padStart(2, '0'); const month = String(d.getMonth() + 1).padStart(2, '0'); const year = d.getFullYear(); return `${day}/${month}/${year}`; })()}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => dismissOverdue(alert.lending_order_id)}
-                          className="ml-1 flex-shrink-0 text-orange-400 hover:text-orange-700 transition-colors"
-                          title="Dismiss"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-gray-500 text-sm py-4 text-center">
-                    No overdue alerts
-                  </div>
-                )}
-              </div>
+              visibleOverdue.length > 0 ? (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                      <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Borrower</th>
+                      <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Product</th>
+                      <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Due</th>
+                      <th style={{ padding: '4px 8px', width: 24 }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleOverdue.map((a, i) => {
+                      const d = new Date(a.due_date)
+                      const dateStr = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
+                      return (
+                        <tr key={`${a.lending_order_id}-${i}`} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '6px 8px', fontSize: 12, color: 'var(--fg)' }}>{a.borrower_name}</td>
+                          <td style={{ padding: '6px 8px', fontSize: 12, color: 'var(--fg)' }}>{a.product_name}</td>
+                          <td style={{ padding: '6px 8px', fontSize: 11, color: 'var(--danger)', whiteSpace: 'nowrap' }}>{dateStr}</td>
+                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                            <button
+                              onClick={() => dismissOverdue(a.lending_order_id)}
+                              title="Dismiss"
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', lineHeight: 1, padding: 2 }}
+                            >
+                              ×
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 12, color: 'var(--muted)' }}>
+                  No overdue alerts
+                </div>
+              )
             )}
           </div>
         </div>
 
-        {/* Stock Status Distribution */}
-        <div className="bg-gray-200 rounded-lg p-4 shadow flex flex-col min-h-0">
-          <h3 className="text-gray-900 text-lg font-semibold mb-3">Stock status distribution</h3>
-          
+        {/* Stock Distribution */}
+        <div style={{ ...S.panel, display: 'flex', flexDirection: 'column', minHeight: 260 }}>
+          <div style={S.panelTitle as any}>Stock Distribution</div>
           {chartData.length > 0 ? (
-            <div className="flex-1 min-h-0">
+            <div style={{ flex: 1, minHeight: 220 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={chartData}
                     cx="50%"
                     cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
+                    innerRadius={55}
+                    outerRadius={75}
                     paddingAngle={2}
-                    minAngle={5}
+                    minAngle={4}
                     dataKey="value"
-                    label={({ percentage }) => `${percentage}%`}
+                    label={({ name }) => {
+                      const item = chartData.find(d => d.name === name)
+                      return item ? `${item.pct}%` : ''
+                    }}
+                    labelLine={false}
                   >
-                    {chartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[entry.name as keyof typeof COLORS]} />
+                    {chartData.map((entry) => (
+                      <Cell key={entry.name} fill={COLORS[entry.name] ?? '#ccc'} />
                     ))}
                   </Pie>
-                  <Tooltip 
-                    formatter={(value: number, name: string) => {
-                      const item = chartData.find(d => d.name === name)
-                      return [`${value} items (${item?.percentage ?? 0}%)`, 'Quantity']
+                  <Tooltip
+                    formatter={(value, name) => {
+                      const item = chartData.find(d => d.name === String(name))
+                      return [`${value} units (${item?.pct ?? 0}%)`, String(name)]
                     }}
+                    contentStyle={{ fontSize: 11, border: '1px solid var(--border)', borderRadius: 0 }}
                   />
-                  <Legend 
-                    verticalAlign="bottom" 
+                  <Legend
+                    verticalAlign="bottom"
                     height={36}
+                    iconSize={8}
+                    iconType="circle"
                     formatter={(value) => {
                       const item = chartData.find(d => d.name === value)
-                      return `${value}: ${item?.value || 0} (${item?.percentage ?? 0}%)`
+                      return <span style={{ fontSize: 11, color: 'var(--fg)' }}>{value}: {item?.value} ({item?.pct}%)</span>
                     }}
                   />
                 </PieChart>
               </ResponsiveContainer>
             </div>
           ) : (
-            <div className="flex-1 min-h-0 flex items-center justify-center text-gray-500">
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--muted)' }}>
               No stock data available
             </div>
           )}
         </div>
 
         {/* Top Lent Products */}
-        <div className="bg-gray-200 rounded-lg p-4 shadow flex flex-col min-h-0">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-gray-900 text-lg font-semibold">Top lent products</h3>
+        <div style={{ ...S.panel, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <span style={S.panelTitle as any}>Top Lent Products</span>
             <select
               value={topLentFilter}
               onChange={(e) => setTopLentFilter(e.target.value)}
-              className="px-2 py-1 text-xs border rounded bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400"
+              style={{
+                fontSize: 11,
+                border: '1px solid var(--border)',
+                padding: '3px 6px',
+                color: 'var(--fg)',
+                background: 'var(--bg)',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
             >
               <option>Daily</option>
               <option>Weekly</option>
@@ -364,39 +418,43 @@ export default function Dashboard() {
               <option>Yearly</option>
             </select>
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3">
-            {topLentProducts.length > 0 ? (
-              (() => {
-                const totalLent = topLentProducts.reduce((sum, p) => sum + p.total_lent, 0) || 1
-                return topLentProducts.map((product) => {
-                  const barWidth = Math.max((product.total_lent / totalLent) * 100, 2)
-                  return (
-                    <div key={product.product_id} className="flex items-center gap-3">
-                      <span className="text-sm text-gray-800 w-28 truncate flex-shrink-0" title={product.product_name}>
-                        {product.product_name}
+
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {topLentProducts.length > 0 ? (() => {
+              const totalLent = topLentProducts.reduce((s, p) => s + p.total_lent, 0) || 1
+              return topLentProducts.map((p) => {
+                const w = Math.max((p.total_lent / totalLent) * 100, 2)
+                return (
+                  <div key={p.product_id}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 12, color: 'var(--fg)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.product_name}>
+                        {p.product_name}
                       </span>
-                      <div className="flex-1 flex items-center gap-2">
-                        <div className="flex-1 bg-gray-300 rounded-full h-3.5 overflow-hidden">
-                          <div
-                            className="bg-[#3d7a99] h-full rounded-full transition-all"
-                            style={{ width: `${barWidth}%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-gray-600 w-6 text-right flex-shrink-0">{product.total_lent}</span>
-                      </div>
+                      <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>{p.total_lent}</span>
                     </div>
-                  )
-                })
-              })()
-            ) : (
-              <div className="text-gray-500 text-sm py-4 text-center">
+                    <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          width: `${w}%`,
+                          height: '100%',
+                          background: 'var(--accent)',
+                          borderRadius: 2,
+                          transition: 'width 0.4s ease',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )
+              })
+            })() : (
+              <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 12, color: 'var(--muted)' }}>
                 No lending data available
               </div>
             )}
           </div>
         </div>
       </div>
-
     </div>
   )
 }
+

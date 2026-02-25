@@ -9,11 +9,13 @@ export default function AdminLayout({
 }) {
   return (
     <ProtectedRoute>
-      <div className="flex min-h-screen bg-slate-50">
+      <div className="flex" style={{ height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
         <Sidebar />
-        <div className="flex-1 flex flex-col">
+        <div className="flex flex-col min-w-0" style={{ flex: 1, height: '100vh', overflow: 'hidden', borderLeft: '1px solid var(--border)' }}>
           <Navbar />
-          <main className="p-6">{children}</main>
+          <main className="p-5" style={{ flex: 1, overflowY: 'auto', background: 'var(--surface)' }}>
+            {children}
+          </main>
         </div>
       </div>
     </ProtectedRoute>

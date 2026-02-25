@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 
@@ -559,18 +559,23 @@ export default function LendingPage() {
     }
   };
 
-  if (loading) return <div className="p-6">Loading lending records...</div>;
+  if (loading) return (
+    <div style={{ padding: 32, color: 'var(--muted)', fontSize: 13 }}>Loading lending records...</div>
+  );
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-slate-800">Lending management</h1>
-        <div className="flex items-center gap-3">
+    <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 28px' }}>
+      {/* Page Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>Lending Management</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Track and manage all borrowing records</div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <select
             value={timeFilter}
             onChange={(e) => setTimeFilter(e.target.value)}
-            className="px-4 py-2 border rounded bg-slate-600 text-white text-sm"
+            style={{ padding: '5px 10px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}
           >
             <option>Daily</option>
             <option>Weekly</option>
@@ -579,452 +584,236 @@ export default function LendingPage() {
           </select>
           <button
             onClick={() => setIsModalOpen(true)}
-            className="px-4 py-2 bg-slate-600 text-white rounded text-sm"
+            style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}
           >
-            + Add entry
+            + Add Entry
           </button>
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-lg shadow p-5 border">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-sm text-slate-500 mb-1">Total lent products</p>
-              <h2 className="text-3xl font-bold text-slate-800">
-                {totalLent} <span className="text-xl text-slate-600">({totalQuantity})</span>
-              </h2>
-              <p className="text-xs text-green-600 mt-1">↑ 12% from last week</p>
-            </div>
-            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-            </div>
+      {/* Stats Strip */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', border: '1px solid var(--border)', marginBottom: 20, background: '#fff' }}>
+        {[
+          { label: 'Total Lent', value: `${totalLent} (${totalQuantity})` },
+          { label: 'Returned', value: returned },
+          { label: 'Pending', value: pending },
+        ].map((s, i) => (
+          <div key={i} style={{ padding: '14px 18px', borderRight: i < 2 ? '1px solid var(--border)' : 'none' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--fg)', marginTop: 4 }}>{s.value}</div>
           </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-5 border">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-sm text-slate-500 mb-1">Returned</p>
-              <h2 className="text-3xl font-bold text-slate-800">{returned}</h2>
-              <p className="text-xs text-red-600 mt-1">↓ 5% from last week</p>
-            </div>
-            <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-              <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-5 border">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-sm text-slate-500 mb-1">Pending</p>
-              <h2 className="text-3xl font-bold text-slate-800">{pending}</h2>
-              <p className="text-xs text-green-600 mt-1">↑ 3% from last week</p>
-            </div>
-            <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
-              <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-          </div>
-        </div>
+        ))}
       </div>
 
-      {/* Search and Filters */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex-1">
-          <input
-            type="text"
-            placeholder="Search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full px-4 py-2 border rounded text-sm text-slate-900 placeholder:text-slate-500"
-          />
-        </div>
-        <button className="flex items-center gap-2 px-4 py-2 border rounded bg-white text-slate-700 text-sm">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
-          </svg>
-          Sort
-        </button>
-        <button className="flex items-center gap-2 px-4 py-2 border rounded bg-slate-700 text-white text-sm">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-          </svg>
-          Filter
-        </button>
-        <button className="flex items-center gap-2 px-4 py-2 border rounded bg-white text-slate-700 text-sm">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-          </svg>
-        </button>
-        <button className="flex items-center gap-2 px-4 py-2 border rounded bg-white text-slate-700 text-sm">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-          </svg>
-        </button>
+      {/* Search */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search by name, product, department..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{ flex: 1, padding: '6px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: '#fff', outline: 'none' }}
+        />
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead className="bg-slate-700 text-white">
+      <div style={{ background: '#fff', border: '1px solid var(--border)', overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: 'var(--surface)' }}>
+              {['#', 'Borrower Name', 'Type', 'Dept', 'Product', 'Borrowed', 'Returned', 'Damaged', 'Lost', 'Balance', 'Lent Date', 'Due Date', 'Return Date', 'Status', 'Mentor', 'Actions'].map((h) => (
+                <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRecords.length === 0 ? (
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">S.No</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Borrower Name</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Borrower</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Dept</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Product Name</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">No. of Borrowed</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">No. Returned</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">No. Damaged</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">No. Lost</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Balance</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Date of Lending</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Due Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Return Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Mentor</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">Actions</th>
+                <td colSpan={16} style={{ padding: '32px 10px', textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>No lending records found</td>
               </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredRecords.length === 0 ? (
-                <tr>
-                  <td colSpan={16} className="px-4 py-8 text-center text-slate-500">
-                    No lending records found
+            ) : (
+              filteredRecords.map((record, idx) => (
+                <tr key={`${record.id}-${record.product_id ?? 'none'}-${idx}`} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td style={{ padding: '7px 10px', color: 'var(--muted)' }}>{idx + 1}</td>
+                  <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>{record.borrower_name || '—'}</td>
+                  <td style={{ padding: '7px 10px' }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 6px', background: record.borrower_type === 'STUDENT' ? '#dbeafe' : '#ede9fe', color: record.borrower_type === 'STUDENT' ? '#1e40af' : '#6d28d9', letterSpacing: '0.04em' }}>
+                      {record.borrower_type || '—'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '7px 10px', color: 'var(--fg)' }}>{record.department || '—'}</td>
+                  <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>{record.product_name || '—'}</td>
+                  {/* Quantity breakdown */}
+                  {(() => {
+                    const FULLY_RETURNED_STATUSES = ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST'];
+                    const borrowed   = record.original_quantity ?? record.quantity;
+                    const damaged    = record.damaged_quantity ?? 0;
+                    const lost       = record.lost_quantity ?? 0;
+                    const currentQty = record.quantity;
+                    const isFullyReturned = FULLY_RETURNED_STATUSES.includes(record.status);
+                    const retd = isFullyReturned
+                      ? Math.max(0, borrowed - damaged - lost)
+                      : Math.max(0, borrowed - currentQty - damaged - lost);
+                    const balance = isFullyReturned ? 0 : currentQty;
+                    const qCell = (v: number, color: string) => (
+                      <td style={{ padding: '7px 10px', textAlign: 'center', color: v > 0 ? color : 'var(--muted)', fontWeight: v > 0 ? 600 : 400 }}>{v > 0 ? v : '—'}</td>
+                    );
+                    return (
+                      <>
+                        <td style={{ padding: '7px 10px', textAlign: 'center', color: 'var(--fg)' }}>
+                          {editingRow === idx ? (
+                            <input
+                              type="number" min="1"
+                              value={editFormData.quantity || record.quantity}
+                              onChange={(e) => setEditFormData({ ...editFormData, quantity: parseInt(e.target.value) || 1 })}
+                              style={{ width: 52, padding: '2px 6px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)' }}
+                            />
+                          ) : borrowed}
+                        </td>
+                        {qCell(retd, '#16a34a')}
+                        {qCell(damaged, '#dc2626')}
+                        {qCell(lost, '#d97706')}
+                        {qCell(balance, '#92400e')}
+                      </>
+                    );
+                  })()}
+                  <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>{formatDate(record.lending_date)}</td>
+                  <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>
+                    {editingRow === idx ? (
+                      <input
+                        type="date"
+                        value={editFormData.due_date || record.due_date || ''}
+                        onChange={(e) => setEditFormData({ ...editFormData, due_date: e.target.value })}
+                        style={{ padding: '2px 6px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)' }}
+                      />
+                    ) : formatDate(record.due_date)}
+                  </td>
+                  <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>
+                    {record.return_date ? (
+                      <span style={{ color: 'var(--fg)' }}>{formatDate(record.return_date)}</span>
+                    ) : (
+                      <button
+                        onClick={() => { setReturnPickerRowIdx(idx); setReturnPickerDate(new Date().toISOString().split('T')[0]); setReturnPickerQty(record.quantity); }}
+                        title="Set return date"
+                        style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 11, textDecoration: 'underline', padding: 0 }}
+                      >
+                        Set Date
+                      </button>
+                    )}
+                  </td>
+                  <td style={{ padding: '7px 10px' }}>
+                    {(['PENDING', 'PARTIALLY_RETURNED', 'PARTIALLY_DAMAGED', 'PARTIALLY_LOST'].includes(record.status)) ? (
+                      <select
+                        value={record.status}
+                        onChange={(e) => {
+                          if (e.target.value === 'DO_DAMAGED') { setDamagedRowIdx(idx); setDamagedQtyStr('1'); }
+                          else if (e.target.value === 'DO_LOST') { setLostRowIdx(idx); setLostQtyStr('1'); }
+                          else if (e.target.value === 'DO_RETURN') { setReturnPickerRowIdx(idx); setReturnPickerDate(new Date().toISOString().split('T')[0]); setReturnPickerQty(record.quantity); }
+                        }}
+                        style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}
+                      >
+                        <option value={record.status}>
+                          {record.status === 'PENDING' ? 'PENDING'
+                            : record.status === 'PARTIALLY_RETURNED' ? 'PARTIALLY RETURNED'
+                            : record.status === 'PARTIALLY_DAMAGED' ? 'PARTIALLY DAMAGED'
+                            : 'PARTIALLY LOST'}
+                        </option>
+                        <option value="DO_RETURN">Mark as Returned</option>
+                        <option value="DO_DAMAGED">Mark as Damaged</option>
+                        <option value="DO_LOST">Mark as Lost</option>
+                      </select>
+                    ) : (
+                      (() => {
+                        const d = record.damaged_quantity ?? 0;
+                        const l = record.lost_quantity ?? 0;
+                        const orig = (record.original_quantity != null && record.original_quantity > 0) ? record.original_quantity : record.quantity;
+                        const returnedCount = Math.max(0, orig - d - l);
+                        const hasPills = returnedCount > 0 || d > 0 || l > 0;
+                        if (hasPills) {
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                              {returnedCount > 0 && (
+                                <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: '#dcfce7', color: '#166534', whiteSpace: 'nowrap' }}>{returnedCount} Returned</span>
+                              )}
+                              {d > 0 && (
+                                <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: '#fee2e2', color: '#991b1b', whiteSpace: 'nowrap' }}>{d} Damaged</span>
+                              )}
+                              {l > 0 && (
+                                <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: '#fef3c7', color: '#92400e', whiteSpace: 'nowrap' }}>{l} Lost</span>
+                              )}
+                            </div>
+                          );
+                        }
+                        const isConsumable = record.status === 'CONSUMABLE';
+                        return (
+                          <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: isConsumable ? '#ede9fe' : 'var(--surface)', color: isConsumable ? '#6d28d9' : 'var(--muted)' }}>
+                            {record.status || '—'}
+                          </span>
+                        );
+                      })()
+                    )}
+                  </td>
+                  <td style={{ padding: '7px 10px', color: 'var(--fg)' }}>{record.mentor || '—'}</td>
+                  <td style={{ padding: '7px 10px' }}>
+                    {editingRow === idx ? (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={handleSaveEdit} style={{ padding: '3px 10px', fontSize: 11, fontWeight: 600, background: '#16a34a', color: '#fff', border: 'none', cursor: 'pointer' }}>Save</button>
+                        <button onClick={handleCancelEdit} style={{ padding: '3px 10px', fontSize: 11, fontWeight: 600, background: 'var(--surface)', color: 'var(--fg)', border: '1px solid var(--border)', cursor: 'pointer' }}>Cancel</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => handleEdit(record, idx)} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Edit</button>
+                        <button onClick={() => handleDelete(record.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Del</button>
+                      </div>
+                    )}
                   </td>
                 </tr>
-              ) : (
-                filteredRecords.map((record, idx) => (
-                  <tr key={`${record.id}-${record.product_id ?? 'none'}-${idx}`} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-sm text-slate-700">{idx + 1}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{record.borrower_name || "—"}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        record.borrower_type === "STUDENT" 
-                          ? "bg-blue-100 text-blue-800" 
-                          : "bg-purple-100 text-purple-800"
-                      }`}>
-                        {record.borrower_type || "—"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{record.department || "—"}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{record.product_name || "—"}</td>
-                    {/* ── Quantity breakdown columns ── */}
-                    {(() => {
-                      const FULLY_RETURNED_STATUSES = ["RETURNED", "RETURNED_DAMAGED", "RETURNED_LOST"];
-                      const borrowed   = record.original_quantity ?? record.quantity;
-                      const damaged    = record.damaged_quantity ?? 0;
-                      const lost       = record.lost_quantity ?? 0;
-                      const currentQty = record.quantity; // remaining outstanding items
-                      const isFullyReturned = FULLY_RETURNED_STATUSES.includes(record.status);
-                      // For fully-returned rows, derive returned from original minus damaged/lost
-                      // (works regardless of whether DB quantity stores remaining or returned count)
-                      const returned   = isFullyReturned
-                        ? Math.max(0, borrowed - damaged - lost)
-                        : Math.max(0, borrowed - currentQty - damaged - lost);
-                      const balance    = isFullyReturned ? 0 : currentQty;
-                      return (
-                        <>
-                          {/* No. of Borrowed */}
-                          <td className="px-4 py-3 text-sm text-slate-700 text-center">
-                            {editingRow === idx ? (
-                              <input
-                                type="number"
-                                min="1"
-                                value={editFormData.quantity || record.quantity}
-                                onChange={(e) => setEditFormData({ ...editFormData, quantity: parseInt(e.target.value) || 1 })}
-                                className="w-16 px-2 py-1 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
-                              />
-                            ) : borrowed}
-                          </td>
-                          {/* No. Returned */}
-                          <td className="px-4 py-3 text-sm text-center">
-                            <span className={returned > 0 ? "font-semibold text-green-700" : "text-slate-400"}>
-                              {returned > 0 ? returned : "—"}
-                            </span>
-                          </td>
-                          {/* No. Damaged */}
-                          <td className="px-4 py-3 text-sm text-center">
-                            <span className={damaged > 0 ? "font-semibold text-red-600" : "text-slate-400"}>
-                              {damaged > 0 ? damaged : "—"}
-                            </span>
-                          </td>
-                          {/* No. Lost */}
-                          <td className="px-4 py-3 text-sm text-center">
-                            <span className={lost > 0 ? "font-semibold text-orange-600" : "text-slate-400"}>
-                              {lost > 0 ? lost : "—"}
-                            </span>
-                          </td>
-                          {/* Balance */}
-                          <td className="px-4 py-3 text-sm text-center">
-                            <span className={balance > 0 ? "font-semibold text-yellow-700" : "text-slate-400"}>
-                              {balance > 0 ? balance : "—"}
-                            </span>
-                          </td>
-                        </>
-                      );
-                    })()}
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      {formatDate(record.lending_date)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      {editingRow === idx ? (
-                        <input
-                          type="date"
-                          value={editFormData.due_date || record.due_date || ""}
-                          onChange={(e) => setEditFormData({ ...editFormData, due_date: e.target.value })}
-                          className="px-2 py-1 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
-                        />
-                      ) : (
-                        formatDate(record.due_date)
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      {record.return_date ? (
-                        formatDate(record.return_date)
-                      ) : (
-                        <button
-                          onClick={() => {
-                            setReturnPickerRowIdx(idx);
-                            setReturnPickerDate(new Date().toISOString().split("T")[0]);
-                            setReturnPickerQty(record.quantity);
-                          }}
-                          className="flex items-center gap-1 text-blue-600 hover:text-blue-800"
-                          title="Set return date"
-                        >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="h-5 w-5"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                            />
-                          </svg>
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {(["PENDING", "PARTIALLY_RETURNED", "PARTIALLY_DAMAGED", "PARTIALLY_LOST"].includes(record.status)) ? (
-                        <select
-                          value={record.status}
-                          onChange={(e) => {
-                            if (e.target.value === "DO_DAMAGED") {
-                              setDamagedRowIdx(idx);
-                              setDamagedQtyStr("1");
-                            } else if (e.target.value === "DO_LOST") {
-                              setLostRowIdx(idx);
-                              setLostQtyStr("1");
-                            } else if (e.target.value === "DO_RETURN") {
-                              setReturnPickerRowIdx(idx);
-                              setReturnPickerDate(new Date().toISOString().split("T")[0]);
-                              setReturnPickerQty(record.quantity);
-                            }
-                          }}
-                          className={`px-2 py-1 text-xs font-semibold rounded border cursor-pointer focus:outline-none focus:ring-2 ${
-                            record.status === "PARTIALLY_DAMAGED"
-                              ? "border-red-400 bg-red-50 text-red-700 focus:ring-red-400"
-                              : record.status === "PARTIALLY_LOST"
-                              ? "border-orange-400 bg-orange-50 text-orange-700 focus:ring-orange-400"
-                              : record.status === "PARTIALLY_RETURNED"
-                              ? "border-blue-400 bg-blue-50 text-blue-700 focus:ring-blue-400"
-                              : "border-yellow-400 bg-yellow-100 text-yellow-800 focus:ring-yellow-500"
-                          }`}
-                        >
-                          <option value={record.status}>
-                            {record.status === "PENDING"
-                              ? "PENDING"
-                              : record.status === "PARTIALLY_RETURNED"
-                              ? "PARTIALLY RETURNED"
-                              : record.status === "PARTIALLY_DAMAGED"
-                              ? "PARTIALLY DAMAGED"
-                              : "PARTIALLY LOST"}
-                          </option>
-                          <option value="DO_RETURN">Mark as Returned</option>
-                          <option value="DO_DAMAGED">Mark as Damaged</option>
-                          <option value="DO_LOST">Mark as Lost</option>
-                        </select>
-                      ) : (
-                        (() => {
-                          const d = record.damaged_quantity ?? 0;
-                          const l = record.lost_quantity ?? 0;
-                          const orig = (record.original_quantity != null && record.original_quantity > 0)
-                            ? record.original_quantity
-                            : record.quantity;
-                          // Always compute returnedCount from quantities directly —
-                          // this correctly handles DAMAGED / LOST / RETURNED_* statuses
-                          // where some items were returned before the rest were marked damaged/lost.
-                          const returnedCount = Math.max(0, orig - d - l);
-
-                          const hasPills = returnedCount > 0 || d > 0 || l > 0;
-
-                          if (hasPills) {
-                            return (
-                              <div className="flex flex-col gap-1">
-                                {returnedCount > 0 && (
-                                  <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-green-200 text-green-900 whitespace-nowrap">
-                                    {returnedCount} Returned
-                                  </span>
-                                )}
-                                {d > 0 && (
-                                  <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-red-200 text-red-900 whitespace-nowrap">
-                                    {d} Damaged
-                                  </span>
-                                )}
-                                {l > 0 && (
-                                  <span className="inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full bg-[#c4a8a8] text-[#3b1f1f] whitespace-nowrap">
-                                    {l} Lost
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          }
-
-                          // Fallback for CONSUMABLE or any unhandled status
-                          const fallbackColor =
-                            record.status === "CONSUMABLE"
-                              ? "bg-purple-100 text-purple-800"
-                              : "bg-gray-100 text-gray-700";
-                          return (
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full cursor-default ${fallbackColor}`}>
-                              {record.status || "—"}
-                            </span>
-                          );
-                        })()
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{record.mentor || "—"}</td>
-                    <td className="px-4 py-3">
-                      {editingRow === idx ? (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={handleSaveEdit}
-                            className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-                            title="Save"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={handleCancelEdit}
-                            className="px-3 py-1 text-xs bg-gray-400 text-white rounded hover:bg-gray-500"
-                            title="Cancel"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleEdit(record, idx)}
-                            className="p-1 text-blue-600 hover:text-blue-800"
-                            title="Edit"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => handleDelete(record.id)}
-                            className="p-1 text-red-600 hover:text-red-800"
-                            title="Delete"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
 
       {/* Return Date Modal */}
       {returnPickerRowIdx !== null && filteredRecords[returnPickerRowIdx] && (() => {
         const rec = filteredRecords[returnPickerRowIdx];
-        const isPartiallyDamaged = rec.status === "PARTIALLY_DAMAGED";
-        const isPartiallyLost = rec.status === "PARTIALLY_LOST";
+        const isPartiallyDamaged = rec.status === 'PARTIALLY_DAMAGED';
+        const isPartiallyLost = rec.status === 'PARTIALLY_LOST';
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
-              <h2 className="text-lg font-semibold text-slate-800 mb-1">Set Return Date</h2>
-              <p className="text-sm text-slate-500 mb-1">
-                Product: <span className="font-medium text-slate-700">{rec.product_name}</span>
-              </p>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }}>
+            <div style={{ background: '#fff', border: '1px solid var(--border)', padding: 24, width: 360, maxWidth: '90vw' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)', marginBottom: 4 }}>Set Return Date</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>Product: <strong style={{ color: 'var(--fg)' }}>{rec.product_name}</strong></div>
               {isPartiallyDamaged && (
-                <p className="text-xs text-red-600 bg-red-50 rounded px-2 py-1 mb-3">
-                  ⚠ {rec.damaged_quantity ?? 0} item{(rec.damaged_quantity ?? 0) !== 1 ? "s were" : " was"} damaged.
-                  Returning the remaining {rec.quantity} item{rec.quantity !== 1 ? "s" : ""} → status will be <strong>Returned (Damaged)</strong>.
-                </p>
+                <div style={{ fontSize: 11, color: '#991b1b', background: '#fee2e2', padding: '6px 10px', marginBottom: 12 }}>
+                  {rec.damaged_quantity ?? 0} item{(rec.damaged_quantity ?? 0) !== 1 ? 's were' : ' was'} damaged. Returning the remaining {rec.quantity} item{rec.quantity !== 1 ? 's' : ''} → status will be Returned (Damaged).
+                </div>
               )}
               {isPartiallyLost && (
-                <p className="text-xs text-orange-600 bg-orange-50 rounded px-2 py-1 mb-3">
-                  ⚠ {rec.lost_quantity ?? 0} item{(rec.lost_quantity ?? 0) !== 1 ? "s were" : " was"} lost. Returning the remaining {rec.quantity} item{rec.quantity !== 1 ? "s" : ""} → status will be <strong>Returned (Lost)</strong>.
-                </p>
+                <div style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', padding: '6px 10px', marginBottom: 12 }}>
+                  {rec.lost_quantity ?? 0} item{(rec.lost_quantity ?? 0) !== 1 ? 's were' : ' was'} lost. Returning the remaining {rec.quantity} item{rec.quantity !== 1 ? 's' : ''} → status will be Returned (Lost).
+                </div>
               )}
-              <div className="grid grid-cols-2 gap-3 mb-4">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Return date</label>
-                  <input
-                    type="date"
-                    value={returnPickerDate}
-                    max={new Date().toISOString().split("T")[0]}
-                    onChange={(e) => setReturnPickerDate(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-green-400"
-                  />
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Return Date</div>
+                  <input type="date" value={returnPickerDate} max={new Date().toISOString().split('T')[0]} onChange={(e) => setReturnPickerDate(e.target.value)}
+                    style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Qty returned
-                    <span className="text-slate-400 font-normal ml-1">(max {rec.quantity})</span>
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={rec.quantity}
-                    value={returnPickerQty}
-                    onChange={(e) => setReturnPickerQty(Math.min(rec.quantity, Math.max(1, parseInt(e.target.value) || 1)))}
-                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-green-400"
-                  />
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Qty Returned (max {rec.quantity})</div>
+                  <input type="number" min={1} max={rec.quantity} value={returnPickerQty} onChange={(e) => setReturnPickerQty(Math.min(rec.quantity, Math.max(1, parseInt(e.target.value) || 1)))}
+                    style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
                 </div>
               </div>
-              <div className="flex justify-end gap-3">
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button onClick={() => { setReturnPickerRowIdx(null); setReturnPickerDate(''); setReturnPickerQty(1); }} disabled={returnPickerLoading}
+                  style={{ padding: '5px 14px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
                 <button
-                  onClick={() => { setReturnPickerRowIdx(null); setReturnPickerDate(""); setReturnPickerQty(1); }}
-                  disabled={returnPickerLoading}
-                  className="px-4 py-2 border border-slate-300 rounded text-sm text-slate-700 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!returnPickerDate) { alert("Please select a return date."); return; }
-                    setReturnPickerLoading(true);
-                    await handleReturnDateUpdate(rec.id, rec.product_id, returnPickerDate, returnPickerQty);
-                    setReturnPickerLoading(false);
-                  }}
+                  onClick={async () => { if (!returnPickerDate) { alert('Please select a return date.'); return; } setReturnPickerLoading(true); await handleReturnDateUpdate(rec.id, rec.product_id, returnPickerDate, returnPickerQty); setReturnPickerLoading(false); }}
                   disabled={returnPickerLoading || !returnPickerDate}
-                  className="px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700 disabled:opacity-50"
-                >
-                  {returnPickerLoading ? "Saving..." : "Confirm Return"}
+                  style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: '#16a34a', color: '#fff', border: 'none', cursor: 'pointer', opacity: returnPickerLoading || !returnPickerDate ? 0.5 : 1 }}>
+                  {returnPickerLoading ? 'Saving...' : 'Confirm Return'}
                 </button>
               </div>
             </div>
@@ -1032,82 +821,48 @@ export default function LendingPage() {
         );
       })()}
 
-      {/* Damage Confirmation Modal */}
+      {/* Damage Modal */}
       {damagedRowIdx !== null && filteredRecords[damagedRowIdx] && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
-            <h2 className="text-lg font-semibold text-slate-800 mb-1">Mark Items as Damaged</h2>
-            <p className="text-sm text-slate-500 mb-4">
-              Product: <span className="font-medium text-slate-700">{filteredRecords[damagedRowIdx].product_name}</span>
-              <br />
-              Lent quantity: <span className="font-medium text-slate-700">{filteredRecords[damagedRowIdx].quantity}</span>
-            </p>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Number of damaged items
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={filteredRecords[damagedRowIdx].quantity}
-              value={damagedQtyStr}
-              onChange={(e) => setDamagedQtyStr(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-400 mb-4"
-            />
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => { setDamagedRowIdx(null); setDamagedQtyStr("1"); }}
-                disabled={damageLoading}
-                className="px-4 py-2 border border-slate-300 rounded text-sm text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleMarkDamaged(filteredRecords[damagedRowIdx])}
-                disabled={damageLoading}
-                className="px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50"
-              >
-                {damageLoading ? "Saving..." : "Confirm Damaged"}
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }}>
+          <div style={{ background: '#fff', border: '1px solid var(--border)', padding: 24, width: 360, maxWidth: '90vw' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)', marginBottom: 4 }}>Mark Items as Damaged</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 16 }}>
+              Product: <strong style={{ color: 'var(--fg)' }}>{filteredRecords[damagedRowIdx].product_name}</strong><br />
+              Lent qty: <strong style={{ color: 'var(--fg)' }}>{filteredRecords[damagedRowIdx].quantity}</strong>
+            </div>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Number of Damaged Items</div>
+            <input type="number" min={1} max={filteredRecords[damagedRowIdx].quantity} value={damagedQtyStr} onChange={(e) => setDamagedQtyStr(e.target.value)}
+              style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', marginBottom: 16, boxSizing: 'border-box' as const }} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => { setDamagedRowIdx(null); setDamagedQtyStr('1'); }} disabled={damageLoading}
+                style={{ padding: '5px 14px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => handleMarkDamaged(filteredRecords[damagedRowIdx]!)} disabled={damageLoading}
+                style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: '#dc2626', color: '#fff', border: 'none', cursor: 'pointer', opacity: damageLoading ? 0.5 : 1 }}>
+                {damageLoading ? 'Saving...' : 'Confirm Damaged'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Lost Confirmation Modal */}
+      {/* Lost Modal */}
       {lostRowIdx !== null && filteredRecords[lostRowIdx] && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
-            <h2 className="text-lg font-semibold text-slate-800 mb-1">Mark Items as Lost</h2>
-            <p className="text-sm text-slate-500 mb-4">
-              Product: <span className="font-medium text-slate-700">{filteredRecords[lostRowIdx].product_name}</span>
-              <br />
-              Lent quantity: <span className="font-medium text-slate-700">{filteredRecords[lostRowIdx].quantity}</span>
-            </p>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Number of lost items
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={filteredRecords[lostRowIdx].quantity}
-              value={lostQtyStr}
-              onChange={(e) => setLostQtyStr(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-400 mb-4"
-            />
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => { setLostRowIdx(null); setLostQtyStr("1"); }}
-                disabled={lostLoading}
-                className="px-4 py-2 border border-slate-300 rounded text-sm text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleMarkLost(filteredRecords[lostRowIdx])}
-                disabled={lostLoading}
-                className="px-4 py-2 bg-orange-600 text-white rounded text-sm hover:bg-orange-700 disabled:opacity-50"
-              >
-                {lostLoading ? "Saving..." : "Confirm Lost"}
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }}>
+          <div style={{ background: '#fff', border: '1px solid var(--border)', padding: 24, width: 360, maxWidth: '90vw' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)', marginBottom: 4 }}>Mark Items as Lost</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 16 }}>
+              Product: <strong style={{ color: 'var(--fg)' }}>{filteredRecords[lostRowIdx].product_name}</strong><br />
+              Lent qty: <strong style={{ color: 'var(--fg)' }}>{filteredRecords[lostRowIdx].quantity}</strong>
+            </div>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Number of Lost Items</div>
+            <input type="number" min={1} max={filteredRecords[lostRowIdx].quantity} value={lostQtyStr} onChange={(e) => setLostQtyStr(e.target.value)}
+              style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', marginBottom: 16, boxSizing: 'border-box' as const }} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => { setLostRowIdx(null); setLostQtyStr('1'); }} disabled={lostLoading}
+                style={{ padding: '5px 14px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => handleMarkLost(filteredRecords[lostRowIdx]!)} disabled={lostLoading}
+                style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: '#d97706', color: '#fff', border: 'none', cursor: 'pointer', opacity: lostLoading ? 0.5 : 1 }}>
+                {lostLoading ? 'Saving...' : 'Confirm Lost'}
               </button>
             </div>
           </div>
@@ -1116,242 +871,133 @@ export default function LendingPage() {
 
       {/* Add Entry Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 overflow-y-auto">
-          <div className="bg-white rounded-2xl p-6 w-[90%] max-w-3xl my-8">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold text-slate-800">Add new entry</h2>
-              <button onClick={() => { setIsModalOpen(false); resetModal(); }} className="text-slate-500 text-2xl hover:text-slate-700">✕</button>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', overflowY: 'auto', padding: '32px 16px' }}>
+          <div style={{ background: '#fff', border: '1px solid var(--border)', padding: 24, width: '100%', maxWidth: 720 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Add New Entry</div>
+              <button onClick={() => { setIsModalOpen(false); resetModal(); }} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>✕</button>
             </div>
-            
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Student/Staff Toggle & Returnable/Consumable Radio */}
-              <div className="flex items-center justify-between">
-                {/* Student/Staff Toggle */}
-                <div className="inline-flex rounded-lg border border-slate-300 bg-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => setBorrowerType("STUDENT")}
-                    className={`px-6 py-2 text-sm font-medium rounded-l-lg transition-colors ${
-                      borrowerType === "STUDENT"
-                        ? "bg-slate-700 text-white"
-                        : "bg-transparent text-slate-700 hover:bg-slate-200"
-                    }`}
-                  >
-                    Student
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBorrowerType("STAFF")}
-                    className={`px-6 py-2 text-sm font-medium rounded-r-lg transition-colors ${
-                      borrowerType === "STAFF"
-                        ? "bg-slate-700 text-white"
-                        : "bg-transparent text-slate-700 hover:bg-slate-200"
-                    }`}
-                  >
-                    Staff
-                  </button>
-                </div>
 
-                {/* Returnable/Consumable Radio */}
-                <div className="flex items-center gap-6">
-                  <label className="inline-flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="itemType"
-                      checked={itemType === "returnable"}
-                      onChange={() => setItemType("returnable")}
-                      className="w-4 h-4 text-slate-700 border-slate-300 focus:ring-slate-500"
-                    />
-                    <span className="text-sm font-medium text-slate-700">Returnable</span>
-                  </label>
-                  <label className="inline-flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="itemType"
-                      checked={itemType === "consumable"}
-                      onChange={() => setItemType("consumable")}
-                      className="w-4 h-4 text-slate-700 border-slate-300 focus:ring-slate-500"
-                    />
-                    <span className="text-sm font-medium text-slate-700">Consumable</span>
-                  </label>
+            <form onSubmit={handleSubmit}>
+              {/* Borrower Type + Item Type */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                <div style={{ display: 'flex', border: '1px solid var(--border)' }}>
+                  {(['STUDENT', 'STAFF'] as const).map((t) => (
+                    <button key={t} type="button" onClick={() => setBorrowerType(t)}
+                      style={{ padding: '5px 18px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer', background: borrowerType === t ? 'var(--accent)' : '#fff', color: borrowerType === t ? '#fff' : 'var(--fg)' }}>
+                      {t === 'STUDENT' ? 'Student' : 'Staff'}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 20 }}>
+                  {(['returnable', 'consumable'] as const).map((t) => (
+                    <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', color: 'var(--fg)' }}>
+                      <input type="radio" name="itemType" checked={itemType === t} onChange={() => setItemType(t)} />
+                      {t.charAt(0).toUpperCase() + t.slice(1)}
+                    </label>
+                  ))}
                 </div>
               </div>
 
-              {/* Student/Staff Name & Department */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Name & Department */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
                 <div>
-                  <label className="block text-sm font-medium text-slate-900 mb-2">
-                    {borrowerType === "STUDENT" ? "Student name" : "Staff name"}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={borrowerName}
-                    onChange={(e) => setBorrowerName(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
-                    placeholder={`Enter ${borrowerType} name`}
-                  />
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{borrowerType === 'STUDENT' ? 'Student Name' : 'Staff Name'}</div>
+                  <input type="text" required value={borrowerName} onChange={(e) => setBorrowerName(e.target.value)} placeholder={`Enter ${borrowerType === 'STUDENT' ? 'student' : 'staff'} name`}
+                    style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-900 mb-2">Department</label>
-                  <select
-                    required
-                    value={departmentId}
-                    onChange={(e) => setDepartmentId(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
-                  >
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Department</div>
+                  <select required value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}
+                    style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', background: '#fff', boxSizing: 'border-box' as const }}>
                     <option value="">Select department</option>
                     {departments.map((dept) => (
-                      <option key={dept.department_id} value={dept.department_id}>
-                        {dept.department_name}
-                      </option>
+                      <option key={dept.department_id} value={dept.department_id}>{dept.department_name}</option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              {/* Lending Items Section */}
-              <div className="border-t pt-4">
-                <label className="block text-sm font-medium text-slate-900 mb-3">Lending Item</label>
+              {/* Lending Items */}
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, marginBottom: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Lending Items</div>
                 {lendingItems.map((item, index) => (
-                  <div key={index} className="grid grid-cols-12 gap-3 mb-3 items-start">
-                    <div className="col-span-7 relative">
-                      <input
-                        type="text"
-                        placeholder="🔍 Enter item"
-                        value={item.product_name}
+                  <div key={index} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 80px', gap: 8, marginBottom: 8, alignItems: 'start' }}>
+                    <div style={{ position: 'relative' }}>
+                      <input type="text" placeholder="Search item..." value={item.product_name}
                         onChange={(e) => handleProductSearch(index, e.target.value)}
                         onFocus={() => setShowProductDropdown(index)}
-                        className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500 bg-slate-50 placeholder:text-slate-600"
-                      />
+                        style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
                       {showProductDropdown === index && filteredProducts.length > 0 && (
-                        <div className="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                        <div style={{ position: 'absolute', zIndex: 10, width: '100%', background: '#fff', border: '1px solid var(--border)', maxHeight: 180, overflowY: 'auto', top: '100%', left: 0 }}>
                           {filteredProducts.map((product) => (
-                            <button
-                              key={product.product_id}
-                              type="button"
-                              onClick={() => selectProduct(index, product)}
-                              className="w-full px-4 py-2 text-left text-sm text-slate-900 hover:bg-slate-100 focus:bg-slate-100"
-                            >
+                            <button key={product.product_id} type="button" onClick={() => selectProduct(index, product)}
+                              style={{ display: 'block', width: '100%', padding: '6px 10px', textAlign: 'left', fontSize: 12, color: 'var(--fg)', background: 'none', border: 'none', cursor: 'pointer' }}>
                               {product.product_name}
                             </button>
                           ))}
                         </div>
                       )}
                     </div>
-                    <div className="col-span-3">
-                      <input
-                        type="number"
-                        min="1"
-                        placeholder="Quantity"
-                        value={item.quantity}
-                        onChange={(e) => updateLendingItem(index, "quantity", parseInt(e.target.value) || 1)}
-                        className={`w-full px-3 py-2 border rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500 placeholder:text-slate-600 ${
-                          stockErrors[index] ? "border-red-500" : "border-slate-300"
-                        }`}
-                      />
-                      {stockErrors[index] && (
-                        <p className="text-xs text-red-600 mt-1">{stockErrors[index]}</p>
-                      )}
+                    <div>
+                      <input type="number" min="1" placeholder="Qty" value={item.quantity}
+                        onChange={(e) => updateLendingItem(index, 'quantity', parseInt(e.target.value) || 1)}
+                        style={{ width: '100%', padding: '5px 8px', border: stockErrors[index] ? '1px solid #dc2626' : '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
+                      {stockErrors[index] && <div style={{ fontSize: 10, color: '#dc2626', marginTop: 2 }}>{stockErrors[index]}</div>}
                     </div>
-                    <div className="col-span-2">
-                      <button
-                        type="button"
-                        onClick={() => removeLendingItem(index)}
-                        disabled={lendingItems.length === 1}
-                        className={`w-full px-3 py-2 border rounded text-sm font-medium ${
-                          lendingItems.length === 1
-                            ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-                            : "bg-white text-slate-900 border-slate-300 hover:bg-red-50 hover:text-red-600"
-                        }`}
-                      >
-                        Delete
-                      </button>
-                    </div>
+                    <button type="button" onClick={() => removeLendingItem(index)} disabled={lendingItems.length === 1}
+                      style={{ padding: '5px 8px', fontSize: 11, border: '1px solid var(--border)', background: lendingItems.length === 1 ? 'var(--surface)' : '#fff', color: lendingItems.length === 1 ? 'var(--muted)' : '#dc2626', cursor: lendingItems.length === 1 ? 'not-allowed' : 'pointer' }}>
+                      Remove
+                    </button>
                   </div>
                 ))}
-                <button
-                  type="button"
-                  onClick={addLendingItem}
-                  className="text-sm text-slate-900 hover:text-slate-700 font-medium flex items-center gap-1"
-                >
-                  <span className="text-lg">+</span> Add item
+                <button type="button" onClick={addLendingItem}
+                  style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                  + Add item
                 </button>
               </div>
 
               {/* Dates */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
                 <div>
-                  <label className="block text-sm font-medium text-slate-900 mb-2">Lending date</label>
-                  <input
-                    type="date"
-                    required
-                    value={lendingDate}
-                    onChange={(e) => setLendingDate(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500"
-                  />
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Lending Date</div>
+                  <input type="date" required value={lendingDate} onChange={(e) => setLendingDate(e.target.value)}
+                    style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-900 mb-2">Expected date of return</label>
-                  <input
-                    type="date"
-                    required={itemType === "returnable"}
-                    disabled={itemType === "consumable"}
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    className={`w-full px-3 py-2 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-slate-500 ${
-                      itemType === "consumable" ? "bg-slate-100 text-slate-400 cursor-not-allowed" : "text-slate-900"
-                    }`}
-                  />
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Expected Return Date</div>
+                  <input type="date" required={itemType === 'returnable'} disabled={itemType === 'consumable'} value={dueDate} onChange={(e) => setDueDate(e.target.value)}
+                    style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: itemType === 'consumable' ? 'var(--muted)' : 'var(--fg)', background: itemType === 'consumable' ? 'var(--surface)' : '#fff', boxSizing: 'border-box' as const }} />
                 </div>
               </div>
 
               {/* Project & Mentor */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
                 <div>
-                  <label className="block text-sm font-medium text-slate-900 mb-2">Project</label>
-                  <input
-                    type="text"
-                    value={project}
-                    onChange={(e) => setProject(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500 placeholder:text-slate-600"
-                    placeholder="Enter project name"
-                  />
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Project</div>
+                  <input type="text" value={project} onChange={(e) => setProject(e.target.value)} placeholder="Enter project name"
+                    style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
                 </div>
-                {borrowerType === "STUDENT" && (
+                {borrowerType === 'STUDENT' && (
                   <div>
-                    <label className="block text-sm font-medium text-slate-900 mb-2">Mentor</label>
-                    <select
-                      value={mentorStaffId}
-                      onChange={(e) => setMentorStaffId(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
-                    >
+                    <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Mentor</div>
+                    <select value={mentorStaffId} onChange={(e) => setMentorStaffId(e.target.value)}
+                      style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', background: '#fff', boxSizing: 'border-box' as const }}>
                       <option value="">Select mentor</option>
                       {staffList.map((staff) => (
-                        <option key={staff.staff_id} value={staff.staff_id}>
-                          {staff.name}
-                        </option>
-                    ))}
-                  </select>
-                </div>
+                        <option key={staff.staff_id} value={staff.staff_id}>{staff.name}</option>
+                      ))}
+                    </select>
+                  </div>
                 )}
               </div>
 
-              {/* Actions */}
-              <div className="flex justify-end gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => { setIsModalOpen(false); resetModal(); }}
-                  className="px-6 py-2 border border-slate-300 rounded text-slate-900 hover:bg-slate-50 text-sm font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-6 py-2 bg-slate-700 text-white rounded hover:bg-slate-800 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isSubmitting ? "Saving..." : "Save changes"}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+                <button type="button" onClick={() => { setIsModalOpen(false); resetModal(); }}
+                  style={{ padding: '5px 18px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" disabled={isSubmitting}
+                  style={{ padding: '5px 18px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', opacity: isSubmitting ? 0.5 : 1 }}>
+                  {isSubmitting ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </form>
