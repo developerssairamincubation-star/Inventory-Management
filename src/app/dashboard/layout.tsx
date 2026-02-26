@@ -9,11 +9,13 @@ export default function DashboardLayout({
 }) {
   return (
     <ProtectedRoute>
-      <div className="flex h-screen overflow-hidden bg-slate-50">
+      <div className="flex" style={{ height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
         <Sidebar />
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        <div className="flex flex-col min-w-0" style={{ flex: 1, height: '100vh', overflow: 'hidden', borderLeft: '1px solid var(--border)' }}>
           <Navbar />
-          <main className="flex-1 min-h-0 overflow-hidden">{children}</main>
+          <main className="p-5" style={{ flex: 1, overflowY: 'auto', background: 'var(--surface)' }}>
+            {children}
+          </main>
         </div>
       </div>
     </ProtectedRoute>
