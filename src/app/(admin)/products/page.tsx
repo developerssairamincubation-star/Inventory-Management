@@ -152,10 +152,10 @@ export default function ProductsPage() {
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); handleNavigate(); }}
-            style={{ width: 40, padding: '7px 0', fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer' }}
+            style={{ width: 40, padding: '7px 0', fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             title="View Details"
           >
-            â†’
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
         </div>
       </div>
@@ -271,13 +271,14 @@ export default function ProductsPage() {
                 };
                 try {
                   const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-                  if (!res.ok) { console.error('Failed to create product', await res.text()); setSaving(false); return; }
+                  if (!res.ok) { setSaving(false); return; }
                   const created = await res.json();
                   const newProduct = created.product || created;
-                  setProducts((p) => [newProduct, ...p]);
+                  const newStock = created.stock;
+                  setProducts((p) => [{ ...newProduct, stocks: { quantity: newStock?.quantity ?? (quantity === '' ? 0 : Number(quantity)) } }, ...p]);
                   setProductName(''); setSku(''); setQuantity(''); setCost(''); setLowStockThreshold(''); setReturnable(null); setImageFile(null); setImagePreview(null);
                   setIsModalOpen(false);
-                } catch (err) { console.error('Error creating product', err); }
+                } catch (_err) { /* silently ignore */ }
                 finally { setSaving(false); }
               }}
             >

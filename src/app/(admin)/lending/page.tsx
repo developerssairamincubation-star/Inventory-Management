@@ -724,6 +724,14 @@ export default function LendingPage() {
                       </select>
                     ) : (
                       (() => {
+                        const isConsumable = record.status === 'CONSUMABLE';
+                        if (isConsumable) {
+                          return (
+                            <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: '#ede9fe', color: '#6d28d9' }}>
+                              CONSUMABLE
+                            </span>
+                          );
+                        }
                         const d = record.damaged_quantity ?? 0;
                         const l = record.lost_quantity ?? 0;
                         const orig = (record.original_quantity != null && record.original_quantity > 0) ? record.original_quantity : record.quantity;
@@ -744,9 +752,8 @@ export default function LendingPage() {
                             </div>
                           );
                         }
-                        const isConsumable = record.status === 'CONSUMABLE';
                         return (
-                          <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: isConsumable ? '#ede9fe' : 'var(--surface)', color: isConsumable ? '#6d28d9' : 'var(--muted)' }}>
+                          <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: 'var(--surface)', color: 'var(--muted)' }}>
                             {record.status || '—'}
                           </span>
                         );

@@ -25,7 +25,6 @@ export default function Navbar() {
           textTransform: 'uppercase',
         }}
       >
-        Lab Inventory System
       </span>
 
       <span style={{ fontSize: 11, color: 'var(--muted)' }}>

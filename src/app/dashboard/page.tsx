@@ -165,10 +165,10 @@ export default function Dashboard() {
   ].filter(d => d.value > 0)
 
   const COLORS: Record<string, string> = {
-    Available: '#1a56db',
-    Lent:      '#6b7280',
+    Available: '#1D546D',
+    Lent:      '#7AAACE',
     Damaged:   '#dc2626',
-    Lost:      '#d97706',
+    Lost:      '#db8c31',
   }
 
   const visibleOverdue = overdueAlerts.filter(a => !dismissedOverdue.has(a.lending_order_id))

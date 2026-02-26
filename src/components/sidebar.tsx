@@ -1,6 +1,8 @@
 ﻿"use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
@@ -10,79 +12,159 @@ import {
   UserPen,
   ReceiptIndianRupee,
   User,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react";
-import { LucideIcon } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 type NavItem = { label: string; href: string; icon: LucideIcon };
 
 const nav: NavItem[] = [
-  { label: "Dashboard",          href: "/dashboard", icon: LayoutDashboard      },
-  { label: "Product Management", href: "/products",  icon: Box                  },
-  { label: "Lending Management", href: "/lending",   icon: NotepadText          },
-  { label: "Student Management", href: "/students",  icon: Users                },
-  { label: "Staff Management",   href: "/staffs",    icon: UserPen              },
-  { label: "Invoice Details",    href: "/billing",   icon: ReceiptIndianRupee   },
-  { label: "User Management",    href: "/users",     icon: User                 },
+  { label: "Dashboard",          href: "/dashboard", icon: LayoutDashboard    },
+  { label: "Product Management", href: "/products",  icon: Box                },
+  { label: "Lending Management", href: "/lending",   icon: NotepadText        },
+  { label: "Student Management", href: "/students",  icon: Users              },
+  { label: "Staff Management",   href: "/staffs",    icon: UserPen            },
+  { label: "Invoice Details",    href: "/billing",   icon: ReceiptIndianRupee },
+  { label: "User Management",    href: "/users",     icon: User               },
 ];
 
+const SIDEBAR_BG = '#1E2938';
+const HOVER_BG   = '#4A5365';
+
 export default function Sidebar() {
-  const pathname = usePathname();
+  const pathname  = usePathname();
+  const [collapsed, setCollapsed] = useState(false);
+  const [hovered,   setHovered]   = useState<string | null>(null);
+
+  const w = collapsed ? 60 : 210;
 
   return (
-    <aside
+    /* Wrapper — flex child that owns the width; overflow visible so button can protrude */
+    <div
       style={{
-        width: 196,
-        minWidth: 196,
-        height: '100vh',
-        overflowY: 'auto',
-        background: 'var(--bg)',
-        borderRight: '1px solid var(--border)',
-        display: 'flex',
-        flexDirection: 'column',
-        padding: '24px 0 16px',
+        position: 'relative',
+        width: w,
+        minWidth: w,
+        maxWidth: w,
+        flexShrink: 0,
+        transition: 'width 0.2s ease, min-width 0.2s ease, max-width 0.2s ease',
+        zIndex: 20,
       }}
     >
-      {/* Logo */}
-      <div style={{ padding: '0 20px 20px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--fg)', letterSpacing: '-0.01em', lineHeight: 1.2 }}>
-          Lab Inventory
+      <aside
+        style={{
+          width: '100%',
+          height: '100vh',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          background: SIDEBAR_BG,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            padding: collapsed ? '16px 0' : '16px 18px',
+            justifyContent: collapsed ? 'center' : 'flex-start',
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            minHeight: 58,
+            flexShrink: 0,
+          }}
+        >
+          <Image
+            src="/Logo.svg"
+            alt="Logo"
+            width={42}
+            height={42}
+            style={{ flexShrink: 0 }}
+          />
+          {!collapsed && (
+            <div style={{ overflow: 'hidden', marginLeft: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#fff', letterSpacing: '-0.01em', lineHeight: 1.2, whiteSpace: 'nowrap' }}>
+                Lab Inventory
+              </div>
+              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', marginTop: 3, letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                Management System
+              </div>
+            </div>
+          )}
         </div>
-        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3, letterSpacing: '0.03em', textTransform: 'uppercase' }}>
-          Management System
-        </div>
-      </div>
 
-      {/* Nav */}
-      <nav style={{ flex: 1, padding: '8px 0', marginTop: 4 }}>
-        {nav.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + '/');
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 9,
-                padding: '7px 20px',
-                fontSize: 12,
-                fontWeight: active ? 600 : 400,
-                color: active ? 'var(--accent)' : 'var(--fg)',
-                background: active ? '#eff6ff' : 'transparent',
-                borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent',
-                textDecoration: 'none',
-                whiteSpace: 'nowrap',
-                letterSpacing: '0.01em',
-                transition: 'background 0.1s, color 0.1s',
-              }}
-            >
-              <Icon size={14} strokeWidth={active ? 2.5 : 1.75} />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-    </aside>
+        {/* Nav items */}
+        <nav style={{ flex: 1, paddingTop: 8 }}>
+          {nav.map((item) => {
+            const active  = pathname === item.href || pathname.startsWith(item.href + '/');
+            const isHover = hovered === item.href;
+            const Icon    = item.icon;
+
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={collapsed ? item.label : undefined}
+                onMouseEnter={() => setHovered(item.href)}
+                onMouseLeave={() => setHovered(null)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: collapsed ? 'center' : 'flex-start',
+                  gap: 11,
+                  padding: collapsed ? '11px 0' : '10px 20px',
+                  fontSize: 13,
+                  fontWeight: active ? 600 : 400,
+                  color: '#fff',
+                  background: active || isHover ? HOVER_BG : 'transparent',
+                  borderLeft: active ? '3px solid rgba(255,255,255,0.85)' : '3px solid transparent',
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  transition: 'background 0.12s',
+                }}
+              >
+                <Icon size={18} strokeWidth={active ? 2.5 : 1.8} style={{ flexShrink: 0 }} />
+                {!collapsed && (
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {item.label}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </nav>
+      </aside>
+
+      {/* Toggle button — protrudes outside the right edge */}
+      <button
+        onClick={() => setCollapsed(prev => !prev)}
+        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        style={{
+          position: 'absolute',
+          top: 22,
+          right: -12,
+          width: 24,
+          height: 24,
+          borderRadius: '50%',
+          background: '#334155',
+          border: '1.5px solid rgba(255,255,255,0.18)',
+          cursor: 'pointer',
+          color: 'rgba(255,255,255,0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.35)',
+          zIndex: 30,
+          padding: 0,
+        }}
+      >
+        {collapsed
+          ? <ChevronsRight size={13} strokeWidth={2.5} />
+          : <ChevronsLeft  size={13} strokeWidth={2.5} />
+        }
+      </button>
+    </div>
   );
 }

@@ -96,10 +96,8 @@ export async function POST(req: Request) {
 
     // Get the product_id from the inserted product
     const product_id = (product as any).product_id ?? (product as any).id
-    console.log('Created product with ID:', product_id, 'Full product:', product)
 
     if (!product_id) {
-      console.error('No product_id found in created product:', product)
       return NextResponse.json({ error: 'Failed to retrieve product ID after creation' }, { status: 500 })
     }
 
