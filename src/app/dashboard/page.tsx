@@ -175,7 +175,7 @@ export default function Dashboard() {
 
   const statItems = [
     { label: 'Total Products',    value: stats.totalProducts },
-    { label: 'Total Stock',       value: stats.totalStockQuantity },
+    { label: 'Total Stock',       value: stats.stockDistribution.total },
     { label: 'Low Stock',         value: stats.lowStockCount,           color: stats.lowStockCount > 0 ? 'var(--danger)' : undefined },
     { label: 'Available',         value: stats.stockDistribution.available },
     { label: 'Currently Lent',    value: stats.stockDistribution.lent },

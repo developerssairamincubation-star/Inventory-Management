@@ -183,6 +183,9 @@ export default function StudentsPage() {
                 const orig = record.original_quantity ?? record.quantity;
 
                 const statusCell = (() => {
+                  if (record.status === 'CONSUMABLE') {
+                    return <span style={{ background: '#ede9fe', color: '#6d28d9', padding: '2px 7px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>CONSUMABLE</span>;
+                  }
                   if (PENDING_STATUSES.includes(record.status)) {
                     const color =
                       record.status === "PARTIALLY_DAMAGED" ? { background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5' }

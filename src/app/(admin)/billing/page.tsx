@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 // Utility function to format date as DD/MM/YYYY
 const formatDate = (dateString: string | null): string => {
-  if (!dateString) return "â€”";
+  if (!dateString) return "—";
   const date = new Date(dateString);
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -290,7 +290,7 @@ export default function BillingPage() {
   };
   const td: React.CSSProperties = { padding: '7px 10px', fontSize: 12, color: 'var(--fg)', borderBottom: '1px solid var(--border)' };
 
-  if (loading) return <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>Loading invoicesâ€¦</div>;
+  if (loading) return <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>Loading invoices…</div>;
 
 
   return (
@@ -313,7 +313,7 @@ export default function BillingPage() {
       {/* Search */}
       <input
         type="text"
-        placeholder="Search by invoice number or supplierâ€¦"
+        placeholder="Search by invoice number or supplier…"
         value={searchQuery}
         onChange={(e) => setSearchQuery(e.target.value)}
         style={{ padding: '6px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: 'var(--bg)', outline: 'none', width: '100%', boxSizing: 'border-box' }}
@@ -344,7 +344,7 @@ export default function BillingPage() {
                   <td style={td}>{invoice.supplier_name}</td>
                   <td style={td}>{formatDate(invoice.received_date)}</td>
                   <td style={td}>{invoice.items_count || 0}</td>
-                  <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>â‚¹{invoice.total_amount?.toFixed(2) || '0.00'}</td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>₹{invoice.total_amount?.toFixed(2) || '0.00'}</td>
                   <td style={td}>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button
@@ -374,7 +374,7 @@ export default function BillingPage() {
           <div style={{ background: '#fff', width: '100%', maxWidth: 760, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Create New Invoice</div>
-              <button onClick={() => { setIsModalOpen(false); resetModal(); }} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>Ã—</button>
+              <button onClick={() => { setIsModalOpen(false); resetModal(); }} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>×</button>
             </div>
             <div style={{ overflowY: 'auto', flex: 1 }}>
               <form onSubmit={handleSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -408,7 +408,7 @@ export default function BillingPage() {
                         <div style={{ position: 'relative' }}>
                           <input
                             type="text"
-                            placeholder="Search productâ€¦"
+                            placeholder="Search product…"
                             value={item.product_name}
                             onChange={(e) => handleProductSearch(index, e.target.value)}
                             onFocus={() => { if (item.product_name) handleProductSearch(index, item.product_name); }}
@@ -420,7 +420,7 @@ export default function BillingPage() {
                                 <button key={p.product_id} type="button" onClick={() => selectProduct(index, p)}
                                   style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', fontSize: 12, color: 'var(--fg)', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}>
                                   <div style={{ fontWeight: 500 }}>{p.product_name}</div>
-                                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>â‚¹{p.unit_cost}</div>
+                                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>₹{p.unit_cost}</div>
                                 </button>
                               ))}
                             </div>
@@ -438,7 +438,7 @@ export default function BillingPage() {
                         <input type="number" step="0.01" value={item.total_cost.toFixed(2)} readOnly style={{ ...inputStyle, background: 'var(--surface)', color: 'var(--muted)' }} />
                         <button type="button" onClick={() => removeInvoiceItem(index)} disabled={invoiceItems.length === 1}
                           style={{ padding: '5px 8px', fontSize: 11, border: '1px solid var(--border)', background: 'none', color: invoiceItems.length === 1 ? 'var(--muted)' : '#b91c1c', cursor: invoiceItems.length === 1 ? 'not-allowed' : 'pointer' }}>
-                          Ã—
+                          ×
                         </button>
                       </div>
                     ))}
@@ -452,7 +452,7 @@ export default function BillingPage() {
                 {/* Grand total */}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
                   <span style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Grand Total</span>
-                  <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--fg)' }}>â‚¹{calculateGrandTotal().toFixed(2)}</span>
+                  <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--fg)' }}>₹{calculateGrandTotal().toFixed(2)}</span>
                 </div>
 
                 {/* Actions */}
@@ -463,7 +463,7 @@ export default function BillingPage() {
                   </button>
                   <button type="submit" disabled={isSubmitting}
                     style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}>
-                    {isSubmitting ? 'Creatingâ€¦' : 'Create Invoice'}
+                    {isSubmitting ? 'Creating…' : 'Create Invoice'}
                   </button>
                 </div>
               </form>
@@ -477,8 +477,8 @@ export default function BillingPage() {
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', padding: 16 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: 680, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Invoice â€” {selectedInvoice.invoice_number}</div>
-              <button onClick={() => { setIsPreviewOpen(false); setSelectedInvoice(null); }} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>Ã—</button>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Invoice — {selectedInvoice.invoice_number}</div>
+              <button onClick={() => { setIsPreviewOpen(false); setSelectedInvoice(null); }} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>×</button>
             </div>
             <div style={{ overflowY: 'auto', flex: 1, padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
               {/* Meta */}
@@ -513,8 +513,8 @@ export default function BillingPage() {
                         <td style={td}>{idx + 1}</td>
                         <td style={{ ...td, fontWeight: 500 }}>{item.product_name}</td>
                         <td style={{ ...td, textAlign: 'right' }}>{item.quantity}</td>
-                        <td style={{ ...td, textAlign: 'right' }}>â‚¹{item.unit_cost.toFixed(2)}</td>
-                        <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>â‚¹{item.total_cost.toFixed(2)}</td>
+                        <td style={{ ...td, textAlign: 'right' }}>₹{item.unit_cost.toFixed(2)}</td>
+                        <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>₹{item.total_cost.toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -523,7 +523,7 @@ export default function BillingPage() {
               {/* Total */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
                 <span style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Amount</span>
-                <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--fg)' }}>â‚¹{selectedInvoice.total_amount.toFixed(2)}</span>
+                <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--fg)' }}>₹{selectedInvoice.total_amount.toFixed(2)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <button onClick={() => { setIsPreviewOpen(false); setSelectedInvoice(null); }}

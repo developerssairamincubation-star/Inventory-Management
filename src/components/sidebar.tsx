@@ -3,7 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { signOut } from "firebase/auth";
+import { auth } from "@/lib/firebase";
 import {
   LayoutDashboard,
   Box,
@@ -11,7 +13,7 @@ import {
   Users,
   UserPen,
   ReceiptIndianRupee,
-  User,
+  LogOut,
   ChevronsLeft,
   ChevronsRight,
 } from "lucide-react";
@@ -26,7 +28,6 @@ const nav: NavItem[] = [
   { label: "Student Management", href: "/students",  icon: Users              },
   { label: "Staff Management",   href: "/staffs",    icon: UserPen            },
   { label: "Invoice Details",    href: "/billing",   icon: ReceiptIndianRupee },
-  { label: "User Management",    href: "/users",     icon: User               },
 ];
 
 const SIDEBAR_BG = '#1E2938';
@@ -34,8 +35,14 @@ const HOVER_BG   = '#4A5365';
 
 export default function Sidebar() {
   const pathname  = usePathname();
+  const router    = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [hovered,   setHovered]   = useState<string | null>(null);
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    router.push("/login");
+  };
 
   const w = collapsed ? 60 : 210;
 
@@ -85,7 +92,7 @@ export default function Sidebar() {
           {!collapsed && (
             <div style={{ overflow: 'hidden', marginLeft: 10 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: '#fff', letterSpacing: '-0.01em', lineHeight: 1.2, whiteSpace: 'nowrap' }}>
-                Lab Inventory
+                Inventory
               </div>
               <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', marginTop: 3, letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                 Management System
@@ -135,6 +142,37 @@ export default function Sidebar() {
             );
           })}
         </nav>
+
+        {/* Logout button */}
+        <div style={{ paddingBottom: 16, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 8 }}>
+          <button
+            onClick={handleLogout}
+            title={collapsed ? 'Logout' : undefined}
+            onMouseEnter={() => setHovered('__logout__')}
+            onMouseLeave={() => setHovered(null)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: collapsed ? 'center' : 'flex-start',
+              gap: 11,
+              padding: collapsed ? '11px 0' : '10px 20px',
+              width: '100%',
+              fontSize: 13,
+              fontWeight: 400,
+              color: '#fff',
+              background: hovered === '__logout__' ? HOVER_BG : 'transparent',
+              border: 'none',
+              borderLeft: '3px solid transparent',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              transition: 'background 0.12s',
+            }}
+          >
+            <LogOut size={18} strokeWidth={1.8} style={{ flexShrink: 0 }} />
+            {!collapsed && <span>Logout</span>}
+          </button>
+        </div>
       </aside>
 
       {/* Toggle button — protrudes outside the right edge */}

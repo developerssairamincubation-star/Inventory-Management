@@ -9,6 +9,17 @@ export async function DELETE(
     const supabase = getSupabaseAdmin();
     const { id } = await params;
 
+    // Fetch lending items BEFORE deleting so we can restore stock
+    const { data: lendingItems, error: fetchError } = await supabase
+      .from("lending_item")
+      .select("product_id, quantity")
+      .eq("lend_order_id", id);
+
+    if (fetchError) {
+      console.error("Error fetching lending items for stock restore:", fetchError);
+      return NextResponse.json({ error: fetchError.message }, { status: 500 });
+    }
+
     // Delete lending items first (foreign key constraint)
     const { error: itemError } = await supabase
       .from("lending_item")
@@ -29,6 +40,32 @@ export async function DELETE(
     if (orderError) {
       console.error("Error deleting lending order:", orderError);
       return NextResponse.json({ error: orderError.message }, { status: 500 });
+    }
+
+    // Restore stock for each item that still had outstanding quantity
+    // (quantity = 0 means it was already returned/resolved, so no stock change needed)
+    const itemsToRestore = (lendingItems || []).filter(
+      (item: any) => item.product_id && (item.quantity || 0) > 0
+    );
+
+    for (const item of itemsToRestore) {
+      const { data: currentStock, error: stockFetchError } = await supabase
+        .from("stocks")
+        .select("quantity")
+        .eq("product_id", item.product_id)
+        .single();
+
+      if (stockFetchError) {
+        console.error(`Error fetching stock for product ${item.product_id}:`, stockFetchError);
+        continue; // Don't fail the whole delete — record is already gone
+      }
+
+      const restoredQuantity = (currentStock?.quantity || 0) + (item.quantity || 0);
+
+      await supabase
+        .from("stocks")
+        .update({ quantity: restoredQuantity })
+        .eq("product_id", item.product_id);
     }
 
     return NextResponse.json({ success: true });
@@ -56,12 +93,30 @@ export async function PUT(
       status,
       mentor,
       quantity,
+      original_quantity,
       product_id,
     } = body;
 
     // Per-item return: product_id present → update only that item's quantity,
     // then recompute the correct order-level status from all items.
     if (product_id !== undefined && quantity !== undefined) {
+      // Fetch the current outstanding quantity for this item BEFORE updating,
+      // so we know how many are being returned and can restore that to stocks.
+      const { data: currentItem, error: currentItemError } = await supabase
+        .from("lending_item")
+        .select("quantity")
+        .eq("lend_order_id", id)
+        .eq("product_id", product_id)
+        .single();
+
+      if (currentItemError) {
+        console.error("Error fetching current lending item:", currentItemError);
+        return NextResponse.json({ error: currentItemError.message }, { status: 500 });
+      }
+
+      const previousOutstanding = currentItem?.quantity ?? 0;
+      const nowReturning = previousOutstanding - quantity; // quantity = new remaining balance
+
       const { error: itemError } = await supabase
         .from("lending_item")
         .update({ quantity })
@@ -71,6 +126,22 @@ export async function PUT(
       if (itemError) {
         console.error("Error updating lending item:", itemError);
         return NextResponse.json({ error: itemError.message }, { status: 500 });
+      }
+
+      // Restore stock for returned items
+      if (nowReturning > 0) {
+        const { data: currentStock, error: stockFetchError } = await supabase
+          .from("stocks")
+          .select("quantity")
+          .eq("product_id", product_id)
+          .single();
+
+        if (!stockFetchError && currentStock) {
+          await supabase
+            .from("stocks")
+            .update({ quantity: (currentStock.quantity || 0) + nowReturning })
+            .eq("product_id", product_id);
+        }
       }
 
       // Re-fetch all items for this order to compute correct order-level status
@@ -155,9 +226,12 @@ export async function PUT(
 
     // Legacy: update all items' quantity when no product_id is given
     if (quantity !== undefined) {
+      const itemUpdate: any = { quantity };
+      // Also update original_quantity when explicitly editing the borrowed count
+      if (original_quantity !== undefined) itemUpdate.original_quantity = original_quantity;
       const { error: itemError } = await supabase
         .from("lending_item")
-        .update({ quantity })
+        .update(itemUpdate)
         .eq("lend_order_id", id);
 
       if (itemError) {

@@ -33,7 +33,7 @@ type LendingRecord = {
 type LendingItem = {
   product_id: string;
   product_name: string;
-  quantity: number;
+  quantity: number | string;
 };
 
 type Department = {
@@ -76,6 +76,7 @@ export default function LendingPage() {
   const [showProductDropdown, setShowProductDropdown] = useState<number | null>(null);
   const [editingReturnDate, setEditingReturnDate] = useState<number | null>(null);
   const [stockErrors, setStockErrors] = useState<{ [key: number]: string }>({});
+  const [editQtyStr, setEditQtyStr] = useState<string>('');
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editFormData, setEditFormData] = useState<Partial<LendingRecord>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -165,7 +166,7 @@ export default function LendingPage() {
   }
 
   // Recalculate header stats from a records array without a full fetch
-  const FINAL_STATUSES = ["RETURNED", "RETURNED_DAMAGED", "RETURNED_LOST", "DAMAGED", "LOST", "CONSUMABLE"];
+  const FINAL_STATUSES = ["RETURNED", "RETURNED_DAMAGED", "RETURNED_LOST", "DAMAGED", "LOST"];
 
   const applyStats = (recs: LendingRecord[]) => {
     const active = recs.filter(r => !FINAL_STATUSES.includes(r.status));
@@ -176,7 +177,8 @@ export default function LendingPage() {
       r.status === "PENDING" ||
       r.status === "PARTIALLY_RETURNED" ||
       r.status === "PARTIALLY_DAMAGED" ||
-      r.status === "PARTIALLY_LOST"
+      r.status === "PARTIALLY_LOST" ||
+      r.status === "CONSUMABLE"
     ).length);
   };
 
@@ -215,6 +217,7 @@ export default function LendingPage() {
 
   const handleEdit = (record: LendingRecord, index: number) => {
     setEditingRow(index);
+    setEditQtyStr(String(record.quantity ?? ''));
     setEditFormData({
       id: record.id,
       quantity: record.quantity,
@@ -225,6 +228,7 @@ export default function LendingPage() {
 
   const handleCancelEdit = () => {
     setEditingRow(null);
+    setEditQtyStr('');
     setEditFormData({});
   };
 
@@ -325,22 +329,25 @@ export default function LendingPage() {
 
   const handleSaveEdit = async () => {
     if (editingRow === null || !editFormData.id) return;
+    const parsedQty = parseInt(editQtyStr) || (editFormData.quantity as number) || 1;
     const prevRecords = records;
     const updated = records.map(r =>
       r.id === editFormData.id
-        ? { ...r, quantity: editFormData.quantity ?? r.quantity, due_date: editFormData.due_date ?? r.due_date }
+        ? { ...r, quantity: parsedQty, original_quantity: parsedQty, due_date: editFormData.due_date ?? r.due_date }
         : r
     );
     setRecords(updated);
     applyStats(updated);
     setEditingRow(null);
+    setEditQtyStr('');
     setEditFormData({});
     try {
       const res = await fetch(`/api/lending/${editFormData.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          quantity: editFormData.quantity,
+          quantity: parsedQty,
+          original_quantity: parsedQty,
           due_date: editFormData.due_date,
         }),
       });
@@ -372,7 +379,7 @@ export default function LendingPage() {
     
     // Check stock when quantity changes
     if (field === "quantity" && updated[index].product_id) {
-      checkStock(index, updated[index].product_id, value);
+      checkStock(index, updated[index].product_id, parseInt(String(value)) || 0);
     }
   };
 
@@ -418,7 +425,7 @@ export default function LendingPage() {
     setLendingItems(updated);
     
     // Check stock availability for current quantity
-    checkStock(index, product.product_id, updated[index].quantity);
+    checkStock(index, product.product_id, parseInt(String(updated[index].quantity)) || 1);
     
     setShowProductDropdown(null);
     setProductSearchQuery("");
@@ -462,7 +469,9 @@ export default function LendingPage() {
           borrower_type: borrowerType,
           borrower_name: borrowerName,
           department_id: departmentId,
-          lending_items: lendingItems.filter(item => item.product_id && item.quantity > 0),
+          lending_items: lendingItems
+            .filter(item => item.product_id && parseInt(String(item.quantity)) > 0)
+            .map(item => ({ ...item, quantity: parseInt(String(item.quantity)) || 1 })),
           lending_date: lendingDate,
           due_date: itemType === "returnable" ? dueDate : null,
           project_name: project,
@@ -664,8 +673,8 @@ export default function LendingPage() {
                           {editingRow === idx ? (
                             <input
                               type="number" min="1"
-                              value={editFormData.quantity || record.quantity}
-                              onChange={(e) => setEditFormData({ ...editFormData, quantity: parseInt(e.target.value) || 1 })}
+                              value={editQtyStr}
+                              onChange={(e) => setEditQtyStr(e.target.value)}
                               style={{ width: 52, padding: '2px 6px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)' }}
                             />
                           ) : borrowed}
@@ -691,6 +700,8 @@ export default function LendingPage() {
                   <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>
                     {record.return_date ? (
                       <span style={{ color: 'var(--fg)' }}>{formatDate(record.return_date)}</span>
+                    ) : record.status === 'CONSUMABLE' ? (
+                      <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>
                     ) : (
                       <button
                         onClick={() => { setReturnPickerRowIdx(idx); setReturnPickerDate(new Date().toISOString().split('T')[0]); setReturnPickerQty(record.quantity); }}
@@ -948,7 +959,7 @@ export default function LendingPage() {
                     </div>
                     <div>
                       <input type="number" min="1" placeholder="Qty" value={item.quantity}
-                        onChange={(e) => updateLendingItem(index, 'quantity', parseInt(e.target.value) || 1)}
+                        onChange={(e) => updateLendingItem(index, 'quantity', e.target.value)}
                         style={{ width: '100%', padding: '5px 8px', border: stockErrors[index] ? '1px solid #dc2626' : '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
                       {stockErrors[index] && <div style={{ fontSize: 10, color: '#dc2626', marginTop: 2 }}>{stockErrors[index]}</div>}
                     </div>

@@ -51,7 +51,7 @@ export default function ProductsPage() {
     };
   }, []);
 
-  if (loading) return <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>Loading productsâ€¦</div>;
+  if (loading) return <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>Loading products…</div>;
 
   // Filter products based on search query
   const filteredProducts = products.filter((product) => {
@@ -140,7 +140,7 @@ export default function ProductsPage() {
         </div>
         <div style={{ padding: '10px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name ?? 'Unnamed'}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{code ?? 'â€”'}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{code ?? '—'}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Stock: <span style={{ color: currentStock <= 0 ? 'var(--danger)' : 'var(--fg)', fontWeight: 600 }}>{currentStock}</span></div>
         </div>
         <div style={{ display: 'flex', borderTop: '1px solid var(--border)' }}>
@@ -210,7 +210,7 @@ export default function ProductsPage() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
-            placeholder="Search productsâ€¦"
+            placeholder="Search products…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{ padding: '5px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: 'var(--bg)', outline: 'none', width: 220 }}
@@ -244,7 +244,7 @@ export default function ProductsPage() {
           <div style={{ background: '#fff', width: '90%', maxWidth: 640, padding: 24, position: 'relative' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Add New Product</div>
-              <button onClick={() => setIsModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1 }}>Ã—</button>
+              <button onClick={() => setIsModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1 }}>×</button>
             </div>
             <form
               onSubmit={async (e) => {
@@ -330,7 +330,7 @@ export default function ProductsPage() {
               </div>
               <div style={{ marginTop: 18, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                 <button type="button" onClick={() => setIsModalOpen(false)} style={{ padding: '5px 14px', fontSize: 12, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
-                <button type="submit" disabled={saving} style={{ padding: '5px 14px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>{saving ? 'Savingâ€¦' : 'Save'}</button>
+                <button type="submit" disabled={saving} style={{ padding: '5px 14px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>{saving ? 'Saving…' : 'Save'}</button>
               </div>
             </form>
           </div>
@@ -343,7 +343,7 @@ export default function ProductsPage() {
           <div style={{ background: '#fff', width: '90%', maxWidth: 400, padding: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Update Stock</div>
-              <button onClick={() => setIsUpdateStockModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>Ã—</button>
+              <button onClick={() => setIsUpdateStockModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>×</button>
             </div>
             <form onSubmit={handleUpdateStock} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
@@ -369,7 +369,7 @@ export default function ProductsPage() {
               )}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
                 <button type="button" onClick={() => setIsUpdateStockModalOpen(false)} style={{ padding: '5px 14px', fontSize: 12, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
-                <button type="submit" disabled={saving} style={{ padding: '5px 14px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>{saving ? 'Updatingâ€¦' : 'Update'}</button>
+                <button type="submit" disabled={saving} style={{ padding: '5px 14px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>{saving ? 'Updating…' : 'Update'}</button>
               </div>
             </form>
           </div>
@@ -404,9 +404,9 @@ export default function ProductsPage() {
                   return product;
                 })();
                 const name = normalized.name || normalized.title || normalized.product_name || normalized.productName || normalized.label || 'Unnamed';
-                const code = normalized.product_code ?? normalized.productCode ?? 'â€”';
+                const code = normalized.product_code ?? normalized.productCode ?? '—';
                 const id = normalized.id ?? normalized.product_id ?? idx;
-                const cost = normalized.cost ?? normalized.price ?? normalized.unit_cost ?? 'â€”';
+                const cost = normalized.cost ?? normalized.price ?? normalized.unit_cost ?? '—';
                 const stock = normalized.stocks?.quantity ?? normalized.stock ?? normalized.quantity ?? 0;
                 return (
                   <tr key={id}>

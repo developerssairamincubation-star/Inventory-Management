@@ -132,13 +132,20 @@ export async function GET(
 
         // Period-filtered lending summary
         const ordersInPeriod = orders.filter((o: any) => new Date(o.created_at) >= fromDate)
+        // totalLent = sum of original quantities borrowed (not the current balance)
         lendingSummary.totalLent = ordersInPeriod.reduce(
-          (s: number, o: any) => s + (qtyByOrder.get(o.lending_order_id) || 0),
+          (s: number, o: any) => s + (origQtyByOrder.get(o.lending_order_id) || 0),
           0
         )
+        // returned = for returned orders: original - damaged - lost (i.e. physically returned good items)
         lendingSummary.returned = ordersInPeriod
           .filter((o: any) => ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST'].includes(o.status))
-          .reduce((s: number, o: any) => s + (qtyByOrder.get(o.lending_order_id) || 0), 0)
+          .reduce((s: number, o: any) => {
+            const orig = origQtyByOrder.get(o.lending_order_id) || 0
+            const dmg  = damagedByOrder.get(o.lending_order_id) || 0
+            const lst  = lostByOrder.get(o.lending_order_id) || 0
+            return s + Math.max(0, orig - dmg - lst)
+          }, 0)
 
         // Collect all person + mentor IDs
         const studentIds = [...new Set(orders

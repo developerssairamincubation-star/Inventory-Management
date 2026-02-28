@@ -47,7 +47,7 @@ const ROWS_PER_PAGE = 10
 type LendingPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly'
 
 function formatDate(dateStr: string | null) {
-  if (!dateStr) return 'â€”'
+  if (!dateStr) return '—'
   const d = new Date(dateStr)
   const month = d.toLocaleString('en-US', { month: 'short' })
   const day = String(d.getDate()).padStart(2, '0')
@@ -134,6 +134,13 @@ function LendingStatusDisplay({ record }: { record: BorrowRecord }) {
   }
 
   if (FINAL_STATUSES.includes(record.status)) {
+    if (record.status === 'CONSUMABLE') {
+      return (
+        <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: '#ede9fe', color: '#6d28d9', whiteSpace: 'nowrap' }}>
+          CONSUMABLE
+        </span>
+      )
+    }
     const orig = (record.original_quantity != null && record.original_quantity > 0)
       ? record.original_quantity : (record.quantity || 0)
     const d = record.damaged_quantity || 0
@@ -156,9 +163,8 @@ function LendingStatusDisplay({ record }: { record: BorrowRecord }) {
         </div>
       )
     }
-    const isConsumable = record.status === 'CONSUMABLE'
     return (
-      <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: isConsumable ? '#ede9fe' : 'var(--surface)', color: isConsumable ? '#6d28d9' : 'var(--muted)' }}>
+      <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: 'var(--surface)', color: 'var(--muted)' }}>
         {record.status}
       </span>
     )
@@ -166,7 +172,7 @@ function LendingStatusDisplay({ record }: { record: BorrowRecord }) {
 
   return (
     <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: 'var(--surface)', color: 'var(--muted)' }}>
-      {record.status || 'â€”'}
+      {record.status || '—'}
     </span>
   )
 }
@@ -239,7 +245,7 @@ function EditModal({
       <div style={{ background: '#fff', border: '1px solid var(--border)', padding: 24, width: '90%', maxWidth: 480 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Edit Product</div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>âœ•</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1 }}>×</button>
         </div>
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: 12 }}>
@@ -254,7 +260,7 @@ function EditModal({
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Unit Cost (â‚¹)</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Unit Cost (₹)</div>
               <input type="number" step="0.01" min={0} value={cost as number | ''}
                 onChange={e => setCost(e.target.value === '' ? '' : Number(e.target.value))}
                 style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
@@ -307,7 +313,7 @@ function EditModal({
               style={{ padding: '5px 16px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
             <button type="submit" disabled={saving}
               style={{ padding: '5px 16px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', opacity: saving ? 0.5 : 1 }}>
-              {saving ? 'Savingâ€¦' : 'Save Changes'}
+              {saving ? 'Saving…' : 'Save Changes'}
             </button>
           </div>
         </form>
@@ -416,14 +422,14 @@ export default function ProductDetailPage() {
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
       </svg>
-      Loading product detailsâ€¦
+      Loading product details…
     </div>
   )
 
   if (error || !product) return (
     <div className="p-8">
       <p className="text-red-600 mb-4">{error || 'Product not found.'}</p>
-      <button onClick={() => router.push('/products')} className="text-slate-800 underline text-sm">â† Back to Product List</button>
+      <button onClick={() => router.push('/products')} className="text-slate-800 underline text-sm">← Back to Product List</button>
     </div>
   )
 
@@ -442,15 +448,15 @@ export default function ProductDetailPage() {
       {/* Back + Header */}
       <button onClick={() => router.push('/products')}
         style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, marginBottom: 16, padding: 0 }}>
-        â† Back to Product List
+        ← Back to Product List
       </button>
 
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 12 }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>{product.product_name}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
-            SKU: {product.product_code}
-            {product.serial_number && <span style={{ marginLeft: 12 }}>S/N: {product.serial_number}</span>}
+            S/N: {product.product_code}
+            {product.serial_number && <span style={{ marginLeft: 12 }}>SKU: {product.serial_number}</span>}
             <span style={{ marginLeft: 12, fontWeight: 600, color: isLow ? '#dc2626' : '#16a34a' }}>
               {isLow ? 'Low Stock' : 'Active Stock'}
             </span>
@@ -493,7 +499,7 @@ export default function ProductDetailPage() {
           )}
           {product.unit_cost != null && (
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
-              â‚¹{Number(product.unit_cost).toLocaleString('en-US', { minimumFractionDigits: 2 })} / unit
+              ₹{Number(product.unit_cost).toLocaleString('en-US', { minimumFractionDigits: 2 })} / unit
             </div>
           )}
         </div>
@@ -510,7 +516,7 @@ export default function ProductDetailPage() {
             </select>
           </div>
           {summaryLoading ? (
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>Loadingâ€¦</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>Loading…</div>
           ) : (
             <div style={{ display: 'flex', gap: 20 }}>
               <div>
@@ -600,16 +606,16 @@ export default function ProductDetailPage() {
                       </td>
                       <td style={{ padding: '7px 10px', color: 'var(--fg)' }}>{row.department}</td>
                       <td style={{ padding: '7px 10px', textAlign: 'center', color: 'var(--fg)' }}>{borrowed}</td>
-                      <td style={{ padding: '7px 10px', textAlign: 'center', color: retd > 0 ? '#16a34a' : 'var(--muted)', fontWeight: retd > 0 ? 600 : 400 }}>{retd > 0 ? retd : 'â€”'}</td>
-                      <td style={{ padding: '7px 10px', textAlign: 'center', color: dmg > 0 ? '#dc2626' : 'var(--muted)', fontWeight: dmg > 0 ? 600 : 400 }}>{dmg > 0 ? dmg : 'â€”'}</td>
-                      <td style={{ padding: '7px 10px', textAlign: 'center', color: lst > 0 ? '#d97706' : 'var(--muted)', fontWeight: lst > 0 ? 600 : 400 }}>{lst > 0 ? lst : 'â€”'}</td>
-                      <td style={{ padding: '7px 10px', textAlign: 'center', color: bal > 0 ? '#92400e' : 'var(--muted)', fontWeight: bal > 0 ? 600 : 400 }}>{bal > 0 ? bal : 'â€”'}</td>
+                      <td style={{ padding: '7px 10px', textAlign: 'center', color: retd > 0 ? '#16a34a' : 'var(--muted)', fontWeight: retd > 0 ? 600 : 400 }}>{retd > 0 ? retd : '—'}</td>
+                      <td style={{ padding: '7px 10px', textAlign: 'center', color: dmg > 0 ? '#dc2626' : 'var(--muted)', fontWeight: dmg > 0 ? 600 : 400 }}>{dmg > 0 ? dmg : '—'}</td>
+                      <td style={{ padding: '7px 10px', textAlign: 'center', color: lst > 0 ? '#d97706' : 'var(--muted)', fontWeight: lst > 0 ? 600 : 400 }}>{lst > 0 ? lst : '—'}</td>
+                      <td style={{ padding: '7px 10px', textAlign: 'center', color: bal > 0 ? '#92400e' : 'var(--muted)', fontWeight: bal > 0 ? 600 : 400 }}>{bal > 0 ? bal : '—'}</td>
                       <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>{formatDate(row.borrow_date)}</td>
                       <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>
-                        {row.return_date ? formatDate(row.return_date) : (row.due_date ? formatDate(row.due_date) : 'â€”')}
+                        {row.return_date ? formatDate(row.return_date) : (row.due_date ? formatDate(row.due_date) : '—')}
                       </td>
                       <td style={{ padding: '7px 10px' }}><LendingStatusDisplay record={row} /></td>
-                      <td style={{ padding: '7px 10px', color: 'var(--fg)' }}>{row.mentor || 'â€”'}</td>
+                      <td style={{ padding: '7px 10px', color: 'var(--fg)' }}>{row.mentor || '—'}</td>
                     </tr>
                   )
                 })
@@ -621,7 +627,7 @@ export default function ProductDetailPage() {
         {/* Pagination */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderTop: '1px solid var(--border)' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-            Showing {filtered.length === 0 ? 0 : (currentPage - 1) * ROWS_PER_PAGE + 1}â€“{Math.min(currentPage * ROWS_PER_PAGE, filtered.length)} of {filtered.length}
+            Showing {filtered.length === 0 ? 0 : (currentPage - 1) * ROWS_PER_PAGE + 1}–{Math.min(currentPage * ROWS_PER_PAGE, filtered.length)} of {filtered.length}
           </div>
           <div style={{ display: 'flex', gap: 4 }}>
             <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}
@@ -671,7 +677,7 @@ export default function ProductDetailPage() {
                 style={{ padding: '5px 18px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
               <button onClick={handleDelete} disabled={deleting}
                 style={{ padding: '5px 18px', fontSize: 12, fontWeight: 600, background: '#dc2626', color: '#fff', border: 'none', cursor: 'pointer', opacity: deleting ? 0.5 : 1 }}>
-                {deleting ? 'Deletingâ€¦' : 'Yes, Delete'}
+                {deleting ? 'Deleting…' : 'Yes, Delete'}
               </button>
             </div>
           </div>

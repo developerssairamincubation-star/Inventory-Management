@@ -204,12 +204,13 @@ export async function GET(request: NextRequest) {
       });
     });
 
-    // Calculate stats - only count currently lent items (not returned or damaged)
-    const activeLentRecords = records.filter(r => r.status !== "RETURNED" && r.status !== "DAMAGED");
+    // Calculate stats - exclude only truly closed statuses (returned / damaged / lost)
+    const EXCLUDED = ["RETURNED", "RETURNED_DAMAGED", "RETURNED_LOST", "DAMAGED", "LOST"];
+    const activeLentRecords = records.filter(r => !EXCLUDED.includes(r.status));
     const totalQuantity = activeLentRecords.reduce((sum, r) => sum + (r.quantity || 0), 0);
     const uniqueProducts = new Set(activeLentRecords.map(r => r.product_name).filter(name => name !== "—")).size;
-    const returned = records.filter(r => r.status === "RETURNED").length;
-    const pending = records.filter(r => r.status === "PENDING").length;
+    const returned = records.filter(r => r.status === "RETURNED" || r.status === "RETURNED_DAMAGED" || r.status === "RETURNED_LOST").length;
+    const pending = records.filter(r => r.status === "PENDING" || r.status === "CONSUMABLE" || r.status === "PARTIALLY_RETURNED" || r.status === "PARTIALLY_DAMAGED" || r.status === "PARTIALLY_LOST").length;
 
     return NextResponse.json({
       records,
