@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+const ROWS_PER_PAGE = 20;
+
 // Utility function to format date as DD/MM/YYYY
 const formatDate = (dateString: string | null): string => {
   if (!dateString) return "—";
@@ -69,11 +71,17 @@ export default function BillingPage() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     fetchInvoices();
     fetchProducts();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
 
   async function fetchInvoices() {
     try {
@@ -230,6 +238,11 @@ export default function BillingPage() {
     );
   });
 
+  const totalPages = Math.ceil(filteredInvoices.length / ROWS_PER_PAGE);
+  const startIdx = (currentPage - 1) * ROWS_PER_PAGE;
+  const endIdx = startIdx + ROWS_PER_PAGE;
+  const pageRows = showAll ? filteredInvoices : filteredInvoices.slice(startIdx, endIdx);
+
   const calculateGrandTotal = () => {
     return invoiceItems.reduce((sum, item) => sum + (item.total_cost || 0), 0);
   };
@@ -320,9 +333,9 @@ export default function BillingPage() {
       />
 
       {/* Invoices Table */}
-      <div style={{ background: '#fff', border: '1px solid var(--border)', overflowX: 'auto' }}>
+      <div style={{ background: '#fff', border: '1px solid var(--border)', overflowX: 'auto', overflowY: 'auto', maxHeight: 400 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
             <tr style={{ background: 'var(--surface)' }}>
               <th style={th}>#</th>
               <th style={th}>Invoice No</th>
@@ -334,39 +347,86 @@ export default function BillingPage() {
             </tr>
           </thead>
           <tbody>
-            {filteredInvoices.length === 0 ? (
+            {pageRows.length === 0 ? (
               <tr><td colSpan={7} style={{ ...td, textAlign: 'center', color: 'var(--muted)', padding: '24px 10px' }}>No invoices found</td></tr>
             ) : (
-              filteredInvoices.map((invoice, idx) => (
-                <tr key={invoice.invoice_id}>
-                  <td style={td}>{idx + 1}</td>
-                  <td style={{ ...td, fontWeight: 600 }}>{invoice.invoice_number}</td>
-                  <td style={td}>{invoice.supplier_name}</td>
-                  <td style={td}>{formatDate(invoice.received_date)}</td>
-                  <td style={td}>{invoice.items_count || 0}</td>
-                  <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>₹{invoice.total_amount?.toFixed(2) || '0.00'}</td>
-                  <td style={td}>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button
-                        onClick={() => fetchInvoiceDetails(invoice.invoice_id)}
-                        style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--accent)', cursor: 'pointer' }}
-                      >
-                        View
-                      </button>
-                      <button
-                        onClick={() => handleDeleteInvoice(invoice.invoice_id)}
-                        style={{ padding: '3px 10px', fontSize: 11, border: '1px solid #fca5a5', background: '#fef2f2', color: '#b91c1c', cursor: 'pointer' }}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
+              pageRows.map((invoice, localIdx) => {
+                const idx = showAll ? localIdx : (currentPage - 1) * ROWS_PER_PAGE + localIdx;
+                return (
+                  <tr key={invoice.invoice_id}>
+                    <td style={td}>{idx + 1}</td>
+                    <td style={{ ...td, fontWeight: 600 }}>{invoice.invoice_number}</td>
+                    <td style={td}>{invoice.supplier_name}</td>
+                    <td style={td}>{formatDate(invoice.received_date)}</td>
+                    <td style={td}>{invoice.items_count || 0}</td>
+                    <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>₹{invoice.total_amount?.toFixed(2) || '0.00'}</td>
+                    <td style={td}>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          onClick={() => fetchInvoiceDetails(invoice.invoice_id)}
+                          style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--accent)', cursor: 'pointer' }}
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => handleDeleteInvoice(invoice.invoice_id)}
+                          style={{ padding: '3px 10px', fontSize: 11, border: '1px solid #fca5a5', background: '#fef2f2', color: '#b91c1c', cursor: 'pointer' }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Pagination Controls */}
+      {filteredInvoices.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', background: 'var(--surface)', padding: '8px 12px', border: '1px solid var(--border)', borderTop: 'none' }}>
+          <div>
+            Showing {showAll ? filteredInvoices.length : `${startIdx + 1}-${Math.min(endIdx, filteredInvoices.length)}`} of {filteredInvoices.length}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              onClick={() => setShowAll(!showAll)}
+              style={{ padding: '4px 10px', fontSize: 11, background: showAll ? 'var(--accent)' : 'var(--bg)', color: showAll ? '#fff' : 'var(--fg)', border: '1px solid var(--border)', cursor: 'pointer' }}
+            >
+              {showAll ? 'Paginate' : 'Show All'}
+            </button>
+            {!showAll && totalPages > 1 && (
+              <>
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  style={{ padding: '4px 8px', fontSize: 11, background: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--border)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.5 : 1 }}
+                >
+                  Prev
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    style={{ padding: '4px 8px', fontSize: 11, background: currentPage === page ? 'var(--accent)' : 'var(--bg)', color: currentPage === page ? '#fff' : 'var(--fg)', border: '1px solid var(--border)', cursor: 'pointer', fontWeight: currentPage === page ? 600 : 400 }}
+                  >
+                    {page}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  style={{ padding: '4px 8px', fontSize: 11, background: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--border)', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.5 : 1 }}
+                >
+                  Next
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Create Invoice Modal */}
       {isModalOpen && (

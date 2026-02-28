@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+const ROWS_PER_PAGE = 20;
+
 // Utility function to format date as DD/MM/YYYY
 const formatDate = (dateString: string | null): string => {
   if (!dateString) return "—";
@@ -80,6 +82,8 @@ export default function LendingPage() {
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editFormData, setEditFormData] = useState<Partial<LendingRecord>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [showAll, setShowAll] = useState(false);
 
   // Damage-related state
   const [damagedRowIdx, setDamagedRowIdx] = useState<number | null>(null);
@@ -109,6 +113,10 @@ export default function LendingPage() {
     fetchProducts();
     fetchStaffList();
   }, [timeFilter]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, timeFilter]);
 
   async function fetchDepartments() {
     try {
@@ -194,6 +202,9 @@ export default function LendingPage() {
       );
     })
     .sort((a, b) => new Date(b.lending_date).getTime() - new Date(a.lending_date).getTime());
+
+  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / ROWS_PER_PAGE));
+  const pageRows = showAll ? filteredRecords : filteredRecords.slice((currentPage - 1) * ROWS_PER_PAGE, currentPage * ROWS_PER_PAGE);
 
   const handleDelete = async (id: number) => {
     if (!confirm("Are you sure you want to delete this lending record?")) return;
@@ -626,9 +637,10 @@ export default function LendingPage() {
       </div>
 
       {/* Table */}
-      <div style={{ background: '#fff', border: '1px solid var(--border)', overflowX: 'auto' }}>
+      <div style={{ background: '#fff', border: '1px solid var(--border)' }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 400 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-          <thead>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
             <tr style={{ background: 'var(--surface)' }}>
               {['#', 'Borrower Name', 'Type', 'Dept', 'Product', 'Borrowed', 'Returned', 'Damaged', 'Lost', 'Balance', 'Lent Date', 'Due Date', 'Return Date', 'Status', 'Mentor', 'Actions'].map((h) => (
                 <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
@@ -641,7 +653,9 @@ export default function LendingPage() {
                 <td colSpan={16} style={{ padding: '32px 10px', textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>No lending records found</td>
               </tr>
             ) : (
-              filteredRecords.map((record, idx) => (
+              pageRows.map((record, localIdx) => {
+                const idx = showAll ? localIdx : (currentPage - 1) * ROWS_PER_PAGE + localIdx;
+                return (
                 <tr key={`${record.id}-${record.product_id ?? 'none'}-${idx}`} style={{ borderBottom: '1px solid var(--border)' }}>
                   <td style={{ padding: '7px 10px', color: 'var(--muted)' }}>{idx + 1}</td>
                   <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>{record.borrower_name || '—'}</td>
@@ -786,10 +800,51 @@ export default function LendingPage() {
                     )}
                   </td>
                 </tr>
-              ))
+                )
+              })
             )}
           </tbody>
         </table>
+        </div>
+
+        {/* Pagination */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              {showAll
+                ? `Showing all ${filteredRecords.length} records`
+                : `Showing ${filteredRecords.length === 0 ? 0 : (currentPage - 1) * ROWS_PER_PAGE + 1}–${Math.min(currentPage * ROWS_PER_PAGE, filteredRecords.length)} of ${filteredRecords.length}`}
+            </div>
+            <button
+              onClick={() => { setShowAll(v => !v); setCurrentPage(1); }}
+              style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: '1px solid var(--border)', padding: '2px 8px', cursor: 'pointer' }}
+            >
+              {showAll ? 'Paginate' : 'Show All'}
+            </button>
+          </div>
+          {!showAll && (
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}
+                style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: '#fff', color: currentPage === 1 ? 'var(--muted)' : 'var(--fg)', cursor: currentPage === 1 ? 'default' : 'pointer' }}>
+                Prev
+              </button>
+              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                const page = totalPages <= 5 ? i + 1 : currentPage <= 3 ? i + 1 : currentPage + i - 2;
+                if (page < 1 || page > totalPages) return null;
+                return (
+                  <button key={page} onClick={() => setCurrentPage(page)}
+                    style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: currentPage === page ? 'var(--accent)' : '#fff', color: currentPage === page ? '#fff' : 'var(--fg)', cursor: 'pointer', fontWeight: currentPage === page ? 600 : 400 }}>
+                    {page}
+                  </button>
+                );
+              })}
+              <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}
+                style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: '#fff', color: currentPage === totalPages ? 'var(--muted)' : 'var(--fg)', cursor: currentPage === totalPages ? 'default' : 'pointer' }}>
+                Next
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Return Date Modal */}

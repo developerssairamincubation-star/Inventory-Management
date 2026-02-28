@@ -421,7 +421,8 @@ export default function Dashboard() {
 
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
             {topLentProducts.length > 0 ? (() => {
-              const totalLent = topLentProducts.reduce((s, p) => s + p.total_lent, 0) || 1
+              const rawTotal = topLentProducts.reduce((s, p) => s + p.total_lent, 0)
+              const totalLent = rawTotal || 1
               return topLentProducts.map((p) => {
                 const w = Math.max((p.total_lent / totalLent) * 100, 2)
                 return (
@@ -430,7 +431,7 @@ export default function Dashboard() {
                       <span style={{ fontSize: 12, color: 'var(--fg)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.product_name}>
                         {p.product_name}
                       </span>
-                      <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>{p.total_lent}</span>
+                      <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>{p.total_lent}/{rawTotal}</span>
                     </div>
                     <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
                       <div

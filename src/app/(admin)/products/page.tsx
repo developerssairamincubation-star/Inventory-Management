@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import ImageCropModal from "@/components/ImageCropModal";
 
 export default function ProductsPage() {
   const router = useRouter();
@@ -23,6 +24,8 @@ export default function ProductsPage() {
   const [returnable, setReturnable] = useState<boolean | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [showCropModal, setShowCropModal] = useState(false);
 
   // Update stock form fields
   const [additionalStock, setAdditionalStock] = useState<number | ''>('');
@@ -130,10 +133,10 @@ export default function ProductsPage() {
         onMouseEnter={(e) => (e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)')}
         onMouseLeave={(e) => (e.currentTarget.style.boxShadow = 'none')}
       >
-        <div style={{ height: 140, background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        <div style={{ height: 140, background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: 8 }}>
           {image ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={image} alt={name || 'product'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <img src={image} alt={name || 'product'} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           ) : (
             <div style={{ fontSize: 10, color: 'var(--muted)', textAlign: 'center' }}>No image</div>
           )}
@@ -306,15 +309,35 @@ export default function ProductsPage() {
                 <div style={{ gridColumn: '1 / -1' }}>
                   <label style={labelStyle}>Product Photo</label>
                   <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', cursor: 'pointer' }}>
-                    Upload image
+                    Upload &amp; Crop image
                     <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => {
                       const f = e.target.files?.[0] ?? null;
-                      setImageFile(f);
-                      if (f) { const fr = new FileReader(); fr.onload = () => setImagePreview(typeof fr.result === 'string' ? fr.result : null); fr.readAsDataURL(f); }
-                      else { setImagePreview(null); }
+                      if (f) {
+                        const fr = new FileReader();
+                        fr.onload = () => {
+                          if (typeof fr.result === 'string') {
+                            setCropSrc(fr.result);
+                            setShowCropModal(true);
+                          }
+                        };
+                        fr.readAsDataURL(f);
+                      } else {
+                        setImageFile(null);
+                        setImagePreview(null);
+                      }
+                      // Reset input so same file can be re-selected
+                      e.target.value = '';
                     }} />
                   </label>
-                  {imagePreview && <div style={{ marginTop: 8 }}><img src={imagePreview} style={{ height: 64, objectFit: 'contain' }} alt="preview" /></div>}
+                  {imagePreview && (
+                    <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 72, height: 72, border: '1px solid var(--border)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--surface)' }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={imagePreview} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="preview" />
+                      </div>
+                      <button type="button" onClick={() => { setCropSrc(imagePreview); setShowCropModal(true); }} style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: '1px solid var(--border)', padding: '3px 8px', cursor: 'pointer' }}>Re-crop</button>
+                    </div>
+                  )}
                 </div>
                 <div style={{ gridColumn: '1 / -1' }}>
                   <label style={labelStyle}>Type</label>
@@ -335,6 +358,24 @@ export default function ProductsPage() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Image Crop Modal */}
+      {showCropModal && cropSrc && (
+        <ImageCropModal
+          imageSrc={cropSrc}
+          aspect={1}
+          onCrop={(dataUrl, file) => {
+            setImageFile(file);
+            setImagePreview(dataUrl);
+            setShowCropModal(false);
+            setCropSrc(null);
+          }}
+          onClose={() => {
+            setShowCropModal(false);
+            setCropSrc(null);
+          }}
+        />
       )}
 
       {/* Update Stock Modal */}

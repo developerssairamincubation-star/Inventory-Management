@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import ImageCropModal from '@/components/ImageCropModal'
 
 interface ProductDetail {
   product_id: string
@@ -42,7 +43,7 @@ interface BorrowRecord {
   mentor: string
 }
 
-const ROWS_PER_PAGE = 10
+const ROWS_PER_PAGE = 20
 
 type LendingPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly'
 
@@ -197,6 +198,8 @@ function EditModal({
   // Image upload state
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(product.image_url ?? null)
+  const [cropSrc, setCropSrc] = useState<string | null>(null)
+  const [showCropModal, setShowCropModal] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -288,26 +291,50 @@ function EditModal({
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Product Photo</div>
             {imagePreview && (
-              <div style={{ marginBottom: 8 }}>
+              <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={imagePreview} alt="product preview" style={{ height: 96, width: 96, objectFit: 'contain', border: '1px solid var(--border)' }} />
+                <img src={imagePreview} alt="product preview" style={{ height: 96, width: 96, objectFit: 'cover', border: '1px solid var(--border)' }} />
+                <button type="button" onClick={() => { setCropSrc(imagePreview); setShowCropModal(true); }}
+                  style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: '1px solid var(--border)', padding: '3px 8px', cursor: 'pointer' }}>Re-crop</button>
               </div>
             )}
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg)', cursor: 'pointer', padding: '4px 10px', border: '1px solid var(--border)', background: 'var(--surface)' }}>
-              {imageFile ? imageFile.name : 'Change photo'}
+              Upload &amp; Crop photo
               <input type="file" accept="image/*" style={{ display: 'none' }}
                 onChange={(e) => {
                   const f = e.target.files?.[0] ?? null
-                  setImageFile(f)
                   if (f) {
                     const fr = new FileReader()
-                    fr.onload = () => setImagePreview(typeof fr.result === 'string' ? fr.result : null)
+                    fr.onload = () => {
+                      if (typeof fr.result === 'string') {
+                        setCropSrc(fr.result)
+                        setShowCropModal(true)
+                      }
+                    }
                     fr.readAsDataURL(f)
                   }
+                  // Reset so same file can be re-selected
+                  e.target.value = ''
                 }}
               />
             </label>
           </div>
+          {showCropModal && cropSrc && (
+            <ImageCropModal
+              imageSrc={cropSrc}
+              aspect={1}
+              onCrop={(dataUrl, file) => {
+                setImageFile(file)
+                setImagePreview(dataUrl)
+                setShowCropModal(false)
+                setCropSrc(null)
+              }}
+              onClose={() => {
+                setShowCropModal(false)
+                setCropSrc(null)
+              }}
+            />
+          )}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
             <button type="button" onClick={onClose}
               style={{ padding: '5px 16px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
@@ -341,6 +368,7 @@ export default function ProductDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
+  const [showAll, setShowAll] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -413,7 +441,7 @@ export default function ProductDetailPage() {
     )
   })
   const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE))
-  const pageRows = filtered.slice((currentPage - 1) * ROWS_PER_PAGE, currentPage * ROWS_PER_PAGE)
+  const pageRows = showAll ? filtered : filtered.slice((currentPage - 1) * ROWS_PER_PAGE, currentPage * ROWS_PER_PAGE)
 
   // â”€â”€ Loading / Error â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (loading) return (
@@ -477,10 +505,10 @@ export default function ProductDetailPage() {
       {/* Info Strip */}
       <div style={{ display: 'flex', border: '1px solid var(--border)', background: '#fff', marginBottom: 20 }}>
         {/* Image */}
-        <div style={{ width: 160, minHeight: 120, borderRight: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+        <div style={{ width: 160, minHeight: 120, borderRight: '1px solid var(--border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0, padding: 8 }}>
           {selectedImage ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={selectedImage} alt={product.product_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <img src={selectedImage} alt={product.product_name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           ) : (
             <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', padding: 8 }}>No image</div>
           )}
@@ -570,9 +598,9 @@ export default function ProductDetailPage() {
             style={{ padding: '5px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: '#fff', width: 220, outline: 'none' }} />
         </div>
 
-        <div style={{ overflowX: 'auto' }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 400 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
               <tr style={{ background: 'var(--surface)' }}>
                 {['#', 'Borrower Name', 'Type', 'Department', 'Borrowed', 'Returned', 'Damaged', 'Lost', 'Balance', 'Borrow Date', 'Return Date', 'Status', 'Mentor'].map(h => (
                   <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: h === 'Borrower Name' || h === '#' || h === 'Type' || h === 'Department' || h === 'Borrow Date' || h === 'Return Date' || h === 'Status' || h === 'Mentor' ? 'left' : 'center', whiteSpace: 'nowrap' }}>{h}</th>
@@ -626,29 +654,41 @@ export default function ProductDetailPage() {
 
         {/* Pagination */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderTop: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-            Showing {filtered.length === 0 ? 0 : (currentPage - 1) * ROWS_PER_PAGE + 1}–{Math.min(currentPage * ROWS_PER_PAGE, filtered.length)} of {filtered.length}
-          </div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}
-              style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: '#fff', color: currentPage === 1 ? 'var(--muted)' : 'var(--fg)', cursor: currentPage === 1 ? 'default' : 'pointer' }}>
-              Prev
-            </button>
-            {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-              const page = totalPages <= 5 ? i + 1 : currentPage <= 3 ? i + 1 : currentPage + i - 2
-              if (page < 1 || page > totalPages) return null
-              return (
-                <button key={page} onClick={() => setCurrentPage(page)}
-                  style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: currentPage === page ? 'var(--accent)' : '#fff', color: currentPage === page ? '#fff' : 'var(--fg)', cursor: 'pointer', fontWeight: currentPage === page ? 600 : 400 }}>
-                  {page}
-                </button>
-              )
-            })}
-            <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}
-              style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: '#fff', color: currentPage === totalPages ? 'var(--muted)' : 'var(--fg)', cursor: currentPage === totalPages ? 'default' : 'pointer' }}>
-              Next
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              {showAll
+                ? `Showing all ${filtered.length} records`
+                : `Showing ${filtered.length === 0 ? 0 : (currentPage - 1) * ROWS_PER_PAGE + 1}–${Math.min(currentPage * ROWS_PER_PAGE, filtered.length)} of ${filtered.length}`}
+            </div>
+            <button
+              onClick={() => { setShowAll(v => !v); setCurrentPage(1); }}
+              style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: '1px solid var(--border)', padding: '2px 8px', cursor: 'pointer' }}
+            >
+              {showAll ? 'Paginate' : 'Show All'}
             </button>
           </div>
+          {!showAll && (
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}
+                style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: '#fff', color: currentPage === 1 ? 'var(--muted)' : 'var(--fg)', cursor: currentPage === 1 ? 'default' : 'pointer' }}>
+                Prev
+              </button>
+              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                const page = totalPages <= 5 ? i + 1 : currentPage <= 3 ? i + 1 : currentPage + i - 2
+                if (page < 1 || page > totalPages) return null
+                return (
+                  <button key={page} onClick={() => setCurrentPage(page)}
+                    style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: currentPage === page ? 'var(--accent)' : '#fff', color: currentPage === page ? '#fff' : 'var(--fg)', cursor: 'pointer', fontWeight: currentPage === page ? 600 : 400 }}>
+                    {page}
+                  </button>
+                )
+              })}
+              <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}
+                style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: '#fff', color: currentPage === totalPages ? 'var(--muted)' : 'var(--fg)', cursor: currentPage === totalPages ? 'default' : 'pointer' }}>
+                Next
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
