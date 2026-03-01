@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
 
 const ROWS_PER_PAGE = 20;
 
@@ -12,6 +13,31 @@ const formatDate = (dateString: string | null): string => {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = date.getFullYear();
   return `${day}/${month}/${year}`;
+};
+
+type SortCol = 'borrow_date' | 'return_date' | 'quantity' | null;
+type SortDir = 'asc' | 'desc';
+
+function matchesStatusFilter(status: string, filter: string): boolean {
+  if (!filter) return true;
+  const s = status?.toUpperCase() ?? '';
+  if (filter === 'CONSUMABLE') return s === 'CONSUMABLE';
+  if (filter === 'RETURNED') return ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST'].includes(s);
+  if (filter === 'DAMAGED') return ['DAMAGED', 'PARTIALLY_DAMAGED', 'RETURNED_DAMAGED'].includes(s);
+  if (filter === 'LOST') return ['LOST', 'PARTIALLY_LOST', 'RETURNED_LOST'].includes(s);
+  if (filter === 'PENDING') return ['PENDING', 'PARTIALLY_RETURNED', 'PARTIALLY_DAMAGED', 'PARTIALLY_LOST'].includes(s);
+  return true;
+}
+
+const selectStyle: React.CSSProperties = {
+  fontSize: 12,
+  border: '1px solid var(--border)',
+  padding: '5px 8px',
+  color: 'var(--fg)',
+  background: 'var(--bg)',
+  outline: 'none',
+  cursor: 'pointer',
+  minWidth: 130,
 };
 
 type StudentRecord = {
@@ -37,7 +63,21 @@ export default function StudentsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [showAll, setShowAll] = useState(false);
-  
+
+  // Filters
+  const [deptFilter, setDeptFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [productFilter, setProductFilter] = useState('');
+  const [mentorFilter, setMentorFilter] = useState('');
+
+  // Sort
+  const [sortCol, setSortCol] = useState<SortCol>(null);
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+
+  // Dropdown data
+  const [departments, setDepartments] = useState<{ department_id: string; department_name: string }[]>([]);
+  const [products, setProducts] = useState<{ product_id: string; product_name: string }[]>([]);
+
   // Stats
   const [totalBorrowed, setTotalBorrowed] = useState(0);
   const [returned, setReturned] = useState(0);
@@ -45,11 +85,31 @@ export default function StudentsPage() {
 
   useEffect(() => {
     fetchStudentRecords();
+    fetchDepartments();
+    fetchProducts();
   }, [timeFilter]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, timeFilter]);
+  }, [searchQuery, timeFilter, deptFilter, statusFilter, productFilter, mentorFilter, sortCol, sortDir]);
+
+  async function fetchDepartments() {
+    try {
+      const res = await fetch('/api/departments');
+      if (res.ok) { const data = await res.json(); setDepartments(data || []); }
+    } catch { /* ignore */ }
+  }
+
+  async function fetchProducts() {
+    try {
+      const res = await fetch('/api/products');
+      if (res.ok) {
+        const data = await res.json();
+        const arr = Array.isArray(data) ? data : (data.products || []);
+        setProducts(arr.map((p: any) => ({ product_id: p.product_id ?? p.id, product_name: p.product_name ?? p.name })));
+      }
+    } catch { /* ignore */ }
+  }
 
   async function fetchStudentRecords() {
     try {
@@ -71,16 +131,47 @@ export default function StudentsPage() {
     }
   }
 
-  const filteredRecords = records.filter((record) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      record.student_name?.toLowerCase().includes(query) ||
-      record.department?.toLowerCase().includes(query) ||
-      record.product_name?.toLowerCase().includes(query) ||
-      record.mobile?.toLowerCase().includes(query)
-    );
+  const handleSort = (col: SortCol) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+
+  const SortIcon = ({ col }: { col: SortCol }) => {
+    if (sortCol !== col) return <ArrowUpNarrowWide size={11} style={{ opacity: 0.3, marginLeft: 3, verticalAlign: 'middle' }} />;
+    return sortDir === 'asc'
+      ? <ArrowUpNarrowWide size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />
+      : <ArrowUpWideNarrow size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />;
+  };
+
+  const uniqueMentors = Array.from(new Set(records.map(r => r.mentor).filter(Boolean)));
+
+  let filteredRecords = records.filter((record) => {
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      const match = (
+        record.student_name?.toLowerCase().includes(query) ||
+        record.department?.toLowerCase().includes(query) ||
+        record.product_name?.toLowerCase().includes(query) ||
+        record.mobile?.toLowerCase().includes(query)
+      );
+      if (!match) return false;
+    }
+    if (deptFilter && record.department !== deptFilter) return false;
+    if (statusFilter && !matchesStatusFilter(record.status, statusFilter)) return false;
+    if (productFilter && record.product_name !== productFilter) return false;
+    if (mentorFilter && record.mentor !== mentorFilter) return false;
+    return true;
   });
+
+  if (sortCol) {
+    filteredRecords = [...filteredRecords].sort((a, b) => {
+      let av: number, bv: number;
+      if (sortCol === 'borrow_date') { av = new Date(a.borrow_date).getTime(); bv = new Date(b.borrow_date).getTime(); }
+      else if (sortCol === 'return_date') { av = a.return_date ? new Date(a.return_date).getTime() : -Infinity; bv = b.return_date ? new Date(b.return_date).getTime() : -Infinity; }
+      else { av = a.original_quantity ?? a.quantity; bv = b.original_quantity ?? b.quantity; }
+      return sortDir === 'asc' ? av - bv : bv - av;
+    });
+  }
 
   const totalPages = Math.max(1, Math.ceil(filteredRecords.length / ROWS_PER_PAGE));
   const pageRows = showAll ? filteredRecords : filteredRecords.slice((currentPage - 1) * ROWS_PER_PAGE, currentPage * ROWS_PER_PAGE);
@@ -95,6 +186,7 @@ export default function StudentsPage() {
     letterSpacing: '0.06em',
     borderBottom: '1px solid var(--border)',
     whiteSpace: 'nowrap',
+    userSelect: 'none',
   };
   const td: React.CSSProperties = {
     padding: '7px 10px',
@@ -107,7 +199,7 @@ export default function StudentsPage() {
   if (loading) return <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>Loading student records…</div>;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, height: '100%' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -141,40 +233,57 @@ export default function StudentsPage() {
         ))}
       </div>
 
-      {/* Search */}
-      <div>
+      {/* Filters row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} style={selectStyle}>
+          <option value="">All Departments</option>
+          {departments.map(d => <option key={d.department_id} value={d.department_name}>{d.department_name}</option>)}
+        </select>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={selectStyle}>
+          <option value="">All Status</option>
+          <option value="PENDING">Pending</option>
+          <option value="CONSUMABLE">Consumable</option>
+          <option value="RETURNED">Returned</option>
+          <option value="DAMAGED">Damaged</option>
+          <option value="LOST">Lost</option>
+        </select>
+        <select value={productFilter} onChange={e => setProductFilter(e.target.value)} style={selectStyle}>
+          <option value="">All Products</option>
+          {products.map(p => <option key={p.product_id} value={p.product_name}>{p.product_name}</option>)}
+        </select>
+        <select value={mentorFilter} onChange={e => setMentorFilter(e.target.value)} style={selectStyle}>
+          <option value="">All Mentors</option>
+          {uniqueMentors.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
         <input
           type="text"
-          placeholder="Search by name, department, product, mobile…"
+          placeholder="Search by name, dept, product, mobile…"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '6px 10px',
-            fontSize: 12,
-            border: '1px solid var(--border)',
-            color: 'var(--fg)',
-            background: 'var(--bg)',
-            outline: 'none',
-            boxSizing: 'border-box',
-          }}
+          style={{ flex: 1, minWidth: 180, padding: '5px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: 'var(--bg)', outline: 'none' }}
         />
+        {(deptFilter || statusFilter || productFilter || mentorFilter || searchQuery) && (
+          <button
+            onClick={() => { setDeptFilter(''); setStatusFilter(''); setProductFilter(''); setMentorFilter(''); setSearchQuery(''); }}
+            style={{ padding: '5px 10px', fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--muted)', cursor: 'pointer' }}
+          >Clear</button>
+        )}
       </div>
 
       {/* Table */}
-      <div style={{ background: '#fff', border: '1px solid var(--border)' }}>
-        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 400 }}>
+      <div style={{ background: '#fff', border: '1px solid var(--border)', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, minHeight: 0 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
           <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
             <tr style={{ background: 'var(--surface)' }}>
-              <th style={th}>#</th>
+              <th style={th}>S.No</th>
               <th style={th}>Student Name</th>
               <th style={th}>Dept</th>
               <th style={th}>Mentor</th>
               <th style={th}>Product</th>
-              <th style={th}>Qty</th>
-              <th style={th}>Borrow Date</th>
-              <th style={th}>Return Date</th>
+              <th style={{ ...th, cursor: 'pointer' }} onClick={() => handleSort('quantity')}>Qty <SortIcon col="quantity" /></th>
+              <th style={{ ...th, cursor: 'pointer' }} onClick={() => handleSort('borrow_date')}>Borrow Date <SortIcon col="borrow_date" /></th>
+              <th style={{ ...th, cursor: 'pointer' }} onClick={() => handleSort('return_date')}>Return Date <SortIcon col="return_date" /></th>
               <th style={th}>Status</th>
               <th style={th}>Mobile</th>
             </tr>
@@ -190,7 +299,6 @@ export default function StudentsPage() {
               pageRows.map((record, localIdx) => {
                 const idx = showAll ? localIdx : (currentPage - 1) * ROWS_PER_PAGE + localIdx;
                 const PENDING_STATUSES = ["PENDING", "PARTIALLY_RETURNED", "PARTIALLY_DAMAGED", "PARTIALLY_LOST"];
-                const FINAL_RETURNED = ["RETURNED", "RETURNED_DAMAGED", "RETURNED_LOST"];
                 const d = record.damaged_quantity ?? 0;
                 const l = record.lost_quantity ?? 0;
                 const orig = record.original_quantity ?? record.quantity;
@@ -224,12 +332,12 @@ export default function StudentsPage() {
 
                 return (
                   <tr key={idx}>
-                    <td style={td}>{idx + 1}</td>
+                    <td style={{ ...td, color: 'var(--muted)' }}>{idx + 1}</td>
                     <td style={{ ...td, fontWeight: 500 }}>{record.student_name || '—'}</td>
                     <td style={td}>{record.department || '—'}</td>
                     <td style={td}>{record.mentor || '—'}</td>
                     <td style={td}>{record.product_name || '—'}</td>
-                    <td style={td}>{record.quantity || 0}</td>
+                    <td style={td}>{orig}</td>
                     <td style={td}>{formatDate(record.borrow_date)}</td>
                     <td style={td}>{formatDate(record.return_date)}</td>
                     <td style={{ ...td, whiteSpace: 'normal' }}>{statusCell}</td>

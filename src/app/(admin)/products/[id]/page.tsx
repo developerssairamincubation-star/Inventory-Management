@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import ImageCropModal from '@/components/ImageCropModal'
+import { ArrowUpNarrowWide, ArrowUpWideNarrow } from 'lucide-react'
 
 interface ProductDetail {
   product_id: string
@@ -46,6 +47,30 @@ interface BorrowRecord {
 const ROWS_PER_PAGE = 20
 
 type LendingPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly'
+type SortColH = 'borrow_date' | 'return_date' | 'borrowed' | null
+type SortDirH = 'asc' | 'desc'
+
+function matchesStatusFilterH(status: string, filter: string): boolean {
+  if (!filter) return true
+  const s = status?.toUpperCase() ?? ''
+  if (filter === 'CONSUMABLE') return s === 'CONSUMABLE'
+  if (filter === 'RETURNED') return ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST'].includes(s)
+  if (filter === 'DAMAGED') return ['DAMAGED', 'PARTIALLY_DAMAGED', 'RETURNED_DAMAGED'].includes(s)
+  if (filter === 'LOST') return ['LOST', 'PARTIALLY_LOST', 'RETURNED_LOST'].includes(s)
+  if (filter === 'PENDING') return ['PENDING', 'PARTIALLY_RETURNED', 'PARTIALLY_DAMAGED', 'PARTIALLY_LOST'].includes(s)
+  return true
+}
+
+const selectStyleH: React.CSSProperties = {
+  fontSize: 12,
+  border: '1px solid var(--border)',
+  padding: '5px 8px',
+  color: 'var(--fg)',
+  background: '#fff',
+  outline: 'none',
+  cursor: 'pointer',
+  minWidth: 120,
+}
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return '—'
@@ -370,6 +395,15 @@ export default function ProductDetailPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [showAll, setShowAll] = useState(false)
 
+  // Filters
+  const [typeFilter, setTypeFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [deptFilter, setDeptFilter] = useState('')
+
+  // Sort
+  const [sortColH, setSortColH] = useState<SortColH>(null)
+  const [sortDirH, setSortDirH] = useState<SortDirH>('asc')
+
   useEffect(() => {
     if (!id) return
     fetchProductDetail(lendingPeriod)
@@ -430,16 +464,46 @@ export default function ProductDetailPage() {
   }
 
   // Filtered + paginated rows
-  const filtered = borrowingHistory.filter(r => {
-    if (!searchQuery) return true
-    const q = searchQuery.toLowerCase()
-    return (
-      r.borrower_name.toLowerCase().includes(q) ||
-      r.department.toLowerCase().includes(q) ||
-      r.status.toLowerCase().includes(q) ||
-      r.borrower_type.toLowerCase().includes(q)
-    )
+  const handleSortH = (col: SortColH) => {
+    if (sortColH === col) setSortDirH(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortColH(col); setSortDirH('asc') }
+  }
+
+  const SortIconH = ({ col }: { col: SortColH }) => {
+    if (sortColH !== col) return <ArrowUpNarrowWide size={11} style={{ opacity: 0.3, marginLeft: 3, verticalAlign: 'middle' }} />
+    return sortDirH === 'asc'
+      ? <ArrowUpNarrowWide size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />
+      : <ArrowUpWideNarrow size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />
+  }
+
+  const uniqueDepts = Array.from(new Set(borrowingHistory.map(r => r.department).filter(Boolean)))
+
+  let filtered = borrowingHistory.filter(r => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      const match = (
+        r.borrower_name.toLowerCase().includes(q) ||
+        r.department.toLowerCase().includes(q) ||
+        r.status.toLowerCase().includes(q) ||
+        r.borrower_type.toLowerCase().includes(q)
+      )
+      if (!match) return false
+    }
+    if (typeFilter && r.borrower_type !== typeFilter) return false
+    if (statusFilter && !matchesStatusFilterH(r.status, statusFilter)) return false
+    if (deptFilter && r.department !== deptFilter) return false
+    return true
   })
+
+  if (sortColH) {
+    filtered = [...filtered].sort((a, b) => {
+      let av: number, bv: number
+      if (sortColH === 'borrow_date') { av = new Date(a.borrow_date).getTime(); bv = new Date(b.borrow_date).getTime() }
+      else if (sortColH === 'return_date') { av = a.return_date ? new Date(a.return_date).getTime() : -Infinity; bv = b.return_date ? new Date(b.return_date).getTime() : -Infinity }
+      else { av = a.original_quantity ?? a.quantity; bv = b.original_quantity ?? b.quantity }
+      return sortDirH === 'asc' ? av - bv : bv - av
+    })
+  }
   const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE))
   const pageRows = showAll ? filtered : filtered.slice((currentPage - 1) * ROWS_PER_PAGE, currentPage * ROWS_PER_PAGE)
 
@@ -472,7 +536,7 @@ export default function ProductDetailPage() {
   const stockBarPct = Math.min(100, (stock / barMax) * 100)
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 28px' }}>
+    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 28px', height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Back + Header */}
       <button onClick={() => router.push('/products')}
         style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, marginBottom: 16, padding: 0 }}>
@@ -590,20 +654,52 @@ export default function ProductDetailPage() {
       </div>
 
       {/* Borrowing History */}
-      <div style={{ background: '#fff', border: '1px solid var(--border)' }}>
+      <div style={{ background: '#fff', border: '1px solid var(--border)', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Borrowing History</div>
-          <input type="text" placeholder="Search name, dept, status..." value={searchQuery}
-            onChange={e => { setSearchQuery(e.target.value); setCurrentPage(1) }}
-            style={{ padding: '5px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: '#fff', width: 220, outline: 'none' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <select value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setCurrentPage(1) }} style={selectStyleH}>
+              <option value="">All Types</option>
+              <option value="STUDENT">Student</option>
+              <option value="STAFF">Staff</option>
+            </select>
+            <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setCurrentPage(1) }} style={selectStyleH}>
+              <option value="">All Status</option>
+              <option value="PENDING">Pending</option>
+              <option value="CONSUMABLE">Consumable</option>
+              <option value="RETURNED">Returned</option>
+              <option value="DAMAGED">Damaged</option>
+              <option value="LOST">Lost</option>
+            </select>
+            <select value={deptFilter} onChange={e => { setDeptFilter(e.target.value); setCurrentPage(1) }} style={selectStyleH}>
+              <option value="">All Departments</option>
+              {uniqueDepts.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <input type="text" placeholder="Search name, dept, status..." value={searchQuery}
+              onChange={e => { setSearchQuery(e.target.value); setCurrentPage(1) }}
+              style={{ padding: '5px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: '#fff', width: 200, outline: 'none' }} />
+            {(typeFilter || statusFilter || deptFilter || searchQuery) && (
+              <button onClick={() => { setTypeFilter(''); setStatusFilter(''); setDeptFilter(''); setSearchQuery(''); setCurrentPage(1) }}
+                style={{ padding: '5px 10px', fontSize: 11, border: '1px solid var(--border)', background: '#fff', color: 'var(--muted)', cursor: 'pointer' }}>Clear</button>
+            )}
+          </div>
         </div>
 
-        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 400 }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, minHeight: 0 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
               <tr style={{ background: 'var(--surface)' }}>
-                {['#', 'Borrower Name', 'Type', 'Department', 'Borrowed', 'Returned', 'Damaged', 'Lost', 'Balance', 'Borrow Date', 'Return Date', 'Status', 'Mentor'].map(h => (
-                  <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: h === 'Borrower Name' || h === '#' || h === 'Type' || h === 'Department' || h === 'Borrow Date' || h === 'Return Date' || h === 'Status' || h === 'Mentor' ? 'left' : 'center', whiteSpace: 'nowrap' }}>{h}</th>
+                {['S.No', 'Borrower Name', 'Type', 'Department'].map(h => (
+                  <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
+                ))}
+                <th onClick={() => handleSortH('borrowed')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'center', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Borrowed <SortIconH col="borrowed" /></th>
+                {['Returned', 'Damaged', 'Lost', 'Balance'].map(h => (
+                  <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'center', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
+                ))}
+                <th onClick={() => handleSortH('borrow_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Borrow Date <SortIconH col="borrow_date" /></th>
+                <th onClick={() => handleSortH('return_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Return Date <SortIconH col="return_date" /></th>
+                {['Status', 'Mentor'].map(h => (
+                  <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
                 ))}
               </tr>
             </thead>

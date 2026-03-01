@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useState } from "react";
+import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
 
 const ROWS_PER_PAGE = 20;
 
@@ -13,6 +14,9 @@ const formatDate = (dateString: string | null): string => {
   const year = date.getFullYear();
   return `${day}/${month}/${year}`;
 };
+
+type SortColB = 'invoice_number' | 'received_date' | 'items_count' | 'total_amount' | null;
+type SortDirB = 'asc' | 'desc';
 
 type InvoiceItem = {
   product_id: string;
@@ -74,6 +78,10 @@ export default function BillingPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [showAll, setShowAll] = useState(false);
 
+  // Sort
+  const [sortColB, setSortColB] = useState<SortColB>(null);
+  const [sortDirB, setSortDirB] = useState<SortDirB>('asc');
+
   useEffect(() => {
     fetchInvoices();
     fetchProducts();
@@ -81,7 +89,7 @@ export default function BillingPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery]);
+  }, [searchQuery, sortColB, sortDirB]);
 
   async function fetchInvoices() {
     try {
@@ -229,7 +237,19 @@ export default function BillingPage() {
     }
   };
 
-  const filteredInvoices = invoices.filter((invoice) => {
+  const handleSortB = (col: SortColB) => {
+    if (sortColB === col) setSortDirB(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortColB(col); setSortDirB('asc'); }
+  };
+
+  const SortIconB = ({ col }: { col: SortColB }) => {
+    if (sortColB !== col) return <ArrowUpNarrowWide size={11} style={{ opacity: 0.3, marginLeft: 3, verticalAlign: 'middle' }} />;
+    return sortDirB === 'asc'
+      ? <ArrowUpNarrowWide size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />
+      : <ArrowUpWideNarrow size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />;
+  };
+
+  let filteredInvoices = invoices.filter((invoice) => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return (
@@ -237,6 +257,17 @@ export default function BillingPage() {
       invoice.supplier_name?.toLowerCase().includes(query)
     );
   });
+
+  if (sortColB) {
+    filteredInvoices = [...filteredInvoices].sort((a, b) => {
+      let av: any, bv: any;
+      if (sortColB === 'invoice_number') { av = a.invoice_number ?? ''; bv = b.invoice_number ?? ''; return sortDirB === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av); }
+      if (sortColB === 'received_date') { av = new Date(a.received_date).getTime(); bv = new Date(b.received_date).getTime(); }
+      else if (sortColB === 'items_count') { av = a.items_count ?? 0; bv = b.items_count ?? 0; }
+      else { av = a.total_amount ?? 0; bv = b.total_amount ?? 0; }
+      return sortDirB === 'asc' ? av - bv : bv - av;
+    });
+  }
 
   const totalPages = Math.ceil(filteredInvoices.length / ROWS_PER_PAGE);
   const startIdx = (currentPage - 1) * ROWS_PER_PAGE;
@@ -299,7 +330,7 @@ export default function BillingPage() {
   };
   const th: React.CSSProperties = {
     padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)',
-    textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
+    textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', userSelect: 'none',
   };
   const td: React.CSSProperties = { padding: '7px 10px', fontSize: 12, color: 'var(--fg)', borderBottom: '1px solid var(--border)' };
 
@@ -307,7 +338,7 @@ export default function BillingPage() {
 
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, height: '100%' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -333,16 +364,17 @@ export default function BillingPage() {
       />
 
       {/* Invoices Table */}
-      <div style={{ background: '#fff', border: '1px solid var(--border)', overflowX: 'auto', overflowY: 'auto', maxHeight: 400 }}>
+      <div style={{ background: '#fff', border: '1px solid var(--border)', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, minHeight: 0 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
             <tr style={{ background: 'var(--surface)' }}>
-              <th style={th}>#</th>
-              <th style={th}>Invoice No</th>
+              <th style={th}>S.No</th>
+              <th onClick={() => handleSortB('invoice_number')} style={{ ...th, cursor: 'pointer' }}>Invoice No <SortIconB col="invoice_number" /></th>
               <th style={th}>Supplier</th>
-              <th style={th}>Received Date</th>
-              <th style={th}>Items</th>
-              <th style={{ ...th, textAlign: 'right' }}>Total</th>
+              <th onClick={() => handleSortB('received_date')} style={{ ...th, cursor: 'pointer' }}>Received Date <SortIconB col="received_date" /></th>
+              <th onClick={() => handleSortB('items_count')} style={{ ...th, cursor: 'pointer' }}>Items <SortIconB col="items_count" /></th>
+              <th onClick={() => handleSortB('total_amount')} style={{ ...th, textAlign: 'right', cursor: 'pointer' }}>Total <SortIconB col="total_amount" /></th>
               <th style={th}>Actions</th>
             </tr>
           </thead>
@@ -354,7 +386,7 @@ export default function BillingPage() {
                 const idx = showAll ? localIdx : (currentPage - 1) * ROWS_PER_PAGE + localIdx;
                 return (
                   <tr key={invoice.invoice_id}>
-                    <td style={td}>{idx + 1}</td>
+                    <td style={{ ...td, color: 'var(--muted)' }}>{idx + 1}</td>
                     <td style={{ ...td, fontWeight: 600 }}>{invoice.invoice_number}</td>
                     <td style={td}>{invoice.supplier_name}</td>
                     <td style={td}>{formatDate(invoice.received_date)}</td>
@@ -382,11 +414,11 @@ export default function BillingPage() {
             )}
           </tbody>
         </table>
-      </div>
+        </div>
 
-      {/* Pagination Controls */}
-      {filteredInvoices.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', background: 'var(--surface)', padding: '8px 12px', border: '1px solid var(--border)', borderTop: 'none' }}>
+        {/* Pagination Controls */}
+        {filteredInvoices.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', background: 'var(--surface)', padding: '8px 12px', borderTop: '1px solid var(--border)' }}>
           <div>
             Showing {showAll ? filteredInvoices.length : `${startIdx + 1}-${Math.min(endIdx, filteredInvoices.length)}`} of {filteredInvoices.length}
           </div>
@@ -427,6 +459,7 @@ export default function BillingPage() {
           </div>
         </div>
       )}
+      </div>
 
       {/* Create Invoice Modal */}
       {isModalOpen && (

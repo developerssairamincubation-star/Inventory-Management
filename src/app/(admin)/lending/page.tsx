@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useState } from "react";
+import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
 
 const ROWS_PER_PAGE = 20;
 
@@ -12,6 +13,31 @@ const formatDate = (dateString: string | null): string => {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = date.getFullYear();
   return `${day}/${month}/${year}`;
+};
+
+type SortCol = 'lending_date' | 'due_date' | 'return_date' | 'original_quantity' | null;
+type SortDir = 'asc' | 'desc';
+
+function matchesStatusFilter(status: string, filter: string): boolean {
+  if (!filter) return true;
+  const s = status?.toUpperCase() ?? '';
+  if (filter === 'CONSUMABLE') return s === 'CONSUMABLE';
+  if (filter === 'RETURNED') return ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST'].includes(s);
+  if (filter === 'DAMAGED') return ['DAMAGED', 'PARTIALLY_DAMAGED', 'RETURNED_DAMAGED'].includes(s);
+  if (filter === 'LOST') return ['LOST', 'PARTIALLY_LOST', 'RETURNED_LOST'].includes(s);
+  if (filter === 'PENDING') return ['PENDING', 'PARTIALLY_RETURNED', 'PARTIALLY_DAMAGED', 'PARTIALLY_LOST'].includes(s);
+  return true;
+}
+
+const selectStyle: React.CSSProperties = {
+  fontSize: 12,
+  border: '1px solid var(--border)',
+  padding: '5px 8px',
+  color: 'var(--fg)',
+  background: 'var(--bg)',
+  outline: 'none',
+  cursor: 'pointer',
+  minWidth: 130,
 };
 
 type LendingRecord = {
@@ -85,6 +111,16 @@ export default function LendingPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [showAll, setShowAll] = useState(false);
 
+  // Filters
+  const [deptFilter, setDeptFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [productFilter, setProductFilter] = useState('');
+  const [mentorFilter, setMentorFilter] = useState('');
+
+  // Sort
+  const [sortCol, setSortCol] = useState<SortCol>(null);
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
   // Damage-related state
   const [damagedRowIdx, setDamagedRowIdx] = useState<number | null>(null);
   const [damagedQtyStr, setDamagedQtyStr] = useState<string>("1");
@@ -116,7 +152,7 @@ export default function LendingPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, timeFilter]);
+  }, [searchQuery, timeFilter, deptFilter, statusFilter, productFilter, mentorFilter, sortCol, sortDir]);
 
   async function fetchDepartments() {
     try {
@@ -190,18 +226,51 @@ export default function LendingPage() {
     ).length);
   };
 
-  const filteredRecords = records
-    .filter((record) => {
-      if (!searchQuery) return true;
+  const handleSort = (col: SortCol) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+
+  const SortIcon = ({ col }: { col: SortCol }) => {
+    if (sortCol !== col) return <ArrowUpNarrowWide size={11} style={{ opacity: 0.3, marginLeft: 3, verticalAlign: 'middle' }} />;
+    return sortDir === 'asc'
+      ? <ArrowUpNarrowWide size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />
+      : <ArrowUpWideNarrow size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />;
+  };
+
+  const uniqueMentors = Array.from(new Set(records.map(r => r.mentor).filter(Boolean)));
+  const uniqueProducts = Array.from(new Set(records.map(r => r.product_name).filter(Boolean)));
+
+  let filteredRecords = records.filter((record) => {
+    if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      return (
+      const match = (
         record.borrower_name?.toLowerCase().includes(query) ||
         record.department?.toLowerCase().includes(query) ||
         record.product_name?.toLowerCase().includes(query) ||
         record.status?.toLowerCase().includes(query)
       );
-    })
-    .sort((a, b) => new Date(b.lending_date).getTime() - new Date(a.lending_date).getTime());
+      if (!match) return false;
+    }
+    if (deptFilter && record.department !== deptFilter) return false;
+    if (statusFilter && !matchesStatusFilter(record.status, statusFilter)) return false;
+    if (productFilter && record.product_name !== productFilter) return false;
+    if (mentorFilter && record.mentor !== mentorFilter) return false;
+    return true;
+  });
+
+  if (sortCol) {
+    filteredRecords = [...filteredRecords].sort((a, b) => {
+      let av: number, bv: number;
+      if (sortCol === 'lending_date') { av = new Date(a.lending_date).getTime(); bv = new Date(b.lending_date).getTime(); }
+      else if (sortCol === 'due_date') { av = a.due_date ? new Date(a.due_date).getTime() : -Infinity; bv = b.due_date ? new Date(b.due_date).getTime() : -Infinity; }
+      else if (sortCol === 'return_date') { av = a.return_date ? new Date(a.return_date).getTime() : -Infinity; bv = b.return_date ? new Date(b.return_date).getTime() : -Infinity; }
+      else { av = a.original_quantity ?? a.quantity; bv = b.original_quantity ?? b.quantity; }
+      return sortDir === 'asc' ? av - bv : bv - av;
+    });
+  } else {
+    filteredRecords = [...filteredRecords].sort((a, b) => new Date(b.lending_date).getTime() - new Date(a.lending_date).getTime());
+  }
 
   const totalPages = Math.max(1, Math.ceil(filteredRecords.length / ROWS_PER_PAGE));
   const pageRows = showAll ? filteredRecords : filteredRecords.slice((currentPage - 1) * ROWS_PER_PAGE, currentPage * ROWS_PER_PAGE);
@@ -584,7 +653,7 @@ export default function LendingPage() {
   );
 
   return (
-    <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 28px' }}>
+    <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 28px', height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Page Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
@@ -625,25 +694,61 @@ export default function LendingPage() {
         ))}
       </div>
 
-      {/* Search */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+      {/* Filters */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} style={selectStyle}>
+          <option value="">All Departments</option>
+          {departments.map(d => <option key={d.department_id} value={d.department_name}>{d.department_name}</option>)}
+        </select>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={selectStyle}>
+          <option value="">All Status</option>
+          <option value="PENDING">Pending</option>
+          <option value="CONSUMABLE">Consumable</option>
+          <option value="RETURNED">Returned</option>
+          <option value="DAMAGED">Damaged</option>
+          <option value="LOST">Lost</option>
+        </select>
+        <select value={productFilter} onChange={e => setProductFilter(e.target.value)} style={selectStyle}>
+          <option value="">All Products</option>
+          {uniqueProducts.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <select value={mentorFilter} onChange={e => setMentorFilter(e.target.value)} style={selectStyle}>
+          <option value="">All Mentors</option>
+          {uniqueMentors.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
         <input
           type="text"
           placeholder="Search by name, product, department..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          style={{ flex: 1, padding: '6px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: '#fff', outline: 'none' }}
+          style={{ flex: 1, minWidth: 180, padding: '5px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: '#fff', outline: 'none' }}
         />
+        {(deptFilter || statusFilter || productFilter || mentorFilter || searchQuery) && (
+          <button
+            onClick={() => { setDeptFilter(''); setStatusFilter(''); setProductFilter(''); setMentorFilter(''); setSearchQuery(''); }}
+            style={{ padding: '5px 10px', fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--muted)', cursor: 'pointer' }}
+          >Clear</button>
+        )}
       </div>
 
       {/* Table */}
-      <div style={{ background: '#fff', border: '1px solid var(--border)' }}>
-        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 400 }}>
+      <div style={{ background: '#fff', border: '1px solid var(--border)', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, minHeight: 0 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
             <tr style={{ background: 'var(--surface)' }}>
-              {['#', 'Borrower Name', 'Type', 'Dept', 'Product', 'Borrowed', 'Returned', 'Damaged', 'Lost', 'Balance', 'Lent Date', 'Due Date', 'Return Date', 'Status', 'Mentor', 'Actions'].map((h) => (
-                <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
+              {['S.No', 'Borrower Name', 'Type', 'Dept', 'Product'].map((h) => (
+                <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
+              ))}
+              <th onClick={() => handleSort('original_quantity')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Borrowed <SortIcon col="original_quantity" /></th>
+              {['Returned', 'Damaged', 'Lost', 'Balance'].map((h) => (
+                <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
+              ))}
+              <th onClick={() => handleSort('lending_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Lent Date <SortIcon col="lending_date" /></th>
+              <th onClick={() => handleSort('due_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Due Date <SortIcon col="due_date" /></th>
+              <th onClick={() => handleSort('return_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Return Date <SortIcon col="return_date" /></th>
+              {['Status', 'Mentor', 'Actions'].map((h) => (
+                <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
               ))}
             </tr>
           </thead>
