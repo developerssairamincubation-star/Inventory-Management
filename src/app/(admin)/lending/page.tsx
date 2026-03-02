@@ -509,6 +509,8 @@ export default function LendingPage() {
     
     setShowProductDropdown(null);
     setProductSearchQuery("");
+    setItemType(product.returnable ? "returnable" : "consumable");
+    if (!product.returnable) setDueDate("");
   };
 
   const filteredProducts = products.filter((p) =>
@@ -1067,13 +1069,17 @@ export default function LendingPage() {
                     </button>
                   ))}
                 </div>
-                <div style={{ display: 'flex', gap: 20 }}>
-                  {(['returnable', 'consumable'] as const).map((t) => (
-                    <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', color: 'var(--fg)' }}>
-                      <input type="radio" name="itemType" checked={itemType === t} onChange={() => setItemType(t)} />
-                      {t.charAt(0).toUpperCase() + t.slice(1)}
-                    </label>
-                  ))}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Type:</span>
+                  <span style={{
+                    padding: '3px 10px', fontSize: 11, fontWeight: 600,
+                    background: itemType === 'returnable' ? '#dcfce7' : '#ede9fe',
+                    color: itemType === 'returnable' ? '#166534' : '#6d28d9'
+                  }}>
+                    {lendingItems.every(i => !i.product_id)
+                      ? <span style={{ color: 'var(--muted)', fontStyle: 'italic', fontWeight: 400 }}>Select a product</span>
+                      : itemType === 'returnable' ? 'Returnable' : 'Consumable'}
+                  </span>
                 </div>
               </div>
 
@@ -1144,7 +1150,7 @@ export default function LendingPage() {
                 </div>
                 <div>
                   <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Expected Return Date</div>
-                  <input type="date" required={itemType === 'returnable'} disabled={itemType === 'consumable'} value={dueDate} onChange={(e) => setDueDate(e.target.value)}
+                  <input type="date" required={itemType === 'returnable'} disabled={itemType === 'consumable'} min={new Date().toISOString().split('T')[0]} value={dueDate} onChange={(e) => setDueDate(e.target.value)}
                     style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: itemType === 'consumable' ? 'var(--muted)' : 'var(--fg)', background: itemType === 'consumable' ? 'var(--surface)' : '#fff', boxSizing: 'border-box' as const }} />
                 </div>
               </div>

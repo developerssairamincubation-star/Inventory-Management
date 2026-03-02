@@ -94,7 +94,7 @@ export default function ProductsPage() {
       });
       if (!res.ok) { console.error('Failed to update stock', await res.text()); return; }
       const result = await res.json();
-      setProducts((prevProducts) => prevProducts.map((p) => (p.product_id || p.id) === productId ? result.product : p));
+      setProducts((prevProducts) => prevProducts.map((p) => (p.product_id || p.id) === productId ? { ...p, ...result.product } : p));
       setIsUpdateStockModalOpen(false);
       setSelectedProduct(null);
     } catch (err) {
