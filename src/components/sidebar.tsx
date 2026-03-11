@@ -82,6 +82,11 @@ export default function Sidebar() {
             flexShrink: 0,
           }}
         >
+          <Link
+            href="/dashboard"
+            style={{ display: 'flex', alignItems: 'center', textDecoration: 'none', cursor: 'pointer' }}
+            title="Go to Dashboard"
+          >
           <Image
             src="/Logo.svg"
             alt="Logo"
@@ -99,6 +104,7 @@ export default function Sidebar() {
               </div>
             </div>
           )}
+          </Link>
         </div>
 
         {/* Nav items */}

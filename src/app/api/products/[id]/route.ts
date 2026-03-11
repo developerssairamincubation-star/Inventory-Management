@@ -70,11 +70,25 @@ export async function GET(
         }
       : { quantity: 0, damaged_quantity: 0, lost_quantity: 0 }
 
-    // Merge image_url into product
+    // Merge image_url into product and fetch category name
+    const categoryId = product.category_id ?? null
+    let categoryName: string | null = null
+    if (categoryId) {
+      try {
+        const { data: catRow } = await supabase
+          .from('category')
+          .select('category_name')
+          .eq('category_id', categoryId)
+          .maybeSingle()
+        categoryName = catRow?.category_name ?? null
+      } catch { /* category table may not exist yet */ }
+    }
+
     const enrichedProduct = {
       ...product,
       image_url: productImage?.image_url ?? null,
       stocks: stockData,
+      category_name: categoryName,
     }
 
     // Fetch all lending items for this product (with damaged/lost quantities)
@@ -244,6 +258,7 @@ export async function PUT(
     if (body.unit_cost !== undefined) updateData.unit_cost = body.unit_cost
     if (body.low_stock_threshold !== undefined) updateData.low_stock_threshold = body.low_stock_threshold
     if (body.returnable !== undefined) updateData.returnable = body.returnable
+    if (body.category_id !== undefined) updateData.category_id = body.category_id
     // image_url is NOT a column on products — handled separately via product_image table
 
     const { data, error } = await supabase
@@ -312,6 +327,7 @@ export async function DELETE(
       await supabase.from('lending_order').delete().in('lending_order_id', orderIds)
     }
     await supabase.from('stocks').delete().eq('product_id', id)
+    await supabase.from('product_image').delete().eq('product_id', id)
     const { error } = await supabase.from('products').delete().eq('product_id', id)
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

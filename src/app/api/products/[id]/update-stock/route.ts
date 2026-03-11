@@ -8,13 +8,17 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { additionalStock, unitCost } = body
+    const { additionalStock, unitCost, newStock } = body
 
     const supabaseAdmin = getSupabaseAdmin()
 
     // Validate inputs
     if (additionalStock !== undefined && (typeof additionalStock !== 'number' || additionalStock < 0)) {
       return NextResponse.json({ error: 'Invalid additional stock value' }, { status: 400 })
+    }
+
+    if (newStock !== undefined && (typeof newStock !== 'number' || newStock < 0)) {
+      return NextResponse.json({ error: 'Invalid stock value' }, { status: 400 })
     }
 
     if (unitCost !== undefined && (typeof unitCost !== 'number' || unitCost < 0)) {
@@ -33,9 +37,11 @@ export async function PATCH(
       return NextResponse.json({ error: stockError.message }, { status: 500 })
     }
 
-    // Update stock quantity if additionalStock is provided
-    if (additionalStock !== undefined) {
-      const newQuantity = (currentStock?.quantity || 0) + additionalStock
+    // Update stock quantity — either set absolute value (newStock) or add delta (additionalStock)
+    if (newStock !== undefined || additionalStock !== undefined) {
+      const newQuantity = newStock !== undefined
+        ? newStock
+        : (currentStock?.quantity || 0) + (additionalStock as number)
 
       const { error: updateStockError } = await supabaseAdmin
         .from('stocks')

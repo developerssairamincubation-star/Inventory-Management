@@ -5,9 +5,11 @@ import { auth } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Mail, LockKeyhole, Eye, EyeOff } from "lucide-react";
+import { useToast } from "@/components/ui/Toast";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { showToast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pressed, setPressed] = useState(false); //added state for button press
@@ -22,7 +24,7 @@ export default function LoginPage() {
       await signInWithEmailAndPassword(auth, email, password);
       router.push("/dashboard");
     } catch (err: any) {
-      alert(err.message);
+      showToast(err.message || "Login failed. Please try again.", "error");
     }
   };
 

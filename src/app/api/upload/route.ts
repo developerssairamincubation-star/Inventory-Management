@@ -56,9 +56,24 @@ export async function POST(req: NextRequest) {
     const ext = mimeType.split('/')[1].replace('jpeg', 'jpg')
     const key = `${folder}/${randomUUID()}.${ext}`
 
-    const url = await uploadToS3(key, buffer, mimeType)
-
-    return NextResponse.json({ url, key }, { status: 200 })
+    try {
+      // Log file size and target key for debugging
+      console.log(`[upload] uploading to S3 — key=${key} size=${buffer.byteLength} mime=${mimeType}`)
+      const url = await uploadToS3(key, buffer, mimeType)
+      console.log(`[upload] succeeded — url=${url}`)
+      return NextResponse.json({ url, key }, { status: 200 })
+    } catch (s3Err: any) {
+      // Log full error to aid debugging (stack, message, code)
+      console.error('[/api/upload] S3 upload failed', {
+        key,
+        size: buffer.byteLength,
+        mimeType,
+        errorMessage: s3Err?.message ?? s3Err,
+        stack: s3Err?.stack,
+        error: s3Err,
+      })
+      return NextResponse.json({ error: s3Err?.message || 'Failed to upload to S3' }, { status: 500 })
+    }
   } catch (err: any) {
     console.error('[/api/upload] Error uploading to S3:', err)
     return NextResponse.json(

@@ -15,6 +15,8 @@ interface ProductDetail {
   returnable: boolean | null
   image_url: string | null
   created_at: string
+  category_id: string | null
+  category_name: string | null
   stocks: {
     quantity: number
     damaged_quantity: number
@@ -218,7 +220,40 @@ function EditModal({
   const [cost, setCost] = useState<number | ''>(product.unit_cost ?? '')
   const [threshold, setThreshold] = useState<number | ''>(product.low_stock_threshold ?? '')
   const [returnable, setReturnable] = useState<boolean | null>(product.returnable ?? null)
+  const [categoryId, setCategoryId] = useState<string>(product.category_id ?? '')
+  const [stockQuantity, setStockQuantity] = useState<number | ''>(product.stocks?.quantity ?? '')
   const [saving, setSaving] = useState(false)
+
+  // Categories
+  const [categories, setCategories] = useState<{category_id: string; category_name: string}[]>([])
+  const [showAddCatModal, setShowAddCatModal] = useState(false)
+  const [newCatName, setNewCatName] = useState('')
+  const [addCatLoading, setAddCatLoading] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/categories').then(r => r.ok ? r.json() : []).then(d => setCategories(Array.isArray(d) ? d : []))
+  }, [])
+
+  const handleCreateCat = async () => {
+    if (!newCatName.trim() || addCatLoading) return
+    setAddCatLoading(true)
+    try {
+      const res = await fetch('/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category_name: newCatName.trim() }),
+      })
+      if (res.ok) {
+        const created = await res.json()
+        setCategories(prev => [...prev, created])
+        setCategoryId(created.category_id)
+        setNewCatName('')
+        setShowAddCatModal(false)
+      }
+    } catch { /* ignore */ } finally {
+      setAddCatLoading(false)
+    }
+  }
 
   // Image upload state
   const [imageFile, setImageFile] = useState<File | null>(null)
@@ -254,13 +289,22 @@ function EditModal({
           unit_cost: cost === '' ? undefined : Number(cost),
           low_stock_threshold: threshold === '' ? undefined : Number(threshold),
           returnable: returnable,
+          category_id: categoryId || null,
           // Only send image_url if a new file was uploaded
           ...(image_url !== undefined ? { image_url } : {}),
         }),
       })
       if (!res.ok) throw new Error(await res.text())
       const updated = await res.json()
-      onSaved({ ...product, ...updated })
+      const originalStock = product.stocks?.quantity ?? 0
+      if (stockQuantity !== '' && Number(stockQuantity) !== originalStock) {
+        await fetch(`/api/products/${product.product_id}/update-stock`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newStock: Number(stockQuantity) }),
+        })
+      }
+      onSaved({ ...product, ...updated, stocks: { ...product.stocks, quantity: stockQuantity !== '' ? Number(stockQuantity) : originalStock } })
     } catch (err) {
       console.error('Failed to update product:', err)
     } finally {
@@ -286,7 +330,7 @@ function EditModal({
             <input value={serial} onChange={e => setSerial(e.target.value)}
               style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
               <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Unit Cost (₹)</div>
               <input type="number" step="0.01" min={0} value={cost as number | ''}
@@ -299,6 +343,25 @@ function EditModal({
                 onChange={e => setThreshold(e.target.value === '' ? '' : Number(e.target.value))}
                 style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
             </div>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Current Stock</div>
+              <input type="number" min={0} value={stockQuantity as number | ''}
+                onChange={e => setStockQuantity(e.target.value === '' ? '' : Number(e.target.value))}
+                style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
+            </div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Category</div>
+            <select value={categoryId}
+              onChange={e => {
+                if (e.target.value === '__add_new__') { setShowAddCatModal(true) }
+                else setCategoryId(e.target.value)
+              }}
+              style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', background: '#fff', boxSizing: 'border-box' as const }}>
+              <option value=''>— Select category —</option>
+              {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
+              <option value='__add_new__'>+ Add new category…</option>
+            </select>
           </div>
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Product Type</div>
@@ -316,33 +379,39 @@ function EditModal({
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Product Photo</div>
             {imagePreview && (
-              <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ marginBottom: 8 }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={imagePreview} alt="product preview" style={{ height: 96, width: 96, objectFit: 'cover', border: '1px solid var(--border)' }} />
-                <button type="button" onClick={() => { setCropSrc(imagePreview); setShowCropModal(true); }}
-                  style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: '1px solid var(--border)', padding: '3px 8px', cursor: 'pointer' }}>Re-crop</button>
               </div>
             )}
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg)', cursor: 'pointer', padding: '4px 10px', border: '1px solid var(--border)', background: 'var(--surface)' }}>
-              Upload &amp; Crop photo
-              <input type="file" accept="image/*" style={{ display: 'none' }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null
-                  if (f) {
-                    const fr = new FileReader()
-                    fr.onload = () => {
-                      if (typeof fr.result === 'string') {
-                        setCropSrc(fr.result)
-                        setShowCropModal(true)
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg)', cursor: 'pointer', padding: '4px 10px', border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                Re-Upload
+                <input type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null
+                    if (f) {
+                      const fr = new FileReader()
+                      fr.onload = () => {
+                        if (typeof fr.result === 'string') {
+                          setCropSrc(fr.result)
+                          setShowCropModal(true)
+                        }
                       }
+                      fr.readAsDataURL(f)
                     }
-                    fr.readAsDataURL(f)
-                  }
-                  // Reset so same file can be re-selected
-                  e.target.value = ''
-                }}
-              />
-            </label>
+                    // Reset so same file can be re-selected
+                    e.target.value = ''
+                  }}
+                />
+              </label>
+              {imagePreview && (
+                <button type="button" onClick={() => { setCropSrc(imagePreview); setShowCropModal(true); }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg)', cursor: 'pointer', padding: '4px 10px', border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                  Re-crop
+                </button>
+              )}
+            </div>
           </div>
           {showCropModal && cropSrc && (
             <ImageCropModal
@@ -359,6 +428,26 @@ function EditModal({
                 setCropSrc(null)
               }}
             />
+          )}
+          {/* Add Category Mini Modal */}
+          {showAddCatModal && (
+            <div style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }}>
+              <div style={{ background: '#fff', border: '1px solid var(--border)', padding: 24, width: 320 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)', marginBottom: 14 }}>Add New Category</div>
+                <input autoFocus value={newCatName} onChange={e => setNewCatName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateCat(); } }}
+                  placeholder='Category name…'
+                  style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', marginBottom: 12, boxSizing: 'border-box' as const }} />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button type='button' onClick={() => { setShowAddCatModal(false); setNewCatName(''); }}
+                    style={{ padding: '4px 14px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
+                  <button type='button' onClick={handleCreateCat} disabled={addCatLoading || !newCatName.trim()}
+                    style={{ padding: '4px 14px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', opacity: (addCatLoading || !newCatName.trim()) ? 0.5 : 1 }}>
+                    {addCatLoading ? 'Adding…' : 'Add'}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
             <button type="button" onClick={onClose}
@@ -470,10 +559,10 @@ export default function ProductDetailPage() {
   }
 
   const SortIconH = ({ col }: { col: SortColH }) => {
-    if (sortColH !== col) return <ArrowUpNarrowWide size={11} style={{ opacity: 0.3, marginLeft: 3, verticalAlign: 'middle' }} />
+    if (sortColH !== col) return <ArrowUpNarrowWide size={11} style={{ opacity: 0.3, flexShrink: 0 }} />
     return sortDirH === 'asc'
-      ? <ArrowUpNarrowWide size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />
-      : <ArrowUpWideNarrow size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />
+      ? <ArrowUpNarrowWide size={11} style={{ flexShrink: 0, color: 'var(--accent)' }} />
+      : <ArrowUpWideNarrow size={11} style={{ flexShrink: 0, color: 'var(--accent)' }} />
   }
 
   const uniqueDepts = Array.from(new Set(borrowingHistory.map(r => r.department).filter(Boolean)))
@@ -536,14 +625,14 @@ export default function ProductDetailPage() {
   const stockBarPct = Math.min(100, (stock / barMax) * 100)
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 28px', height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Back + Header */}
       <button onClick={() => router.push('/products')}
-        style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, marginBottom: 16, padding: 0 }}>
+        style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, marginBottom: 0, padding: 0, alignSelf: 'flex-start' }}>
         ← Back to Product List
       </button>
 
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>{product.product_name}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
@@ -567,7 +656,7 @@ export default function ProductDetailPage() {
       </div>
 
       {/* Info Strip */}
-      <div style={{ display: 'flex', border: '1px solid var(--border)', background: '#fff', marginBottom: 20 }}>
+      <div style={{ display: 'flex', border: '1px solid var(--border)', background: '#fff' }}>
         {/* Image */}
         <div style={{ width: 160, minHeight: 120, borderRight: '1px solid var(--border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0, padding: 8 }}>
           {selectedImage ? (
@@ -638,9 +727,9 @@ export default function ProductDetailPage() {
             </div>
           </div>
         </div>
-        {/* Policy */}
-        <div style={{ flex: 1, padding: '14px 18px' }}>
-          <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Policy</div>
+        {/* Type */}
+        <div style={{ flex: 1, padding: '14px 18px', borderRight: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Type</div>
           {product.returnable === true && (
             <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', background: '#dcfce7', color: '#166534' }}>Returnable</span>
           )}
@@ -648,6 +737,15 @@ export default function ProductDetailPage() {
             <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', background: '#ede9fe', color: '#6d28d9' }}>Consumable</span>
           )}
           {product.returnable === null && (
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Not set</span>
+          )}
+        </div>
+        {/* Category */}
+        <div style={{ flex: 1, padding: '14px 18px' }}>
+          <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Category</div>
+          {product.category_name ? (
+            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg)' }}>{product.category_name}</span>
+          ) : (
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>Not set</span>
           )}
         </div>
@@ -692,12 +790,12 @@ export default function ProductDetailPage() {
                 {['S.No', 'Borrower Name', 'Type', 'Department'].map(h => (
                   <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
                 ))}
-                <th onClick={() => handleSortH('borrowed')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'center', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Borrowed <SortIconH col="borrowed" /></th>
+                <th onClick={() => handleSortH('borrowed')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'center', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Borrowed <SortIconH col="borrowed" /></span></th>
                 {['Returned', 'Damaged', 'Lost', 'Balance'].map(h => (
                   <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'center', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
                 ))}
-                <th onClick={() => handleSortH('borrow_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Borrow Date <SortIconH col="borrow_date" /></th>
-                <th onClick={() => handleSortH('return_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Return Date <SortIconH col="return_date" /></th>
+                <th onClick={() => handleSortH('borrow_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Borrow Date <SortIconH col="borrow_date" /></span></th>
+                <th onClick={() => handleSortH('return_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Return Date <SortIconH col="return_date" /></span></th>
                 {['Status', 'Mentor'].map(h => (
                   <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
                 ))}
@@ -795,6 +893,7 @@ export default function ProductDetailPage() {
           onClose={() => setEditOpen(false)}
           onSaved={(updated) => {
             setProduct(prev => prev ? { ...prev, ...updated } : updated)
+            if (updated.image_url !== undefined) setSelectedImage(updated.image_url)
             setEditOpen(false)
           }}
         />

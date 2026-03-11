@@ -1,7 +1,11 @@
 ﻿"use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
+import { useToast } from "@/components/ui/Toast";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
 
 const ROWS_PER_PAGE = 20;
 
@@ -110,6 +114,8 @@ export default function LendingPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [showAll, setShowAll] = useState(false);
+  const [showExportDropdown, setShowExportDropdown] = useState(false);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
 
   // Filters
   const [deptFilter, setDeptFilter] = useState('');
@@ -131,6 +137,8 @@ export default function LendingPage() {
   const [lostQtyStr, setLostQtyStr] = useState<string>("1");
   const [lostLoading, setLostLoading] = useState(false);
 
+  const { showToast, showConfirm } = useToast();
+
   // Return-from-dropdown modal state
   const [returnPickerRowIdx, setReturnPickerRowIdx] = useState<number | null>(null);
   const [returnPickerDate, setReturnPickerDate] = useState<string>("");
@@ -149,6 +157,16 @@ export default function LendingPage() {
     fetchProducts();
     fetchStaffList();
   }, [timeFilter]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(e.target as Node)) {
+        setShowExportDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -232,10 +250,10 @@ export default function LendingPage() {
   };
 
   const SortIcon = ({ col }: { col: SortCol }) => {
-    if (sortCol !== col) return <ArrowUpNarrowWide size={11} style={{ opacity: 0.3, marginLeft: 3, verticalAlign: 'middle' }} />;
+    if (sortCol !== col) return <ArrowUpNarrowWide size={11} style={{ opacity: 0.3, flexShrink: 0 }} />;
     return sortDir === 'asc'
-      ? <ArrowUpNarrowWide size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />
-      : <ArrowUpWideNarrow size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />;
+      ? <ArrowUpNarrowWide size={11} style={{ flexShrink: 0, color: 'var(--accent)' }} />
+      : <ArrowUpWideNarrow size={11} style={{ flexShrink: 0, color: 'var(--accent)' }} />;
   };
 
   const uniqueMentors = Array.from(new Set(records.map(r => r.mentor).filter(Boolean)));
@@ -276,7 +294,7 @@ export default function LendingPage() {
   const pageRows = showAll ? filteredRecords : filteredRecords.slice((currentPage - 1) * ROWS_PER_PAGE, currentPage * ROWS_PER_PAGE);
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Are you sure you want to delete this lending record?")) return;
+    if (!(await showConfirm("Are you sure you want to delete this lending record?"))) return;
     const prevRecords = records;
     const updated = records.filter(r => r.id !== id);
     setRecords(updated);
@@ -314,12 +332,12 @@ export default function LendingPage() {
 
   const handleMarkDamaged = async (record: LendingRecord) => {
     if (!record.product_id) {
-      alert("This record has no associated product and cannot be marked as damaged.");
+      showToast("This record has no associated product and cannot be marked as damaged.", "error");
       return;
     }
     const damagedQty = parseInt(damagedQtyStr) || 0;
     if (damagedQty < 1 || damagedQty > record.quantity) {
-      alert(`Damaged quantity must be between 1 and ${record.quantity}`);
+      showToast(`Damaged quantity must be between 1 and ${record.quantity}`, "warning");
       return;
     }
     // Optimistic update
@@ -349,7 +367,7 @@ export default function LendingPage() {
         setRecords(prevRecords);
         applyStats(prevRecords);
         const data = await res.json();
-        alert(data.error || "Failed to mark items as damaged");
+        showToast(data.error || "Failed to mark items as damaged", "error");
       }
     } catch (error) {
       setRecords(prevRecords);
@@ -362,12 +380,12 @@ export default function LendingPage() {
 
   const handleMarkLost = async (record: LendingRecord) => {
     if (!record.product_id) {
-      alert("This record has no associated product and cannot be marked as lost.");
+      showToast("This record has no associated product and cannot be marked as lost.", "error");
       return;
     }
     const lostQty = parseInt(lostQtyStr) || 0;
     if (lostQty < 1 || lostQty > record.quantity) {
-      alert(`Lost quantity must be between 1 and ${record.quantity}`);
+      showToast(`Lost quantity must be between 1 and ${record.quantity}`, "warning");
       return;
     }
     const prevRecords = records;
@@ -396,7 +414,7 @@ export default function LendingPage() {
         setRecords(prevRecords);
         applyStats(prevRecords);
         const data = await res.json();
-        alert(data.error || "Failed to mark items as lost");
+        showToast(data.error || "Failed to mark items as lost", "error");
       }
     } catch (error) {
       setRecords(prevRecords);
@@ -538,7 +556,7 @@ export default function LendingPage() {
     
     // Check if there are any stock errors
     if (Object.keys(stockErrors).length > 0) {
-      alert("Please resolve stock availability issues before submitting.");
+      showToast("Please resolve stock availability issues before submitting.", "warning");
       return;
     }
 
@@ -650,6 +668,92 @@ export default function LendingPage() {
     }
   };
 
+  const exportPDF = () => {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    const extractDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Lending Data', 14, 16);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Extracted on: ${extractDate}`, 14, 23);
+    const head = [['S.No', 'Borrower Name', 'Type', 'Dept', 'Product', 'Borrowed', 'Returned', 'Damaged', 'Lost', 'Balance', 'Lent Date', 'Due Date', 'Return Date', 'Status', 'Mentor']];
+    const FULLY_RETURNED_STATUSES = ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST'];
+    const body = filteredRecords.map((record, i) => {
+      const borrowed = record.original_quantity ?? record.quantity;
+      const damaged = record.damaged_quantity ?? 0;
+      const lost = record.lost_quantity ?? 0;
+      const currentQty = record.quantity;
+      const isFullyReturned = FULLY_RETURNED_STATUSES.includes(record.status);
+      const retd = isFullyReturned
+        ? Math.max(0, borrowed - damaged - lost)
+        : Math.max(0, borrowed - currentQty - damaged - lost);
+      const balance = isFullyReturned ? 0 : currentQty;
+      return [
+        i + 1,
+        record.borrower_name || '—',
+        record.borrower_type || '—',
+        record.department || '—',
+        record.product_name || '—',
+        borrowed,
+        retd > 0 ? retd : '—',
+        damaged > 0 ? damaged : '—',
+        lost > 0 ? lost : '—',
+        balance > 0 ? balance : '—',
+        formatDate(record.lending_date),
+        formatDate(record.due_date),
+        formatDate(record.return_date),
+        record.status || '—',
+        record.mentor || '—',
+      ];
+    });
+    autoTable(doc, {
+      head,
+      body,
+      startY: 28,
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [30, 41, 56], textColor: 255, fontStyle: 'bold', fontSize: 7 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+    });
+    doc.save(`lending-data-${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  const exportExcel = () => {
+    const FULLY_RETURNED_STATUSES = ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST'];
+    const data = filteredRecords.map((record, i) => {
+      const borrowed = record.original_quantity ?? record.quantity;
+      const damaged = record.damaged_quantity ?? 0;
+      const lost = record.lost_quantity ?? 0;
+      const currentQty = record.quantity;
+      const isFullyReturned = FULLY_RETURNED_STATUSES.includes(record.status);
+      const retd = isFullyReturned
+        ? Math.max(0, borrowed - damaged - lost)
+        : Math.max(0, borrowed - currentQty - damaged - lost);
+      const balance = isFullyReturned ? 0 : currentQty;
+      return {
+        'S.No': i + 1,
+        'Borrower Name': record.borrower_name || '',
+        'Type': record.borrower_type || '',
+        'Department': record.department || '',
+        'Product': record.product_name || '',
+        'Borrowed': borrowed,
+        'Returned': retd > 0 ? retd : '',
+        'Damaged': damaged > 0 ? damaged : '',
+        'Lost': lost > 0 ? lost : '',
+        'Balance': balance > 0 ? balance : '',
+        'Lent Date': formatDate(record.lending_date),
+        'Due Date': formatDate(record.due_date),
+        'Return Date': formatDate(record.return_date),
+        'Status': record.status || '',
+        'Mentor': record.mentor || '',
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Lending Data');
+    XLSX.writeFile(wb, `lending-data-${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
   if (loading) return (
     <div style={{ padding: 32, color: 'var(--muted)', fontSize: 13 }}>Loading lending records...</div>
   );
@@ -679,6 +783,38 @@ export default function LendingPage() {
           >
             + Add Entry
           </button>
+          {/* Export split button */}
+          <div ref={exportDropdownRef} style={{ position: 'relative', display: 'flex' }}>
+            <button
+              onClick={() => { exportExcel(); setShowExportDropdown(false); }}
+              style={{ padding: '5px 12px', fontSize: 12, fontWeight: 600, background: '#fff', color: 'var(--fg)', border: '1px solid var(--border)', borderRight: 'none', cursor: 'pointer' }}
+            >
+              Export Excel
+            </button>
+            <button
+              onClick={() => setShowExportDropdown(d => !d)}
+              style={{ padding: '5px 8px', fontSize: 12, background: '#fff', color: 'var(--fg)', border: '1px solid var(--border)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+              title="More export options"
+            >
+              ▾
+            </button>
+            {showExportDropdown && (
+              <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 20, background: '#fff', border: '1px solid var(--border)', minWidth: 150, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+                <button
+                  onClick={() => { exportExcel(); setShowExportDropdown(false); }}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 14px', fontSize: 12, background: 'none', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', color: 'var(--fg)' }}
+                >
+                  Export Excel
+                </button>
+                <button
+                  onClick={() => { exportPDF(); setShowExportDropdown(false); }}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 14px', fontSize: 12, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg)' }}
+                >
+                  Export PDF
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -742,13 +878,13 @@ export default function LendingPage() {
               {['S.No', 'Borrower Name', 'Type', 'Dept', 'Product'].map((h) => (
                 <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
               ))}
-              <th onClick={() => handleSort('original_quantity')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Borrowed <SortIcon col="original_quantity" /></th>
+              <th onClick={() => handleSort('original_quantity')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Borrowed <SortIcon col="original_quantity" /></span></th>
               {['Returned', 'Damaged', 'Lost', 'Balance'].map((h) => (
                 <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
               ))}
-              <th onClick={() => handleSort('lending_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Lent Date <SortIcon col="lending_date" /></th>
-              <th onClick={() => handleSort('due_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Due Date <SortIcon col="due_date" /></th>
-              <th onClick={() => handleSort('return_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>Return Date <SortIcon col="return_date" /></th>
+              <th onClick={() => handleSort('lending_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Lent Date <SortIcon col="lending_date" /></span></th>
+              <th onClick={() => handleSort('due_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Due Date <SortIcon col="due_date" /></span></th>
+              <th onClick={() => handleSort('return_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Return Date <SortIcon col="return_date" /></span></th>
               {['Status', 'Mentor', 'Actions'].map((h) => (
                 <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
               ))}
@@ -990,7 +1126,7 @@ export default function LendingPage() {
                 <button onClick={() => { setReturnPickerRowIdx(null); setReturnPickerDate(''); setReturnPickerQty(1); }} disabled={returnPickerLoading}
                   style={{ padding: '5px 14px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
                 <button
-                  onClick={async () => { if (!returnPickerDate) { alert('Please select a return date.'); return; } setReturnPickerLoading(true); await handleReturnDateUpdate(rec.id, rec.product_id, returnPickerDate, returnPickerQty); setReturnPickerLoading(false); }}
+                  onClick={async () => { if (!returnPickerDate) { showToast('Please select a return date.', 'warning'); return; } setReturnPickerLoading(true); await handleReturnDateUpdate(rec.id, rec.product_id, returnPickerDate, returnPickerQty); setReturnPickerLoading(false); }}
                   disabled={returnPickerLoading || !returnPickerDate}
                   style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: '#16a34a', color: '#fff', border: 'none', cursor: 'pointer', opacity: returnPickerLoading || !returnPickerDate ? 0.5 : 1 }}>
                   {returnPickerLoading ? 'Saving...' : 'Confirm Return'}
@@ -1069,17 +1205,21 @@ export default function LendingPage() {
                     </button>
                   ))}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Type:</span>
-                  <span style={{
-                    padding: '3px 10px', fontSize: 11, fontWeight: 600,
-                    background: itemType === 'returnable' ? '#dcfce7' : '#ede9fe',
-                    color: itemType === 'returnable' ? '#166534' : '#6d28d9'
-                  }}>
-                    {lendingItems.every(i => !i.product_id)
-                      ? <span style={{ color: 'var(--muted)', fontStyle: 'italic', fontWeight: 400 }}>Select a product</span>
-                      : itemType === 'returnable' ? 'Returnable' : 'Consumable'}
-                  </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Item Type:</span>
+                  {(['returnable', 'consumable'] as const).map((t) => (
+                    <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer', color: 'var(--fg)', userSelect: 'none' }}>
+                      <input
+                        type="radio"
+                        name="itemType"
+                        value={t}
+                        checked={itemType === t}
+                        onChange={() => { setItemType(t); if (t === 'consumable') setDueDate(''); }}
+                        style={{ cursor: 'pointer', accentColor: 'var(--accent, #2563eb)', width: 14, height: 14 }}
+                      />
+                      {t === 'returnable' ? 'Returnable' : 'Consumable'}
+                    </label>
+                  ))}
                 </div>
               </div>
 

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
+import UploadInvoiceModal from "@/components/UploadInvoiceModal";
+import { useToast } from "@/components/ui/Toast";
 
 const ROWS_PER_PAGE = 20;
 
@@ -81,6 +83,8 @@ export default function BillingPage() {
   // Sort
   const [sortColB, setSortColB] = useState<SortColB>(null);
   const [sortDirB, setSortDirB] = useState<SortDirB>('asc');
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const { showToast, showConfirm } = useToast();
 
   useEffect(() => {
     fetchInvoices();
@@ -203,7 +207,7 @@ export default function BillingPage() {
     // Validate items
     const validItems = invoiceItems.filter(item => item.product_id && item.quantity > 0);
     if (validItems.length === 0) {
-      alert("Please add at least one item with a valid product");
+      showToast("Please add at least one item with a valid product", "warning");
       return;
     }
 
@@ -221,17 +225,17 @@ export default function BillingPage() {
       });
 
       if (res.ok) {
-        alert("Invoice created successfully!");
+        showToast("Invoice created successfully!", "success");
         setIsModalOpen(false);
         resetModal();
         fetchInvoices();
       } else {
         const error = await res.json();
-        alert(`Error: ${error.error || "Failed to create invoice"}`);
+        showToast(`Error: ${error.error || "Failed to create invoice"}`, "error");
       }
     } catch (error) {
       console.error("Error creating invoice:", error);
-      alert("An error occurred while creating the invoice");
+      showToast("An error occurred while creating the invoice", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -243,10 +247,10 @@ export default function BillingPage() {
   };
 
   const SortIconB = ({ col }: { col: SortColB }) => {
-    if (sortColB !== col) return <ArrowUpNarrowWide size={11} style={{ opacity: 0.3, marginLeft: 3, verticalAlign: 'middle' }} />;
+    if (sortColB !== col) return <ArrowUpNarrowWide size={11} style={{ opacity: 0.3, flexShrink: 0 }} />;
     return sortDirB === 'asc'
-      ? <ArrowUpNarrowWide size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />
-      : <ArrowUpWideNarrow size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />;
+      ? <ArrowUpNarrowWide size={11} style={{ flexShrink: 0, color: 'var(--accent)' }} />
+      : <ArrowUpWideNarrow size={11} style={{ flexShrink: 0, color: 'var(--accent)' }} />;
   };
 
   let filteredInvoices = invoices.filter((invoice) => {
@@ -287,18 +291,18 @@ export default function BillingPage() {
         setSelectedInvoice(data);
         setIsPreviewOpen(true);
       } else {
-        alert("Failed to load invoice details");
+        showToast("Failed to load invoice details", "error");
       }
     } catch (error) {
       console.error("Error fetching invoice details:", error);
-      alert("An error occurred while loading invoice details");
+      showToast("An error occurred while loading invoice details", "error");
     } finally {
       setLoadingDetail(false);
     }
   };
 
   const handleDeleteInvoice = async (invoiceId: string) => {
-    if (!confirm("Are you sure you want to delete this invoice? This action cannot be undone.")) {
+    if (!(await showConfirm("Are you sure you want to delete this invoice? This action cannot be undone."))) {
       return;
     }
 
@@ -308,15 +312,15 @@ export default function BillingPage() {
       });
 
       if (res.ok) {
-        alert("Invoice deleted successfully!");
+        showToast("Invoice deleted successfully!", "success");
         fetchInvoices();
       } else {
         const error = await res.json();
-        alert(`Error: ${error.error || "Failed to delete invoice"}`);
+        showToast(`Error: ${error.error || "Failed to delete invoice"}`, "error");
       }
     } catch (error) {
       console.error("Error deleting invoice:", error);
-      alert("An error occurred while deleting the invoice");
+      showToast("An error occurred while deleting the invoice", "error");
     }
   };
 
@@ -346,12 +350,20 @@ export default function BillingPage() {
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>Billing / Invoices</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Manage purchase invoices</div>
         </div>
-        <button
-          onClick={handleOpenModal}
-          style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}
-        >
-          + Create Invoice
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => setIsUploadModalOpen(true)}
+            style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: '#fff', color: 'var(--accent)', border: '1px solid var(--accent)', cursor: 'pointer' }}
+          >
+            ↑ Upload Invoice
+          </button>
+          <button
+            onClick={handleOpenModal}
+            style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}
+          >
+            + Create Invoice
+          </button>
+        </div>
       </div>
 
       {/* Search */}
@@ -370,11 +382,11 @@ export default function BillingPage() {
           <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
             <tr style={{ background: 'var(--surface)' }}>
               <th style={th}>S.No</th>
-              <th onClick={() => handleSortB('invoice_number')} style={{ ...th, cursor: 'pointer' }}>Invoice No <SortIconB col="invoice_number" /></th>
+              <th onClick={() => handleSortB('invoice_number')} style={{ ...th, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Invoice No <SortIconB col="invoice_number" /></span></th>
               <th style={th}>Supplier</th>
-              <th onClick={() => handleSortB('received_date')} style={{ ...th, cursor: 'pointer' }}>Received Date <SortIconB col="received_date" /></th>
-              <th onClick={() => handleSortB('items_count')} style={{ ...th, cursor: 'pointer' }}>Items <SortIconB col="items_count" /></th>
-              <th onClick={() => handleSortB('total_amount')} style={{ ...th, textAlign: 'right', cursor: 'pointer' }}>Total <SortIconB col="total_amount" /></th>
+              <th onClick={() => handleSortB('received_date')} style={{ ...th, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Received Date <SortIconB col="received_date" /></span></th>
+              <th onClick={() => handleSortB('items_count')} style={{ ...th, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Items <SortIconB col="items_count" /></span></th>
+              <th onClick={() => handleSortB('total_amount')} style={{ ...th, textAlign: 'right', cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Total <SortIconB col="total_amount" /></span></th>
               <th style={th}>Actions</th>
             </tr>
           </thead>
@@ -563,6 +575,15 @@ export default function BillingPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Upload Invoice Modal */}
+      {isUploadModalOpen && (
+        <UploadInvoiceModal
+          existingProducts={products}
+          onClose={() => setIsUploadModalOpen(false)}
+          onSuccess={() => { fetchInvoices(); }}
+        />
       )}
 
       {/* Preview Invoice Modal */}

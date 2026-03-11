@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Prevent Next.js from bundling pdf-parse (and its native deps like @napi-rs/canvas).
+  // When bundled, the CJS module structure breaks and require() returns a non-callable object.
+  // Marking it external forces Node.js to require() it directly at runtime.
+  serverExternalPackages: ["pdf-parse"],
   images: {
     remotePatterns: [
       {

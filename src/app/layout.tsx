@@ -1,5 +1,6 @@
 import "./globals.css";
 import NextTopLoader from "nextjs-toploader";
+import { ToastProvider } from "@/components/ui/Toast";
 
 export default function RootLayout({
   children,
@@ -10,7 +11,7 @@ export default function RootLayout({
     <html lang="en">
       <body suppressHydrationWarning>
         <NextTopLoader color="#475569" showSpinner={false} />
-        {children}
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   );

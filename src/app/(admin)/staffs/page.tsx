@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
+import { useToast } from "@/components/ui/Toast";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const ROWS_PER_PAGE = 20;
 
@@ -83,6 +86,8 @@ export default function StaffsPage() {
   const [returned, setReturned] = useState(0);
   const [pending, setPending] = useState(0);
 
+  const { showToast } = useToast();
+
   useEffect(() => {
     fetchStaffRecords();
     fetchDepartments();
@@ -124,11 +129,11 @@ export default function StaffsPage() {
       } else {
         const errorData = await res.json();
         console.error("Failed to fetch staff records:", errorData);
-        alert(`Error: ${errorData.error || "Failed to fetch staff records"}`);
+        showToast(`Error: ${errorData.error || "Failed to fetch staff records"}`, "error");
       }
     } catch (error) {
       console.error("Error fetching staff records:", error);
-      alert(`Error: ${error}`);
+      showToast(`Failed to load staff records`, "error");
     } finally {
       setLoading(false);
     }
@@ -140,10 +145,10 @@ export default function StaffsPage() {
   };
 
   const SortIcon = ({ col }: { col: SortCol }) => {
-    if (sortCol !== col) return <ArrowUpNarrowWide size={11} style={{ opacity: 0.3, marginLeft: 3, verticalAlign: 'middle' }} />;
+    if (sortCol !== col) return <ArrowUpNarrowWide size={11} style={{ opacity: 0.3, flexShrink: 0 }} />;
     return sortDir === 'asc'
-      ? <ArrowUpNarrowWide size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />
-      : <ArrowUpWideNarrow size={11} style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--accent)' }} />;
+      ? <ArrowUpNarrowWide size={11} style={{ flexShrink: 0, color: 'var(--accent)' }} />
+      : <ArrowUpWideNarrow size={11} style={{ flexShrink: 0, color: 'var(--accent)' }} />;
   };
 
   const uniqueMentors = Array.from(new Set(records.map(r => r.mentor).filter(Boolean)));
@@ -179,6 +184,55 @@ export default function StaffsPage() {
   const totalPages = Math.max(1, Math.ceil(filteredRecords.length / ROWS_PER_PAGE));
   const pageRows = showAll ? filteredRecords : filteredRecords.slice((currentPage - 1) * ROWS_PER_PAGE, currentPage * ROWS_PER_PAGE);
 
+  const exportPDF = () => {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    const extractDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Lending Data \u2013 Staff', 14, 16);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Extracted on: ${extractDate}`, 14, 23);
+    const head = [['S.No', 'Staff Name', 'Dept', 'Product', 'Qty', 'Borrow Date', 'Return Date', 'Status', 'Mobile']];
+    const body = filteredRecords.map((record, i) => {
+      const orig = record.original_quantity ?? record.quantity;
+      const d = record.damaged_quantity ?? 0;
+      const l = record.lost_quantity ?? 0;
+      let statusStr = record.status || '\u2014';
+      const PENDING_STATUSES = ['PENDING', 'PARTIALLY_RETURNED', 'PARTIALLY_DAMAGED', 'PARTIALLY_LOST'];
+      if (record.status === 'CONSUMABLE') statusStr = 'CONSUMABLE';
+      else if (PENDING_STATUSES.includes(record.status)) statusStr = record.status.replace(/_/g, ' ');
+      else {
+        const returnedCount = Math.max(0, orig - d - l);
+        const parts: string[] = [];
+        if (returnedCount > 0) parts.push(`${returnedCount} Returned`);
+        if (d > 0) parts.push(`${d} Damaged`);
+        if (l > 0) parts.push(`${l} Lost`);
+        if (parts.length > 0) statusStr = parts.join(', ');
+      }
+      return [
+        i + 1,
+        record.staff_name || '\u2014',
+        record.department || '\u2014',
+        record.product_name || '\u2014',
+        orig,
+        formatDate(record.borrow_date),
+        formatDate(record.return_date),
+        statusStr,
+        record.mobile || '\u2014',
+      ];
+    });
+    autoTable(doc, {
+      head,
+      body,
+      startY: 28,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [30, 41, 56], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+    });
+    doc.save(`staff-lending-data-${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
   const th: React.CSSProperties = {
     padding: '6px 10px',
     textAlign: 'left',
@@ -210,16 +264,24 @@ export default function StaffsPage() {
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>Staff Records</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Borrowing history by staff</div>
         </div>
-        <select
-          value={timeFilter}
-          onChange={(e) => setTimeFilter(e.target.value)}
-          style={{ fontSize: 11, border: '1px solid var(--border)', padding: '4px 8px', color: 'var(--fg)', background: 'var(--bg)', outline: 'none' }}
-        >
-          <option>Daily</option>
-          <option>Weekly</option>
-          <option>Monthly</option>
-          <option>Yearly</option>
-        </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            onClick={exportPDF}
+            style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: '#fff', color: 'var(--fg)', border: '1px solid var(--border)', cursor: 'pointer' }}
+          >
+            Export PDF
+          </button>
+          <select
+            value={timeFilter}
+            onChange={(e) => setTimeFilter(e.target.value)}
+            style={{ fontSize: 11, border: '1px solid var(--border)', padding: '4px 8px', color: 'var(--fg)', background: 'var(--bg)', outline: 'none' }}
+          >
+            <option>Daily</option>
+            <option>Weekly</option>
+            <option>Monthly</option>
+            <option>Yearly</option>
+          </select>
+        </div>
       </div>
 
       {/* Stats strip */}
@@ -283,9 +345,9 @@ export default function StaffsPage() {
               <th style={th}>Staff Name</th>
               <th style={th}>Dept</th>
               <th style={th}>Product</th>
-              <th style={{ ...th, cursor: 'pointer' }} onClick={() => handleSort('quantity')}>Qty <SortIcon col="quantity" /></th>
-              <th style={{ ...th, cursor: 'pointer' }} onClick={() => handleSort('borrow_date')}>Borrow Date <SortIcon col="borrow_date" /></th>
-              <th style={{ ...th, cursor: 'pointer' }} onClick={() => handleSort('return_date')}>Return Date <SortIcon col="return_date" /></th>
+              <th style={{ ...th, cursor: 'pointer' }} onClick={() => handleSort('quantity')}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Qty <SortIcon col="quantity" /></span></th>
+              <th style={{ ...th, cursor: 'pointer' }} onClick={() => handleSort('borrow_date')}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Borrow Date <SortIcon col="borrow_date" /></span></th>
+              <th style={{ ...th, cursor: 'pointer' }} onClick={() => handleSort('return_date')}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Return Date <SortIcon col="return_date" /></span></th>
               <th style={th}>Status</th>
               <th style={th}>Mobile</th>
             </tr>

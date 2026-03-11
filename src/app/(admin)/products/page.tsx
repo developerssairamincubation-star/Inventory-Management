@@ -4,28 +4,63 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import ImageCropModal from "@/components/ImageCropModal";
 
+interface ProductItem {
+  id: string;
+  productName: string;
+  sku: string;
+  quantity: number | '';
+  cost: number | '';
+  lowStockThreshold: number | '';
+  returnable: boolean | null;
+  imageFile: File | null;
+  imagePreview: string | null;
+  category_id: string;
+}
+
 export default function ProductsPage() {
   const router = useRouter();
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isUpdateStockModalOpen, setIsUpdateStockModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [sortField, setSortField] = useState<'price' | 'stock' | 'threshold' | ''>('');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [listCurrentPage, setListCurrentPage] = useState(1);
+  const [listShowAll, setListShowAll] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
 
-  // form fields
-  const [productName, setProductName] = useState('');
-  const [sku, setSku] = useState('');
-  const [quantity, setQuantity] = useState<number | ''>('');
-  const [cost, setCost] = useState<number | ''>('');
-  const [lowStockThreshold, setLowStockThreshold] = useState<number | ''>('');
-  const [returnable, setReturnable] = useState<boolean | null>(null);
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  // Categories
+  const [categories, setCategories] = useState<{category_id: string; category_name: string}[]>([]);
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [addCategoryLoading, setAddCategoryLoading] = useState(false);
+  const [addCategoryForContext, setAddCategoryForContext] = useState<{type: 'modal'|'inline'; itemId: string} | null>(null);
+
+  // Multi-item product addition
+  const [productItems, setProductItems] = useState<ProductItem[]>([{
+    id: '1',
+    productName: '',
+    sku: '',
+    quantity: '',
+    cost: '',
+    lowStockThreshold: '',
+    returnable: null,
+    imageFile: null,
+    imagePreview: null,
+    category_id: '',
+  }]);
+
+  // Image crop modal state
   const [cropSrc, setCropSrc] = useState<string | null>(null);
   const [showCropModal, setShowCropModal] = useState(false);
+  const [currentCropItemId, setCurrentCropItemId] = useState<string | null>(null);
+
+  // Inline add items in list view (array to support multiple inline additions)
+  const [inlineItems, setInlineItems] = useState<ProductItem[]>([]);
 
   // Update stock form fields
   const [additionalStock, setAdditionalStock] = useState<number | ''>('');
@@ -48,28 +83,201 @@ export default function ProductsPage() {
         if (mounted) setLoading(false);
       }
     }
+    async function fetchCategories() {
+      try {
+        const res = await fetch('/api/categories');
+        if (res.ok) {
+          const data = await res.json();
+          if (mounted) setCategories(data || []);
+        }
+      } catch { /* ignore */ }
+    }
     fetchProducts();
+    fetchCategories();
     return () => {
       mounted = false;
     };
   }, []);
 
+  // Helper functions for multi-item management
+  const addNewProductItem = () => {
+    setProductItems(prev => [...prev, {
+      id: Date.now().toString(),
+      productName: '',
+      sku: '',
+      quantity: '',
+      cost: '',
+      lowStockThreshold: '',
+      returnable: null,
+      imageFile: null,
+      imagePreview: null,
+      category_id: '',
+    }]);
+  };
+
+  const removeProductItem = (id: string) => {
+    if (productItems.length > 1) {
+      setProductItems(prev => prev.filter(item => item.id !== id));
+    }
+  };
+
+  // Use functional prev => form to avoid stale-closure issues
+  const updateProductItem = (id: string, field: keyof ProductItem, value: any) => {
+    setProductItems(prev => prev.map(item =>
+      item.id === id ? { ...item, [field]: value } : item
+    ));
+  };
+
+  // Merge multiple fields at once — avoids double-update / stale-closure when
+  // two fields (imageFile + imagePreview) must be set in a single render cycle
+  const mergeProductItem = (id: string, fields: Partial<ProductItem>) => {
+    setProductItems(prev => prev.map(item =>
+      item.id === id ? { ...item, ...fields } : item
+    ));
+  };
+
+  const resetProductItems = () => {
+    setProductItems([{
+      id: '1',
+      productName: '',
+      sku: '',
+      quantity: '',
+      cost: '',
+      lowStockThreshold: '',
+      returnable: null,
+      imageFile: null,
+      imagePreview: null,
+      category_id: '',
+    }]);
+  };
+
+  const resetInlineItem = () => {
+    setInlineItems([]);
+  };
+
+  const addNewInlineItem = () => {
+    setInlineItems(prev => [...prev, {
+      id: `inline-${Date.now()}`,
+      productName: '',
+      sku: '',
+      quantity: '',
+      cost: '',
+      lowStockThreshold: '',
+      returnable: null,
+      imageFile: null,
+      imagePreview: null,
+      category_id: '',
+    }]);
+  };
+
+  const removeInlineItem = (id: string) => {
+    setInlineItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  // Functional form to avoid stale closure
+  const updateInlineItem = (id: string, field: keyof ProductItem, value: any) => {
+    setInlineItems(prev => prev.map(item =>
+      item.id === id ? { ...item, [field]: value } : item
+    ));
+  };
+
+  const mergeInlineItem = (id: string, fields: Partial<ProductItem>) => {
+    setInlineItems(prev => prev.map(item =>
+      item.id === id ? { ...item, ...fields } : item
+    ));
+  };
+
   if (loading) return <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>Loading products…</div>;
 
-  // Filter products based on search query
-  const filteredProducts = products.filter((product) => {
-    if (!searchQuery) return true;
-    const normalized = (() => {
-      if (!product) return {};
-      const singleKey = Object.keys(product).length === 1 ? Object.keys(product)[0] : null;
-      if (singleKey && (singleKey === 'product' || singleKey === 'data' || singleKey === 'row')) {
-        return product[singleKey] ?? product;
+  const handleCreateCategory = async () => {
+    if (!newCategoryName.trim() || addCategoryLoading) return;
+    setAddCategoryLoading(true);
+    try {
+      const res = await fetch('/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category_name: newCategoryName.trim() }),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setCategories(prev => [...prev, created]);
+        if (addCategoryForContext) {
+          if (addCategoryForContext.type === 'modal') {
+            updateProductItem(addCategoryForContext.itemId, 'category_id', created.category_id);
+          } else {
+            updateInlineItem(addCategoryForContext.itemId, 'category_id', created.category_id);
+          }
+        }
+        setNewCategoryName('');
+        setShowAddCategoryModal(false);
+        setAddCategoryForContext(null);
       }
-      return product;
-    })();
-    const name = (normalized.name || normalized.title || normalized.product_name || normalized.productName || normalized.pname || normalized.label || '').toLowerCase();
-    return name.includes(searchQuery.toLowerCase());
+    } catch (err) {
+      console.error('Error creating category:', err);
+    } finally {
+      setAddCategoryLoading(false);
+    }
+  };
+
+  // Helper to normalize product data
+  const normalizeProduct = (product: any) => {
+    if (!product) return {} as any;
+    const singleKey = Object.keys(product).length === 1 ? Object.keys(product)[0] : null;
+    if (singleKey && (singleKey === 'product' || singleKey === 'data' || singleKey === 'row')) {
+      return product[singleKey] ?? product;
+    }
+    return product;
+  };
+
+  // Filter and sort products
+  let filteredProducts = products.filter((product) => {
+    const norm = normalizeProduct(product);
+    if (searchQuery) {
+      const name = (norm.name || norm.title || norm.product_name || norm.productName || norm.pname || norm.label || '').toLowerCase();
+      if (!name.includes(searchQuery.toLowerCase())) return false;
+    }
+    if (categoryFilter) {
+      const catId = norm.category_id ?? '';
+      if (catId !== categoryFilter) return false;
+    }
+    return true;
   });
+
+  if (sortField) {
+    filteredProducts = [...filteredProducts].sort((a, b) => {
+      const na = normalizeProduct(a);
+      const nb = normalizeProduct(b);
+      let av: number, bv: number;
+      if (sortField === 'price') {
+        av = Number(na.cost ?? na.price ?? na.unit_cost ?? 0);
+        bv = Number(nb.cost ?? nb.price ?? nb.unit_cost ?? 0);
+      } else if (sortField === 'stock') {
+        av = na.stocks?.quantity ?? na.stock ?? na.quantity ?? 0;
+        bv = nb.stocks?.quantity ?? nb.stock ?? nb.quantity ?? 0;
+      } else {
+        av = na.low_stock_threshold ?? 0;
+        bv = nb.low_stock_threshold ?? 0;
+      }
+      return sortDir === 'asc' ? av - bv : bv - av;
+    });
+  }
+
+  const LIST_ROWS_PER_PAGE = 20;
+  const listTotalPages = Math.max(1, Math.ceil(filteredProducts.length / LIST_ROWS_PER_PAGE));
+  const listStartIdx = (listCurrentPage - 1) * LIST_ROWS_PER_PAGE;
+  const listEndIdx = listStartIdx + LIST_ROWS_PER_PAGE;
+  const listPageRows = listShowAll ? filteredProducts : filteredProducts.slice(listStartIdx, listEndIdx);
+
+  const handleProductSort = (field: 'price' | 'stock' | 'threshold') => {
+    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortField(field); setSortDir('asc'); }
+    setListCurrentPage(1);
+  };
+
+  function ProductSortIcon({ field: f }: { field: 'price' | 'stock' | 'threshold' }) {
+    if (sortField !== f) return <span style={{ opacity: 0.3, fontSize: 10, marginLeft: 3 }}>↑</span>;
+    return <span style={{ color: 'var(--accent)', fontSize: 10, marginLeft: 3 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>;
+  }
 
   const handleOpenUpdateStock = (product: any) => {
     setSelectedProduct(product);
@@ -149,16 +357,9 @@ export default function ProductsPage() {
         <div style={{ display: 'flex', borderTop: '1px solid var(--border)' }}>
           <button
             onClick={(e) => { e.stopPropagation(); handleOpenUpdateStock(normalized); }}
-            style={{ flex: 1, padding: '7px 0', fontSize: 11, color: 'var(--fg)', background: 'none', border: 'none', borderRight: '1px solid var(--border)', cursor: 'pointer' }}
+            style={{ flex: 1, padding: '7px 0', fontSize: 11, color: 'var(--fg)', background: 'none', border: 'none', cursor: 'pointer' }}
           >
             Update Stock
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); handleNavigate(); }}
-            style={{ width: 40, padding: '7px 0', fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            title="View Details"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
         </div>
       </div>
@@ -203,7 +404,7 @@ export default function ProductsPage() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -215,7 +416,7 @@ export default function ProductsPage() {
           <input
             placeholder="Search products…"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => { setSearchQuery(e.target.value); setListCurrentPage(1); }}
             style={{ padding: '5px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: 'var(--bg)', outline: 'none', width: 220 }}
           />
           <div style={{ display: 'flex', border: '1px solid var(--border)' }}>
@@ -241,121 +442,397 @@ export default function ProductsPage() {
         </div>
       </div>
 
+      {/* Filters Row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+        <select
+          value={categoryFilter}
+          onChange={(e) => { setCategoryFilter(e.target.value); setListCurrentPage(1); }}
+          style={{ padding: '5px 8px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: 'var(--bg)', outline: 'none', cursor: 'pointer' }}
+        >
+          <option value="">All Categories</option>
+          {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
+        </select>
+        {(categoryFilter || sortField) && (
+          <button
+            onClick={() => { setCategoryFilter(''); setSortField(''); setSortDir('asc'); setListCurrentPage(1); }}
+            style={{ padding: '5px 8px', fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--muted)', cursor: 'pointer' }}
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
       {/* Add Product Modal */}
       {isModalOpen && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }}>
-          <div style={{ background: '#fff', width: '90%', maxWidth: 640, padding: 24, position: 'relative' }}>
+          <div style={{ background: '#fff', width: '95%', maxWidth: 1200, padding: 24, position: 'relative', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Add New Product</div>
-              <button onClick={() => setIsModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1 }}>×</button>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Add New Products</div>
+              <button onClick={() => { setIsModalOpen(false); resetProductItems(); }} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1 }}>×</button>
             </div>
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
                 setSaving(true);
-                let image_url: string | undefined = undefined;
-                if (imageFile) {
-                  try {
-                    const formData = new FormData();
-                    formData.append('file', imageFile);
-                    formData.append('folder', 'products');
-                    const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
-                    if (uploadRes.ok) { const uploadData = await uploadRes.json(); image_url = uploadData.url; }
-                  } catch (uploadErr) { console.error('Image upload error:', uploadErr); }
-                }
-                const body: any = {
-                  name: productName || undefined,
-                  sku: sku || undefined,
-                  quantity: quantity === '' ? undefined : Number(quantity),
-                  cost: cost === '' ? undefined : Number(cost),
-                  low_stock_threshold: lowStockThreshold === '' ? undefined : Number(lowStockThreshold),
-                  returnable: returnable === null ? undefined : !!returnable,
-                  image_url: image_url ?? undefined,
-                };
+                
                 try {
-                  const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-                  if (!res.ok) { setSaving(false); return; }
-                  const created = await res.json();
-                  const newProduct = created.product || created;
-                  const newStock = created.stock;
-                  setProducts((p) => [{ ...newProduct, stocks: { quantity: newStock?.quantity ?? (quantity === '' ? 0 : Number(quantity)) } }, ...p]);
-                  setProductName(''); setSku(''); setQuantity(''); setCost(''); setLowStockThreshold(''); setReturnable(null); setImageFile(null); setImagePreview(null);
+                  // Process each product item
+                  for (const item of productItems) {
+                    let image_url: string | undefined = undefined;
+                    
+                    // Upload image if exists
+                    if (item.imageFile) {
+                      try {
+                        const formData = new FormData();
+                        formData.append('file', item.imageFile);
+                        formData.append('folder', 'products');
+                        const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+                        if (uploadRes.ok) {
+                          const uploadData = await uploadRes.json();
+                          image_url = uploadData.url;
+                          if (!image_url) console.error('[upload] missing url in response', uploadData);
+                        } else {
+                          const text = await uploadRes.text();
+                          console.error('[upload] non-OK response:', uploadRes.status, text);
+                        }
+                        // Fallback: if upload didn't provide a URL, use the local data URL preview so UI shows the image.
+                        if (!image_url && item.imagePreview) {
+                          console.warn('[upload] falling back to data URL for product image (not persisted to S3)');
+                          image_url = item.imagePreview;
+                        }
+                      } catch (uploadErr) {
+                        console.error('Image upload error:', uploadErr);
+                      }
+                    }
+
+                    const body: any = {
+                      name: item.productName || undefined,
+                      sku: item.sku || undefined,
+                      quantity: item.quantity === '' ? undefined : Number(item.quantity),
+                      cost: item.cost === '' ? undefined : Number(item.cost),
+                      low_stock_threshold: item.lowStockThreshold === '' ? undefined : Number(item.lowStockThreshold),
+                      returnable: item.returnable === null ? undefined : !!item.returnable,
+                      image_url: image_url ?? undefined,
+                      category_id: item.category_id || undefined,
+                    };
+
+                    const res = await fetch('/api/products', { 
+                      method: 'POST', 
+                      headers: { 'Content-Type': 'application/json' }, 
+                      body: JSON.stringify(body) 
+                    });
+                    
+                    if (res.ok) {
+                      const created = await res.json();
+                      const newProduct = created.product || created;
+                      const newStock = created.stock;
+                      setProducts((p) => [{ 
+                        ...newProduct, 
+                        stocks: { 
+                          quantity: newStock?.quantity ?? (item.quantity === '' ? 0 : Number(item.quantity)) 
+                        } 
+                      }, ...p]);
+                    }
+                  }
+                  
+                  resetProductItems();
                   setIsModalOpen(false);
-                } catch (_err) { /* silently ignore */ }
-                finally { setSaving(false); }
+                } catch (_err) { 
+                  console.error('Error adding products:', _err);
+                } finally { 
+                  setSaving(false); 
+                }
               }}
             >
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={labelStyle}>Product Name</label>
-                  <input required value={productName} onChange={(e) => setProductName(e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>SKU / Serial Number</label>
-                  <input value={sku} onChange={(e) => setSku(e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Initial Quantity</label>
-                  <input type="number" min={0} value={quantity as any} onChange={(e) => setQuantity(e.target.value === '' ? '' : Number(e.target.value))} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Cost per Unit</label>
-                  <input type="number" step="0.01" min={0} value={cost as any} onChange={(e) => setCost(e.target.value === '' ? '' : Number(e.target.value))} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Low Stock Threshold</label>
-                  <input type="number" min={0} value={lowStockThreshold as any} onChange={(e) => setLowStockThreshold(e.target.value === '' ? '' : Number(e.target.value))} style={inputStyle} placeholder="Alert when below" />
-                </div>
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <label style={labelStyle}>Product Photo</label>
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', cursor: 'pointer' }}>
-                    Upload &amp; Crop image
-                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null;
-                      if (f) {
-                        const fr = new FileReader();
-                        fr.onload = () => {
-                          if (typeof fr.result === 'string') {
-                            setCropSrc(fr.result);
-                            setShowCropModal(true);
-                          }
-                        };
-                        fr.readAsDataURL(f);
-                      } else {
-                        setImageFile(null);
-                        setImagePreview(null);
-                      }
-                      // Reset input so same file can be re-selected
-                      e.target.value = '';
-                    }} />
-                  </label>
-                  {imagePreview && (
-                    <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 72, height: 72, border: '1px solid var(--border)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--surface)' }}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={imagePreview} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="preview" />
-                      </div>
-                      <button type="button" onClick={() => { setCropSrc(imagePreview); setShowCropModal(true); }} style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: '1px solid var(--border)', padding: '3px 8px', cursor: 'pointer' }}>Re-crop</button>
-                    </div>
-                  )}
-                </div>
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <label style={labelStyle}>Type</label>
-                  <div style={{ display: 'flex', gap: 16 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
-                      <input type="radio" name="returnable" checked={returnable === true} onChange={() => setReturnable(true)} /> Returnable
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
-                      <input type="radio" name="returnable" checked={returnable === false} onChange={() => setReturnable(false)} /> Consumable
-                    </label>
-                  </div>
-                </div>
+              {/* Header Row */}
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: '40px 50px 2fr 1.5fr 1fr 1fr 1fr 80px 1.2fr 1.2fr 40px', 
+                gap: 8, 
+                marginBottom: 8, 
+                paddingBottom: 6, 
+                borderBottom: '1px solid var(--border)' 
+              }}>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>#</div>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Image</div>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Product Name</div>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>SKU</div>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Qty</div>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Cost</div>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Threshold</div>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Type</div>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Category</div>
+                <div></div>
+                <div></div>
               </div>
-              <div style={{ marginTop: 18, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <button type="button" onClick={() => setIsModalOpen(false)} style={{ padding: '5px 14px', fontSize: 12, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
-                <button type="submit" disabled={saving} style={{ padding: '5px 14px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>{saving ? 'Saving…' : 'Save'}</button>
+
+              {/* Product Items */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '50vh', overflowY: 'auto', paddingRight: 4 }}>
+                {productItems.map((item, index) => (
+                  <div key={item.id} style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: '40px 50px 2fr 1.5fr 1fr 1fr 1fr 80px 1.2fr 1.2fr 40px', 
+                    gap: 8,
+                    alignItems: 'start',
+                    padding: '8px 4px',
+                    background: index % 2 === 0 ? '#fff' : 'var(--surface)',
+                    borderRadius: 2
+                  }}>
+                    {/* Index */}
+                    <div style={{ fontSize: 11, color: 'var(--muted)', paddingTop: 5 }}>{index + 1}</div>
+                    
+                    {/* Image */}
+                    <div>
+                      <label style={{ 
+                        display: 'block', 
+                        width: 40, 
+                        height: 40, 
+                        border: '1px dashed var(--border)', 
+                        cursor: 'pointer',
+                        overflow: 'hidden',
+                        position: 'relative'
+                      }}>
+                        {item.imagePreview ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={item.imagePreview} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="preview" />
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 18, color: 'var(--muted)' }}>+</div>
+                        )}
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          style={{ display: 'none' }} 
+                          onChange={(e) => {
+                            const f = e.target.files?.[0] ?? null;
+                            if (f) {
+                              const fr = new FileReader();
+                              fr.onload = () => {
+                                if (typeof fr.result === 'string') {
+                                  setCropSrc(fr.result);
+                                  setCurrentCropItemId(item.id);
+                                  setShowCropModal(true);
+                                }
+                              };
+                              fr.readAsDataURL(f);
+                            }
+                            e.target.value = '';
+                          }} 
+                        />
+                      </label>
+                    </div>
+
+                    {/* Product Name */}
+                    <input 
+                      required
+                      value={item.productName} 
+                      onChange={(e) => updateProductItem(item.id, 'productName', e.target.value)} 
+                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
+                      placeholder="Product name"
+                    />
+
+                    {/* SKU */}
+                    <input 
+                      value={item.sku} 
+                      onChange={(e) => updateProductItem(item.id, 'sku', e.target.value)} 
+                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
+                      placeholder="SKU"
+                    />
+
+                    {/* Quantity */}
+                    <input 
+                      type="number" 
+                      min={0} 
+                      value={item.quantity as any} 
+                      onChange={(e) => updateProductItem(item.id, 'quantity', e.target.value === '' ? '' : Number(e.target.value))} 
+                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
+                      placeholder="0"
+                    />
+
+                    {/* Cost */}
+                    <input 
+                      type="number" 
+                      step="0.01" 
+                      min={0} 
+                      value={item.cost as any} 
+                      onChange={(e) => updateProductItem(item.id, 'cost', e.target.value === '' ? '' : Number(e.target.value))} 
+                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
+                      placeholder="0.00"
+                    />
+
+                    {/* Low Stock Threshold */}
+                    <input 
+                      type="number" 
+                      min={0} 
+                      value={item.lowStockThreshold as any} 
+                      onChange={(e) => updateProductItem(item.id, 'lowStockThreshold', e.target.value === '' ? '' : Number(e.target.value))} 
+                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
+                      placeholder="0"
+                    />
+
+                    {/* Type */}
+                    <select
+                      value={item.returnable === null ? '' : item.returnable ? 'returnable' : 'consumable'}
+                      onChange={(e) => updateProductItem(item.id, 'returnable', e.target.value === '' ? null : e.target.value === 'returnable')}
+                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
+                    >
+                      <option value="">Select</option>
+                      <option value="returnable">Returnable</option>
+                      <option value="consumable">Consumable</option>
+                    </select>
+
+                    {/* Category */}
+                    <select
+                      value={item.category_id}
+                      onChange={(e) => {
+                        if (e.target.value === '__add_new__') {
+                          setAddCategoryForContext({ type: 'modal', itemId: item.id });
+                          setShowAddCategoryModal(true);
+                        } else {
+                          updateProductItem(item.id, 'category_id', e.target.value);
+                        }
+                      }}
+                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
+                    >
+                      <option value="">Category…</option>
+                      {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
+                      <option value="__add_new__">╋ Add New Category</option>
+                    </select>
+
+                    {/* Re-crop button (if image exists) */}
+                    <div>
+                      {item.imagePreview && (
+                        <button 
+                          type="button" 
+                          onClick={() => { 
+                            setCropSrc(item.imagePreview); 
+                            setCurrentCropItemId(item.id);
+                            setShowCropModal(true); 
+                          }} 
+                          style={{ 
+                            fontSize: 9, 
+                            color: 'var(--accent)', 
+                            background: 'none', 
+                            border: '1px solid var(--border)', 
+                            padding: '3px 6px', 
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          Re-crop
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Remove button */}
+                    <div>
+                      {productItems.length > 1 && (
+                        <button 
+                          type="button" 
+                          onClick={() => removeProductItem(item.id)} 
+                          style={{ 
+                            background: 'none', 
+                            border: 'none', 
+                            fontSize: 16, 
+                            color: 'var(--danger)', 
+                            cursor: 'pointer',
+                            padding: 0,
+                            width: '100%',
+                            height: 32,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                          title="Remove item"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add Item Button */}
+              <div style={{ marginTop: 12 }}>
+                <button 
+                  type="button" 
+                  onClick={addNewProductItem} 
+                  style={{ 
+                    padding: '6px 12px', 
+                    fontSize: 11, 
+                    border: '1px dashed var(--border)', 
+                    background: 'var(--bg)', 
+                    color: 'var(--accent)', 
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    width: '100%'
+                  }}
+                >
+                  + Add Item
+                </button>
+              </div>
+
+              {/* Form Actions */}
+              <div style={{ marginTop: 18, display: 'flex', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                <button 
+                  type="button" 
+                  onClick={() => { setIsModalOpen(false); resetProductItems(); }} 
+                  style={{ 
+                    padding: '5px 14px', 
+                    fontSize: 12, 
+                    border: '1px solid var(--border)', 
+                    background: 'var(--bg)', 
+                    color: 'var(--fg)', 
+                    cursor: 'pointer' 
+                  }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={saving} 
+                  style={{ 
+                    padding: '5px 14px', 
+                    fontSize: 12, 
+                    background: 'var(--accent)', 
+                    color: '#fff', 
+                    border: 'none', 
+                    cursor: 'pointer', 
+                    fontWeight: 600 
+                  }}
+                >
+                  {saving ? 'Saving…' : `Save ${productItems.length} Product${productItems.length > 1 ? 's' : ''}`}
+                </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Category Mini Modal */}
+      {showAddCategoryModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }}>
+          <div style={{ background: '#fff', border: '1px solid var(--border)', padding: 20, width: 340, boxShadow: '0 4px 20px rgba(0,0,0,0.15)' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)', marginBottom: 14 }}>Add New Category</div>
+            <input
+              autoFocus
+              value={newCategoryName}
+              onChange={e => setNewCategoryName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleCreateCategory()}
+              placeholder="Category name…"
+              style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', boxSizing: 'border-box', marginBottom: 14, outline: 'none' }}
+            />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => { setShowAddCategoryModal(false); setNewCategoryName(''); setAddCategoryForContext(null); }}
+                style={{ padding: '5px 14px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}
+              >Cancel</button>
+              <button
+                onClick={handleCreateCategory}
+                disabled={!newCategoryName.trim() || addCategoryLoading}
+                style={{ padding: '5px 14px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600, opacity: !newCategoryName.trim() || addCategoryLoading ? 0.5 : 1 }}
+              >{addCategoryLoading ? 'Adding…' : 'Add Category'}</button>
+            </div>
           </div>
         </div>
       )}
@@ -366,14 +843,21 @@ export default function ProductsPage() {
           imageSrc={cropSrc}
           aspect={1}
           onCrop={(dataUrl, file) => {
-            setImageFile(file);
-            setImagePreview(dataUrl);
+            // Merge both fields in ONE state update — two separate calls would
+            // cause the second to see stale state and silently drop imageFile
+            if (currentCropItemId?.startsWith('inline-')) {
+              mergeInlineItem(currentCropItemId, { imageFile: file, imagePreview: dataUrl });
+            } else if (currentCropItemId) {
+              mergeProductItem(currentCropItemId, { imageFile: file, imagePreview: dataUrl });
+            }
             setShowCropModal(false);
             setCropSrc(null);
+            setCurrentCropItemId(null);
           }}
           onClose={() => {
             setShowCropModal(false);
             setCropSrc(null);
+            setCurrentCropItemId(null);
           }}
         />
       )}
@@ -419,53 +903,349 @@ export default function ProductsPage() {
 
       {/* Product Grid / List */}
       {viewMode === 'grid' ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, marginTop: 12 }}>
           {filteredProducts.map((product) => (
             <ProductCard key={product.id ?? Math.random()} product={product} />
           ))}
         </div>
       ) : (
-        <div style={{ background: '#fff', border: '1px solid var(--border)', overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ background: 'var(--surface)' }}>
-                <th style={th}>Product Name</th>
-                <th style={th}>Code</th>
-                <th style={th}>Cost</th>
-                <th style={th}>Stock</th>
-                <th style={th}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProducts.map((product, idx) => {
-                const normalized = (() => {
-                  if (!product) return {} as any;
-                  const singleKey = Object.keys(product).length === 1 ? Object.keys(product)[0] : null;
-                  if (singleKey && (singleKey === 'product' || singleKey === 'data' || singleKey === 'row')) return product[singleKey] ?? product;
-                  return product;
-                })();
-                const name = normalized.name || normalized.title || normalized.product_name || normalized.productName || normalized.label || 'Unnamed';
-                const code = normalized.product_code ?? normalized.productCode ?? '—';
-                const id = normalized.id ?? normalized.product_id ?? idx;
-                const cost = normalized.cost ?? normalized.price ?? normalized.unit_cost ?? '—';
-                const stock = normalized.stocks?.quantity ?? normalized.stock ?? normalized.quantity ?? 0;
-                return (
-                  <tr key={id}>
-                    <td style={{ ...td, fontWeight: 500 }}>{name}</td>
-                    <td style={td}>{code}</td>
-                    <td style={td}>{cost}</td>
-                    <td style={td}>{stock}</td>
+        <div style={{ background: '#fff', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, marginTop: 12 }}>
+          <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
+                <tr style={{ background: 'var(--surface)' }}>
+                  <th style={{ ...th, width: 80 }}>Image</th>
+                  <th style={th}>Product Name</th>
+                  <th style={th}>SKU</th>
+                  <th style={th}>Type</th>
+                  <th style={th}>Category</th>
+                  <th onClick={() => handleProductSort('stock')} style={{ ...th, width: 80, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>Stock<ProductSortIcon field="stock" /></span></th>
+                  <th onClick={() => handleProductSort('price')} style={{ ...th, width: 90, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>Price<ProductSortIcon field="price" /></span></th>
+                  <th onClick={() => handleProductSort('threshold')} style={{ ...th, width: 80, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>Threshold<ProductSortIcon field="threshold" /></span></th>
+                  <th style={{ ...th, width: 200 }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {listPageRows.map((product, idx) => {
+                  const normalized = (() => {
+                    if (!product) return {} as any;
+                    const singleKey = Object.keys(product).length === 1 ? Object.keys(product)[0] : null;
+                    if (singleKey && (singleKey === 'product' || singleKey === 'data' || singleKey === 'row')) return product[singleKey] ?? product;
+                    return product;
+                  })();
+                  const name = normalized.name || normalized.title || normalized.product_name || normalized.productName || normalized.label || 'Unnamed';
+                  const id = normalized.id ?? normalized.product_id ?? idx;
+                  const cost = normalized.cost ?? normalized.price ?? normalized.unit_cost ?? '—';
+                  const stock = normalized.stocks?.quantity ?? normalized.stock ?? normalized.quantity ?? 0;
+                  const image = normalized.image_url || normalized.image || normalized.photo || normalized.imageUrl || null;
+                  const returnable = normalized.returnable;
+                  const productType = returnable === true ? 'Returnable' : returnable === false ? 'Consumable' : '—';
+                  const sku = normalized.sku || normalized.product_code || '—';
+                  const threshold = normalized.low_stock_threshold ?? '—';
+                  const categoryName = normalized.category_name ?? '—';
+                  
+                  return (
+                    <tr
+                      key={id}
+                      onClick={() => { const pid = normalized.product_id ?? normalized.id; if (pid) router.push(`/products/${pid}`); }}
+                      style={{ cursor: 'pointer' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = '')}
+                    >
+                      <td style={td}>
+                        <div style={{ width: 60, height: 60, border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 4 }}>
+                          {image ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={image} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <div style={{ fontSize: 9, color: 'var(--muted)' }}>No img</div>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ ...td, fontWeight: 500 }}>{name}</td>
+                      <td style={td}>{sku}</td>
+                      <td style={td}>{productType}</td>
+                      <td style={td}>{categoryName}</td>
+                      <td style={td}>{stock}</td>
+                      <td style={td}>{cost}</td>
+                      <td style={td}>{threshold}</td>
+                      <td style={td}>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button onClick={(e) => { e.stopPropagation(); handleOpenUpdateStock(normalized); }} style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--fg)', cursor: 'pointer' }}>Update Stock</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {/* Inline Add Item Rows */}
+                {inlineItems.map((item, idx) => (
+                  <tr key={item.id} style={{ background: idx % 2 === 0 ? 'var(--surface)' : '#fffef5' }}>
+                    <td style={td}>
+                      <label style={{ 
+                        display: 'block', 
+                        width: 60, 
+                        height: 60, 
+                        border: '1px dashed var(--border)', 
+                        cursor: 'pointer',
+                        overflow: 'hidden',
+                        position: 'relative',
+                        borderRadius: 4
+                      }}>
+                        {item.imagePreview ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={item.imagePreview} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="preview" />
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 20, color: 'var(--muted)' }}>+</div>
+                        )}
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          style={{ display: 'none' }} 
+                          onChange={(e) => {
+                            const f = e.target.files?.[0] ?? null;
+                            if (f) {
+                              const fr = new FileReader();
+                              fr.onload = () => {
+                                if (typeof fr.result === 'string') {
+                                  setCropSrc(fr.result);
+                                  setCurrentCropItemId(item.id);
+                                  setShowCropModal(true);
+                                }
+                              };
+                              fr.readAsDataURL(f);
+                            }
+                            e.target.value = '';
+                          }} 
+                        />
+                      </label>
+                    </td>
+                    <td style={td}>
+                      <input 
+                        value={item.productName} 
+                        onChange={(e) => updateInlineItem(item.id, 'productName', e.target.value)} 
+                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
+                        placeholder="Product name"
+                      />
+                    </td>
+                    <td style={td}>
+                      <input 
+                        value={item.sku} 
+                        onChange={(e) => updateInlineItem(item.id, 'sku', e.target.value)} 
+                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
+                        placeholder="SKU"
+                      />
+                    </td>
+                    <td style={td}>
+                      <select
+                        value={item.returnable === null ? '' : item.returnable ? 'returnable' : 'consumable'}
+                        onChange={(e) => updateInlineItem(item.id, 'returnable', e.target.value === '' ? null : e.target.value === 'returnable')}
+                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
+                      >
+                        <option value="">Select</option>
+                        <option value="returnable">Returnable</option>
+                        <option value="consumable">Consumable</option>
+                      </select>
+                    </td>
+                    <td style={td}>
+                      <select
+                        value={item.category_id}
+                        onChange={(e) => {
+                          if (e.target.value === '__add_new__') {
+                            setAddCategoryForContext({ type: 'inline', itemId: item.id });
+                            setShowAddCategoryModal(true);
+                          } else {
+                            updateInlineItem(item.id, 'category_id', e.target.value);
+                          }
+                        }}
+                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
+                      >
+                        <option value="">Category…</option>
+                        {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
+                        <option value="__add_new__">╋ Add New Category</option>
+                      </select>
+                    </td>
+                    <td style={td}>
+                      <input 
+                        type="number" 
+                        min={0} 
+                        value={item.quantity as any} 
+                        onChange={(e) => updateInlineItem(item.id, 'quantity', e.target.value === '' ? '' : Number(e.target.value))} 
+                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
+                        placeholder="0"
+                      />
+                    </td>
+                    <td style={td}>
+                      <input 
+                        type="number" 
+                        step="0.01" 
+                        min={0} 
+                        value={item.cost as any} 
+                        onChange={(e) => updateInlineItem(item.id, 'cost', e.target.value === '' ? '' : Number(e.target.value))} 
+                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
+                        placeholder="0.00"
+                      />
+                    </td>
+                    <td style={td}>
+                      <input 
+                        type="number" 
+                        min={0} 
+                        value={item.lowStockThreshold as any} 
+                        onChange={(e) => updateInlineItem(item.id, 'lowStockThreshold', e.target.value === '' ? '' : Number(e.target.value))} 
+                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
+                        placeholder="0"
+                      />
+                    </td>
                     <td style={td}>
                       <div style={{ display: 'flex', gap: 6 }}>
-                        <button onClick={() => handleOpenUpdateStock(normalized)} style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--fg)', cursor: 'pointer' }}>Update Stock</button>
-                        <button onClick={() => { const pid = normalized.product_id ?? normalized.id; if (pid) router.push(`/products/${pid}`); }} style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--accent)', cursor: 'pointer' }}>View</button>
+                        <button 
+                          onClick={async () => {
+                            if (!item.productName) return;
+                            setSaving(true);
+                            
+                            try {
+                              let image_url: string | undefined = undefined;
+                              
+                              if (item.imageFile) {
+                                try {
+                                  const formData = new FormData();
+                                  formData.append('file', item.imageFile);
+                                  formData.append('folder', 'products');
+                                  const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+                                  if (uploadRes.ok) {
+                                    const uploadData = await uploadRes.json();
+                                    image_url = uploadData.url;
+                                    if (!image_url) console.error('[upload] missing url in response', uploadData);
+                                  } else {
+                                    const text = await uploadRes.text();
+                                    console.error('[upload] non-OK response:', uploadRes.status, text);
+                                  }
+                                  // Fallback to local data URL preview if upload to S3 failed
+                                  if (!image_url && item.imagePreview) {
+                                    console.warn('[upload] falling back to data URL for inline product image (not persisted to S3)');
+                                    image_url = item.imagePreview;
+                                  }
+                                } catch (uploadErr) {
+                                  console.error('Image upload error:', uploadErr);
+                                }
+                              }
+
+                              const body: any = {
+                                name: item.productName || undefined,
+                                sku: item.sku || undefined,
+                                quantity: item.quantity === '' ? undefined : Number(item.quantity),
+                                cost: item.cost === '' ? undefined : Number(item.cost),
+                                low_stock_threshold: item.lowStockThreshold === '' ? undefined : Number(item.lowStockThreshold),
+                                returnable: item.returnable === null ? undefined : !!item.returnable,
+                                image_url: image_url ?? undefined,
+                                category_id: item.category_id || undefined,
+                              };
+
+                              const res = await fetch('/api/products', { 
+                                method: 'POST', 
+                                headers: { 'Content-Type': 'application/json' }, 
+                                body: JSON.stringify(body) 
+                              });
+                              
+                              if (res.ok) {
+                                const created = await res.json();
+                                const newProduct = created.product || created;
+                                const newStock = created.stock;
+                                setProducts((p) => [{ 
+                                  ...newProduct, 
+                                  stocks: { 
+                                    quantity: newStock?.quantity ?? (item.quantity === '' ? 0 : Number(item.quantity)) 
+                                  } 
+                                }, ...p]);
+                                
+                                // Remove this item from inline items
+                                removeInlineItem(item.id);
+                              }
+                            } catch (_err) { 
+                              console.error('Error adding product:', _err);
+                            } finally { 
+                              setSaving(false); 
+                            }
+                          }} 
+                          disabled={saving || !item.productName}
+                          style={{ 
+                            padding: '3px 10px', 
+                            fontSize: 11, 
+                            background: 'var(--accent)', 
+                            color: '#fff', 
+                            border: 'none', 
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          {saving ? 'Saving…' : 'Save'}
+                        </button>
+                        <button 
+                          onClick={() => removeInlineItem(item.id)} 
+                          style={{ 
+                            padding: '3px 10px', 
+                            fontSize: 11, 
+                            border: '1px solid var(--border)', 
+                            background: 'var(--bg)', 
+                            color: 'var(--fg)', 
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          ×
+                        </button>
                       </div>
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Bottom bar: Add Item + Pagination */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', background: 'var(--surface)', padding: '8px 12px', borderTop: '1px solid var(--border)', flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button
+                onClick={addNewInlineItem}
+                style={{ padding: '5px 12px', fontSize: 11, border: '1px dashed var(--border)', background: 'var(--bg)', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600 }}
+              >
+                + Add Item
+              </button>
+              {filteredProducts.length > 0 && (
+                <span>Showing {listShowAll ? filteredProducts.length : `${Math.min(listStartIdx + 1, filteredProducts.length)}–${Math.min(listEndIdx, filteredProducts.length)}`} of {filteredProducts.length}</span>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                onClick={() => setListShowAll(!listShowAll)}
+                style={{ padding: '4px 10px', fontSize: 11, background: listShowAll ? 'var(--accent)' : 'var(--bg)', color: listShowAll ? '#fff' : 'var(--fg)', border: '1px solid var(--border)', cursor: 'pointer' }}
+              >
+                {listShowAll ? 'Paginate' : 'Show All'}
+              </button>
+              {!listShowAll && listTotalPages > 1 && (
+                <>
+                  <button
+                    onClick={() => setListCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={listCurrentPage === 1}
+                    style={{ padding: '4px 8px', fontSize: 11, background: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--border)', cursor: listCurrentPage === 1 ? 'not-allowed' : 'pointer', opacity: listCurrentPage === 1 ? 0.5 : 1 }}
+                  >Prev</button>
+                  {Array.from({ length: listTotalPages }, (_, i) => i + 1).map(page => (
+                    <button
+                      key={page}
+                      onClick={() => setListCurrentPage(page)}
+                      style={{ padding: '4px 8px', fontSize: 11, background: listCurrentPage === page ? 'var(--accent)' : 'var(--bg)', color: listCurrentPage === page ? '#fff' : 'var(--fg)', border: '1px solid var(--border)', cursor: 'pointer', fontWeight: listCurrentPage === page ? 600 : 400 }}
+                    >{page}</button>
+                  ))}
+                  <button
+                    onClick={() => setListCurrentPage(p => Math.min(listTotalPages, p + 1))}
+                    disabled={listCurrentPage === listTotalPages}
+                    style={{ padding: '4px 8px', fontSize: 11, background: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--border)', cursor: listCurrentPage === listTotalPages ? 'not-allowed' : 'pointer', opacity: listCurrentPage === listTotalPages ? 0.5 : 1 }}
+                  >Next</button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
