@@ -84,6 +84,13 @@ type Staff = {
   name: string;
 };
 
+// const th: React.CSSProperties = {
+//     border: '1px solid #1D293780',
+// };
+// const td: React.CSSProperties = {
+//   border: '1px solid #1D293780',
+// };
+
 export default function LendingPage() {
   const [records, setRecords] = useState<LendingRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -759,7 +766,7 @@ export default function LendingPage() {
   );
 
   return (
-    <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 28px', height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ maxWidth: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Page Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
@@ -872,21 +879,21 @@ export default function LendingPage() {
       {/* Table */}
       <div style={{ background: '#fff', border: '1px solid var(--border)', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, minHeight: 0 }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }} className="[&_td]:border [&_td]:border-[#1D293780]">
           <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
             <tr style={{ background: 'var(--surface)' }}>
               {['S.No', 'Borrower Name', 'Type', 'Dept', 'Product'].map((h) => (
-                <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
+                <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #1D293780', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
               ))}
-              <th onClick={() => handleSort('original_quantity')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Borrowed <SortIcon col="original_quantity" /></span></th>
+              <th onClick={() => handleSort('original_quantity')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #1D293780', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Borrowed <SortIcon col="original_quantity" /></span></th>
               {['Returned', 'Damaged', 'Lost', 'Balance'].map((h) => (
-                <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
+                <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #1D293780', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
               ))}
-              <th onClick={() => handleSort('lending_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Lent Date <SortIcon col="lending_date" /></span></th>
-              <th onClick={() => handleSort('due_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Due Date <SortIcon col="due_date" /></span></th>
-              <th onClick={() => handleSort('return_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Return Date <SortIcon col="return_date" /></span></th>
+              <th onClick={() => handleSort('lending_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #1D293780', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Lent Date <SortIcon col="lending_date" /></span></th>
+              <th onClick={() => handleSort('due_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #1D293780', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Due Date <SortIcon col="due_date" /></span></th>
+              <th onClick={() => handleSort('return_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #1D293780', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Return Date <SortIcon col="return_date" /></span></th>
               {['Status', 'Mentor', 'Actions'].map((h) => (
-                <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
+                <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #1D293780', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -899,7 +906,7 @@ export default function LendingPage() {
               pageRows.map((record, localIdx) => {
                 const idx = showAll ? localIdx : (currentPage - 1) * ROWS_PER_PAGE + localIdx;
                 return (
-                <tr key={`${record.id}-${record.product_id ?? 'none'}-${idx}`} style={{ borderBottom: '1px solid var(--border)' }}>
+                <tr key={`${record.id}-${record.product_id ?? 'none'}-${idx}`} style={{ border: '1px solid #1D293780' }}>
                   <td style={{ padding: '7px 10px', color: 'var(--muted)' }}>{idx + 1}</td>
                   <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>{record.borrower_name || '—'}</td>
                   <td style={{ padding: '7px 10px' }}>
