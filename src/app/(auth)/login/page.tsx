@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Mail, LockKeyhole, Eye, EyeOff } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
+import { useEffect, useRef } from "react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -14,6 +15,17 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [pressed, setPressed] = useState(false); //added state for button press
   const [showPassword, setShowPassword] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    emailRef.current?.focus();
+  }, []);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      login();
+    }
+  };
 
   const login = async () => {
     setPressed(true);
@@ -48,7 +60,7 @@ export default function LoginPage() {
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3759C1] pointer-events-none">
               <Mail size={16} />
             </span>
-            <input
+            <input 
               className="bg-[#F1F7FF]
                 border
                 border-[#3759C1]
@@ -60,10 +72,12 @@ export default function LoginPage() {
                 w-full
                 h-[40px]
                 rounded-md
-                text-[#0E132380]
+                text-[#0E1323]
                 "
               placeholder="Email"
               onChange={(e) => setEmail(e.target.value)}
+              ref={emailRef}
+              onKeyDown={handleKeyDown}
             />
           </div>
 
@@ -84,10 +98,11 @@ export default function LoginPage() {
                 h-[40px]
                 w-full
                 rounded-md
-                text-[#0E132380]"
+                text-[#0E1323]"
               type={showPassword ? "text" : "password"}
               placeholder="Password"
               onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={handleKeyDown}
             />
             <button
               type="button"

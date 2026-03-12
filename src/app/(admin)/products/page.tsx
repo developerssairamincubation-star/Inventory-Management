@@ -388,19 +388,19 @@ export default function ProductsPage() {
   const th: React.CSSProperties = {
     padding: '6px 10px',
     textAlign: 'left',
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 600,
-    color: 'var(--muted)',
+    color: '#0E1323',
     textTransform: 'uppercase',
     letterSpacing: '0.06em',
-    borderBottom: '1px solid var(--border)',
+    border: '1px solid #1D293780',
     whiteSpace: 'nowrap',
   };
   const td: React.CSSProperties = {
     padding: '7px 10px',
     fontSize: 12,
     color: 'var(--fg)',
-    borderBottom: '1px solid var(--border)',
+    border: '1px solid #1D293780',
   };
 
   return (
@@ -553,7 +553,7 @@ export default function ProductsPage() {
                 paddingBottom: 6, 
                 borderBottom: '1px solid var(--border)' 
               }}>
-                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>#</div>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>S.no</div>
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Image</div>
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Product Name</div>
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>SKU</div>
@@ -904,8 +904,8 @@ export default function ProductsPage() {
       {/* Product Grid / List */}
       {viewMode === 'grid' ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, marginTop: 12 }}>
-          {filteredProducts.map((product) => (
-            <ProductCard key={product.id ?? Math.random()} product={product} />
+          {filteredProducts.map((product , idx) => (
+            <ProductCard key={product.id ?? idx} product={product} />
           ))}
         </div>
       ) : (
@@ -914,6 +914,7 @@ export default function ProductsPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
                 <tr style={{ background: 'var(--surface)' }}>
+                  <th style={{ ...th, width: 40 }}>S.no</th>
                   <th style={{ ...th, width: 80 }}>Image</th>
                   <th style={th}>Product Name</th>
                   <th style={th}>SKU</th>
@@ -925,7 +926,7 @@ export default function ProductsPage() {
                   <th style={{ ...th, width: 200 }}>Actions</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody >
                 {listPageRows.map((product, idx) => {
                   const normalized = (() => {
                     if (!product) return {} as any;
@@ -952,6 +953,7 @@ export default function ProductsPage() {
                       onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface)')}
                       onMouseLeave={(e) => (e.currentTarget.style.background = '')}
                     >
+                      <td style={td}>{(listCurrentPage - 1) * 20 + idx + 1}</td>
                       <td style={td}>
                         <div style={{ width: 60, height: 60, border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 4 }}>
                           {image ? (
@@ -962,6 +964,7 @@ export default function ProductsPage() {
                           )}
                         </div>
                       </td>
+
                       <td style={{ ...td, fontWeight: 500 }}>{name}</td>
                       <td style={td}>{sku}</td>
                       <td style={td}>{productType}</td>
@@ -981,6 +984,7 @@ export default function ProductsPage() {
                 {/* Inline Add Item Rows */}
                 {inlineItems.map((item, idx) => (
                   <tr key={item.id} style={{ background: idx % 2 === 0 ? 'var(--surface)' : '#fffef5' }}>
+                    <td style={td}>{idx + 1}</td>
                     <td style={td}>
                       <label style={{ 
                         display: 'block', 
@@ -1026,6 +1030,7 @@ export default function ProductsPage() {
                         onChange={(e) => updateInlineItem(item.id, 'productName', e.target.value)} 
                         style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
                         placeholder="Product name"
+                        autoFocus
                       />
                     </td>
                     <td style={td}>

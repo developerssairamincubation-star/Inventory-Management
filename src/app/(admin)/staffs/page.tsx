@@ -244,6 +244,7 @@ export default function StaffsPage() {
     borderBottom: '1px solid var(--border)',
     whiteSpace: 'nowrap',
     userSelect: 'none',
+    border: '1px solid #1D293780',
   };
   const td: React.CSSProperties = {
     padding: '7px 10px',
@@ -251,6 +252,7 @@ export default function StaffsPage() {
     color: 'var(--fg)',
     borderBottom: '1px solid var(--border)',
     whiteSpace: 'nowrap',
+    border: '1px solid #1D293780',
   };
 
   if (loading) return <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>Loading staff records…</div>;

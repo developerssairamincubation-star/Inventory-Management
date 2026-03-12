@@ -36,7 +36,10 @@ const HOVER_BG   = '#4A5365';
 export default function Sidebar() {
   const pathname  = usePathname();
   const router    = useRouter();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('sidebar-collapsed') === 'true';
+  });
   const [hovered,   setHovered]   = useState<string | null>(null);
 
   const handleLogout = async () => {
@@ -183,7 +186,11 @@ export default function Sidebar() {
 
       {/* Toggle button — protrudes outside the right edge */}
       <button
-        onClick={() => setCollapsed(prev => !prev)}
+        onClick={() => setCollapsed(prev => {
+          const next = !prev;
+          localStorage.setItem('sidebar-collapsed', String(next));
+          return next;
+        })}
         title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         style={{
           position: 'absolute',
