@@ -304,7 +304,10 @@ function EditModal({
           body: JSON.stringify({ newStock: Number(stockQuantity) }),
         })
       }
-      onSaved({ ...product, ...updated, stocks: { ...product.stocks, quantity: stockQuantity !== '' ? Number(stockQuantity) : originalStock } })
+      // Include category_name from categories array
+      const selectedCategory = categories.find(c => c.category_id === (categoryId || updated.category_id))
+      const category_name = selectedCategory ? selectedCategory.category_name : null
+      onSaved({ ...product, ...updated, category_name, stocks: { ...product.stocks, quantity: stockQuantity !== '' ? Number(stockQuantity) : originalStock } })
     } catch (err) {
       console.error('Failed to update product:', err)
     } finally {

@@ -393,14 +393,14 @@ export default function ProductsPage() {
     color: '#0E1323',
     textTransform: 'uppercase',
     letterSpacing: '0.06em',
-    border: '1px solid #1D293780',
+    border: '1px solid #d1d1d1',
     whiteSpace: 'nowrap',
   };
   const td: React.CSSProperties = {
     padding: '7px 10px',
     fontSize: 12,
     color: 'var(--fg)',
-    border: '1px solid #1D293780',
+    border: '1px solid #d1d1d1',
   };
 
   return (

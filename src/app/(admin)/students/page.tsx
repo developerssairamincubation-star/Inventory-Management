@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
 
 const ROWS_PER_PAGE = 20;
 
@@ -65,6 +66,8 @@ export default function StudentsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [showAll, setShowAll] = useState(false);
+  const [showExportDropdown, setShowExportDropdown] = useState(false);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
 
   // Filters
   const [deptFilter, setDeptFilter] = useState('');
@@ -178,6 +181,52 @@ export default function StudentsPage() {
   const totalPages = Math.max(1, Math.ceil(filteredRecords.length / ROWS_PER_PAGE));
   const pageRows = showAll ? filteredRecords : filteredRecords.slice((currentPage - 1) * ROWS_PER_PAGE, currentPage * ROWS_PER_PAGE);
 
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(e.target as Node)) {
+        setShowExportDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const exportExcel = () => {
+    const data = filteredRecords.map((record, i) => {
+      const orig = record.original_quantity ?? record.quantity;
+      const d = record.damaged_quantity ?? 0;
+      const l = record.lost_quantity ?? 0;
+      let statusStr = record.status || '—';
+      const PENDING_STATUSES = ['PENDING', 'PARTIALLY_RETURNED', 'PARTIALLY_DAMAGED', 'PARTIALLY_LOST'];
+      if (record.status === 'CONSUMABLE') statusStr = 'CONSUMABLE';
+      else if (PENDING_STATUSES.includes(record.status)) statusStr = record.status.replace(/_/g, ' ');
+      else {
+        const returnedCount = Math.max(0, orig - d - l);
+        const parts: string[] = [];
+        if (returnedCount > 0) parts.push(`${returnedCount} Returned`);
+        if (d > 0) parts.push(`${d} Damaged`);
+        if (l > 0) parts.push(`${l} Lost`);
+        if (parts.length > 0) statusStr = parts.join(', ');
+      }
+      return {
+        'S.No': i + 1,
+        'Student Name': record.student_name || '',
+        'Department': record.department || '',
+        'Mentor': record.mentor || '',
+        'Product': record.product_name || '',
+        'Quantity': orig,
+        'Borrow Date': formatDate(record.borrow_date),
+        'Return Date': formatDate(record.return_date),
+        'Status': statusStr,
+        'Mobile': record.mobile || '',
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Student Lending Data');
+    XLSX.writeFile(wb, `student-lending-data-${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
   const exportPDF = () => {
     const doc = new jsPDF({ orientation: 'landscape' });
     const extractDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -239,7 +288,7 @@ export default function StudentsPage() {
     borderBottom: '1px solid var(--border)',
     whiteSpace: 'nowrap',
     userSelect: 'none',
-    border: '1px solid #1D293780',
+    border: '1px solid #d1d1d1',
   };
   const td: React.CSSProperties = {
     padding: '7px 10px',
@@ -247,7 +296,7 @@ export default function StudentsPage() {
     color: 'var(--fg)',
     borderBottom: '1px solid var(--border)',
     whiteSpace: 'nowrap',
-    border: '1px solid #1D293780',
+    border: '1px solid #d1d1d1',
   };
 
   if (loading) return <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>Loading student records…</div>;
@@ -262,12 +311,38 @@ export default function StudentsPage() {
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Borrowing history by students</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            onClick={exportPDF}
-            style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: '#fff', color: 'var(--fg)', border: '1px solid var(--border)', cursor: 'pointer' }}
-          >
-            Export PDF
-          </button>
+          {/* Export split button */}
+          <div ref={exportDropdownRef} style={{ position: 'relative', display: 'flex' }}>
+            <button
+              onClick={() => { exportExcel(); setShowExportDropdown(false); }}
+              style={{ padding: '5px 12px', fontSize: 12, fontWeight: 600, background: '#fff', color: 'var(--fg)', border: '1px solid var(--border)', borderRight: 'none', cursor: 'pointer' }}
+            >
+              Export
+            </button>
+            <button
+              onClick={() => setShowExportDropdown(d => !d)}
+              style={{ padding: '5px 8px', fontSize: 12, background: '#fff', color: 'var(--fg)', border: '1px solid var(--border)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+              title="More export options"
+            >
+              ▾
+            </button>
+            {showExportDropdown && (
+              <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 20, background: '#fff', border: '1px solid var(--border)', minWidth: 150, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+                <button
+                  onClick={() => { exportExcel(); setShowExportDropdown(false); }}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 14px', fontSize: 12, background: 'none', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', color: 'var(--fg)' }}
+                >
+                  Export Excel
+                </button>
+                <button
+                  onClick={() => { exportPDF(); setShowExportDropdown(false); }}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 14px', fontSize: 12, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg)' }}
+                >
+                  Export PDF
+                </button>
+              </div>
+            )}
+          </div>
           <select
             value={timeFilter}
             onChange={(e) => setTimeFilter(e.target.value)}
