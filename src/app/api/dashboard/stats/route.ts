@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server'
+import { ApiError } from '@/lib/api/errors'
+import { fromError, ok } from '@/lib/api/response'
 import getSupabaseAdmin from '@/lib/supabaseServer'
 
 export const dynamic = 'force-dynamic'
@@ -12,14 +13,14 @@ export async function GET() {
       .from('products')
       .select('*', { count: 'exact', head: true })
 
-    if (productsError) throw productsError
+    if (productsError) throw new ApiError(500, 'DATABASE_ERROR', productsError.message)
 
     // 2. Get total stock quantity (sum of all stock quantities)
     const { data: stocksData, error: quantityError } = await supabaseAdmin
       .from('stocks')
       .select('quantity')
 
-    if (quantityError) throw quantityError
+    if (quantityError) throw new ApiError(500, 'DATABASE_ERROR', quantityError.message)
 
     const totalStockQuantity = stocksData?.reduce((sum, stock) => sum + (stock.quantity || 0), 0) || 0
 
@@ -32,7 +33,7 @@ export async function GET() {
         stocks (quantity)
       `)
 
-    if (lowStockError) throw lowStockError
+    if (lowStockError) throw new ApiError(500, 'DATABASE_ERROR', lowStockError.message)
 
     const lowStockCount = lowStockData?.filter((product: any) => 
       product.low_stock_threshold && 
@@ -46,7 +47,7 @@ export async function GET() {
       .from('stocks')
       .select('quantity, damaged_quantity, lost_quantity')
 
-    if (allStocksError) throw allStocksError
+    if (allStocksError) throw new ApiError(500, 'DATABASE_ERROR', allStocksError.message)
 
     const damagedQuantity = allStocksData?.reduce((sum, stock) => sum + (stock.damaged_quantity || 0), 0) || 0
     const lostQuantity = allStocksData?.reduce((sum, stock) => sum + (stock.lost_quantity || 0), 0) || 0
@@ -59,7 +60,7 @@ export async function GET() {
         lending_order:lending_order!lend_order_id(status)
       `)
 
-    if (lendingError) throw lendingError
+    if (lendingError) throw new ApiError(500, 'DATABASE_ERROR', lendingError.message)
 
     // Count items that are currently lent out (still outstanding)
     const ACTIVE_LENDING_STATUSES = ['PENDING', 'ACTIVE', 'OVERDUE', 'PARTIALLY_RETURNED', 'PARTIALLY_DAMAGED', 'PARTIALLY_LOST']
@@ -88,15 +89,14 @@ export async function GET() {
       lost: Math.round((lostQuantity / grandTotal) * 100),
     }
 
-    return NextResponse.json({
+    return ok({
       totalProducts: totalProducts || 0,
       totalStockQuantity,
       lowStockCount,
       stockDistribution,
       stockDistributionPercentages
     })
-  } catch (err: any) {
-    console.error('Dashboard stats error:', err)
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 })
+  } catch (error) {
+    return fromError(error)
   }
 }

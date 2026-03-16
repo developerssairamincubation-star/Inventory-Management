@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import { ApiError } from '@/lib/api/errors'
+import { fromError, ok } from '@/lib/api/response'
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const supabase = getSupabaseAdmin();
 
@@ -10,17 +11,10 @@ export async function GET(request: NextRequest) {
       .select("department_id, department_name")
       .order("department_name", { ascending: true });
 
-    if (error) {
-      console.error("Database error:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    if (error) throw new ApiError(500, 'DATABASE_ERROR', error.message)
 
-    return NextResponse.json(departments || []);
+    return ok(departments || []);
   } catch (error) {
-    console.error("Error fetching departments:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch departments" },
-      { status: 500 }
-    );
+    return fromError(error)
   }
 }

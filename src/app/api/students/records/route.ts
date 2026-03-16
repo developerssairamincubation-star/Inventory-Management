@@ -1,30 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import { ApiError } from '@/lib/api/errors'
+import { getPeriod, getStartDateByPeriod } from '@/lib/api/request'
+import { fromError, ok } from '@/lib/api/response'
 
 export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
-    const searchParams = request.nextUrl.searchParams;
-    const period = searchParams.get("period") || "monthly";
-
-    // Calculate date range based on period
-    const now = new Date();
-    let startDate = new Date();
-    
-    switch (period.toLowerCase()) {
-      case "daily":
-        startDate.setDate(now.getDate() - 1);
-        break;
-      case "weekly":
-        startDate.setDate(now.getDate() - 7);
-        break;
-      case "monthly":
-        startDate.setMonth(now.getMonth() - 1);
-        break;
-      case "yearly":
-        startDate.setFullYear(now.getFullYear() - 1);
-        break;
-    }
+    const period = getPeriod(request.nextUrl.searchParams)
+    const startDate = getStartDateByPeriod(period)
 
     // Fetch lending records for students
     const { data: lendingOrders, error } = await supabase
@@ -43,10 +27,7 @@ export async function GET(request: NextRequest) {
       .gte("created_at", startDate.toISOString())
       .order("created_at", { ascending: false });
 
-    if (error) {
-      console.error("Database error:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    if (error) throw new ApiError(500, 'DATABASE_ERROR', error.message)
 
     // Fetch lending items
     const orderIds = lendingOrders?.map((o: any) => o.lending_order_id) || [];
@@ -180,7 +161,7 @@ export async function GET(request: NextRequest) {
     );
     const pending = pendingStudents.size;
 
-    return NextResponse.json({
+    return ok({
       records,
       stats: {
         totalBorrowed,
@@ -189,10 +170,6 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("Error fetching student records:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch student records" },
-      { status: 500 }
-    );
+    return fromError(error)
   }
 }
