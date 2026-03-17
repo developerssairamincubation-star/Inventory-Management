@@ -34,7 +34,7 @@ type NewProductDraft = {
 
 type Decision = {
   index: number;
-  action: "add_stock" | "new_product" | "skip";
+  action: "add_stock" | "new_product" | "invoice_only";
   existingProductId?: string;
   newProductDraft?: NewProductDraft;
   newProductImageFile?: File | null;
@@ -73,6 +73,18 @@ function findMatch(name: string, products: ExistingProduct[]): ExistingProduct |
     products.find((p) => normalise(p.product_name).includes(n) || n.includes(normalise(p.product_name))) ??
     null
   );
+}
+
+function searchProducts(query: string, products: ExistingProduct[]): ExistingProduct[] {
+  const q = normalise(query);
+  if (!q) return [];
+
+  return products
+    .filter((product) => {
+      const name = normalise(product.product_name);
+      return name.includes(q) || q.includes(name);
+    })
+    .slice(0, 8);
 }
 
 const emptyProduct = (): ParsedProduct => ({ product_name: "", quantity: 1, unit_price: 0, total: 0 });
@@ -116,6 +128,9 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
   const [addCatLoading, setAddCatLoading] = useState(false);
   // ── Confirmation flow ─────────────────────────────────────────────────────
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const [linkExistingEnabled, setLinkExistingEnabled] = useState(false);
+  const [linkExistingQuery, setLinkExistingQuery] = useState("");
+  const [linkExistingSelection, setLinkExistingSelection] = useState<ExistingProduct | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { showToast } = useToast();
 
@@ -225,8 +240,14 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
     setConfirmState({ items, currentIdx: 0, decisions: [] });
   };
 
+  useEffect(() => {
+    setLinkExistingEnabled(false);
+    setLinkExistingQuery("");
+    setLinkExistingSelection(null);
+  }, [confirmState?.currentIdx]);
+
   // ── Confirmation step ─────────────────────────────────────────────────────
-  const handleDecision = (action: "add_stock" | "new_product" | "skip") => {
+  const handleDecision = (action: "add_stock" | "new_product" | "invoice_only", selectedProduct?: ExistingProduct | null) => {
     if (!confirmState) return;
     const cur = confirmState.items[confirmState.currentIdx];
 
@@ -254,7 +275,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
     const newDec: Decision = {
       index: cur.index,
       action,
-      existingProductId: action === "add_stock" ? cur.match?.product_id : undefined,
+      existingProductId: action === "add_stock" ? selectedProduct?.product_id ?? cur.match?.product_id : undefined,
     };
     advanceConfirm([...confirmState.decisions, newDec]);
   };
@@ -283,7 +304,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
   const handleNewProductSkip = () => {
     if (!confirmState || !newProductForm) return;
     const cur = newProductForm.item;
-    const newDec: Decision = { index: cur.index, action: "skip" };
+    const newDec: Decision = { index: cur.index, action: "invoice_only" };
     setNewProductForm(null);
     advanceConfirm([...confirmState.decisions, newDec]);
   };
@@ -315,7 +336,6 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
     try {
       const productIdMap: Record<number, string> = {};
       for (const dec of decisions) {
-        if (dec.action === "skip") continue;
         const item = items[dec.index];
         if (dec.action === "add_stock" && dec.existingProductId) {
           productIdMap[dec.index] = dec.existingProductId;
@@ -359,16 +379,19 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
         }
       }
 
-      const invoiceItems = decisions
-        .filter((d) => d.action !== "skip")
-        .map((d) => {
-          const p = items[d.index].parsed;
-          return { product_id: productIdMap[d.index], product_name: p.product_name, quantity: p.quantity, unit_cost: p.unit_price, total_cost: p.total };
-        })
-        .filter((i) => i.product_id);
+      const invoiceItems = decisions.map((d) => {
+        const p = items[d.index].parsed;
+        return {
+          product_id: productIdMap[d.index] ?? null,
+          product_name: p.product_name,
+          quantity: p.quantity,
+          unit_cost: p.unit_price,
+          total_cost: p.total,
+        };
+      });
 
       if (invoiceItems.length === 0) {
-        showToast("All items were skipped — invoice not created.", "warning");
+        showToast("Please add at least one invoice item.", "warning");
         setIsSubmitting(false);
         return;
       }
@@ -383,7 +406,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
         const e = await res.json();
         throw new Error(e.error || "Failed to create invoice");
       }
-      showToast("Invoice created successfully! Stock has been updated.", "success");
+      showToast("Invoice created successfully! Stock was updated for linked products.", "success");
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -563,7 +586,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={handleNewProductSkip}
               style={{ padding: "6px 14px", fontSize: 12, border: "1px solid var(--border)", background: "#fff", color: "var(--muted)", cursor: "pointer" }}>
-              Skip
+              Invoice Only
             </button>
             <button onClick={() => canSave && handleNewProductDone(draft, imageFile)} disabled={!canSave}
               style={{ padding: "6px 20px", fontSize: 12, fontWeight: 600, background: "var(--accent)", color: "#fff", border: "none", cursor: canSave ? "pointer" : "not-allowed", opacity: canSave ? 1 : 0.5 }}>
@@ -581,6 +604,8 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
     const cur      = confirmState.items[confirmState.currentIdx];
     const isExist  = cur.match !== null;
     const progress = `${confirmState.currentIdx + 1} / ${confirmState.items.length}`;
+    const existingMatches = searchProducts(linkExistingQuery, existingProducts)
+      .filter((product) => product.product_id !== linkExistingSelection?.product_id);
 
     return (
       <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.55)" }}>
@@ -605,8 +630,8 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
               </div>
               <div style={{ fontSize: 12, color: "var(--fg)" }}>Add <strong>{cur.parsed.quantity} units</strong> to existing stock?</div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <button onClick={() => handleDecision("skip")}
-                  style={{ padding: "5px 12px", fontSize: 12, border: "1px solid var(--border)", background: "#fff", color: "var(--muted)", cursor: "pointer" }}>Skip</button>
+                <button onClick={() => handleDecision("invoice_only")}
+                  style={{ padding: "5px 12px", fontSize: 12, border: "1px solid var(--border)", background: "#fff", color: "var(--muted)", cursor: "pointer" }}>Invoice Only</button>
                 <button onClick={() => handleDecision("new_product")}
                   style={{ padding: "5px 12px", fontSize: 12, border: "1px solid #d97706", background: "#fffbeb", color: "#b45309", cursor: "pointer", fontWeight: 500 }}>Add as New Product</button>
                 <button onClick={() => handleDecision("add_stock")}
@@ -615,12 +640,75 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
             </>
           ) : (
             <>
-              <div style={{ fontSize: 12, color: "var(--fg)" }}>This product is not in your catalog. Add it as a new product?</div>
+              <div style={{ fontSize: 12, color: "var(--fg)" }}>This product is not in your catalog. You can add it as a new product, or link it to an existing product and update that stock.</div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--fg)", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={linkExistingEnabled}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setLinkExistingEnabled(checked);
+                    setLinkExistingSelection(null);
+                    setLinkExistingQuery(checked ? cur.parsed.product_name : "");
+                  }}
+                />
+                Add as existing product
+              </label>
+              {linkExistingEnabled && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      autoFocus
+                      style={inp}
+                      value={linkExistingQuery}
+                      placeholder="Type to search products"
+                      onChange={(e) => {
+                        setLinkExistingQuery(e.target.value);
+                        setLinkExistingSelection(null);
+                      }}
+                    />
+                    {linkExistingQuery.trim() && existingMatches.length > 0 && !linkExistingSelection && (
+                      <div style={{ position: "absolute", zIndex: 2, top: "calc(100% + 4px)", left: 0, right: 0, border: "1px solid var(--border)", background: "#fff", maxHeight: 180, overflowY: "auto", boxShadow: "0 10px 24px rgba(0,0,0,0.08)" }}>
+                        {existingMatches.map((product) => (
+                          <button
+                            key={product.product_id}
+                            type="button"
+                            onClick={() => {
+                              setLinkExistingSelection(product);
+                              setLinkExistingQuery(product.product_name);
+                            }}
+                            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px", background: "#fff", border: "none", borderBottom: "1px solid var(--border)", cursor: "pointer" }}
+                          >
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--fg)" }}>{product.product_name}</div>
+                            <div style={{ fontSize: 10, color: "var(--muted)" }}>₹{product.unit_cost.toFixed(2)}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {linkExistingSelection ? (
+                    <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", padding: "10px 12px", fontSize: 12, color: "#1d4ed8" }}>
+                      Selected existing product: <strong>{linkExistingSelection.product_name}</strong>
+                    </div>
+                  ) : linkExistingQuery.trim() ? (
+                    <div style={{ fontSize: 11, color: "var(--muted)" }}>No matching products selected yet.</div>
+                  ) : null}
+                </div>
+              )}
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <button onClick={() => handleDecision("skip")}
-                  style={{ padding: "5px 12px", fontSize: 12, border: "1px solid var(--border)", background: "#fff", color: "var(--muted)", cursor: "pointer" }}>Skip</button>
+                <button onClick={() => handleDecision("invoice_only")}
+                  style={{ padding: "5px 12px", fontSize: 12, border: "1px solid var(--border)", background: "#fff", color: "var(--muted)", cursor: "pointer" }}>Invoice Only</button>
                 <button onClick={() => handleDecision("new_product")}
                   style={{ padding: "5px 14px", fontSize: 12, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontWeight: 600 }}>Add New Product ✓</button>
+                {linkExistingEnabled && (
+                  <button
+                    onClick={() => linkExistingSelection && handleDecision("add_stock", linkExistingSelection)}
+                    disabled={!linkExistingSelection}
+                    style={{ padding: "5px 14px", fontSize: 12, border: "1px solid #1d4ed8", background: linkExistingSelection ? "#eff6ff" : "#dbeafe", color: "#1d4ed8", cursor: linkExistingSelection ? "pointer" : "not-allowed", fontWeight: 600, opacity: linkExistingSelection ? 1 : 0.6 }}
+                  >
+                    Add to Existing Stock
+                  </button>
+                )}
               </div>
             </>
           )}
@@ -754,7 +842,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
                         </div>
                         {p.product_name.trim() && (
                           <div style={{ fontSize: 9, marginTop: 3, marginLeft: 2, color: match ? "#166534" : "#92400e" }}>
-                            {match ? `✓ Matches existing: ${match.product_name}` : "⚠ New product — will be added to catalog on save"}
+                            {match ? `✓ Matches existing: ${match.product_name}` : "⚠ New product detected — review can add it to catalog or link it to an existing product"}
                           </div>
                         )}
                       </div>

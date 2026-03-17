@@ -94,6 +94,39 @@ function parseNum(s: string): number {
   return parseFloat(s.replace(/,/g, "").trim()) || 0;
 }
 
+function sanitiseProductName(raw: string): string {
+  return raw
+    .replace(/[|_]+/g, " ")
+    .replace(/[\u2012-\u2015]/g, "-")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function isMeaningfulProductName(name: string): boolean {
+  const trimmed = sanitiseProductName(name);
+  if (!trimmed) return false;
+  if (!/[a-z]/i.test(trimmed)) return false;
+
+  const alphaTokens = trimmed
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+  if (alphaTokens.length === 0) return false;
+
+  const fillerTokens = new Set([
+    "of", "page", "pages", "subtotal", "total", "amount", "qty", "quantity",
+    "rate", "price", "unit", "invoice", "tax", "gst", "cgst", "sgst", "igst",
+    "discount", "shipping", "freight", "balance",
+  ]);
+  const meaningfulTokens = alphaTokens.filter((token) => !fillerTokens.has(token));
+
+  if (meaningfulTokens.length === 0) return false;
+  if (/^[-\s]*of[-\s]*$/i.test(trimmed)) return false;
+
+  return meaningfulTokens.some((token) => /[a-z]/.test(token) && token.length > 1);
+}
+
 // ---------------------------------------------------------------------------
 // Core parsing logic
 // ---------------------------------------------------------------------------
@@ -190,12 +223,14 @@ function parseInvoiceText(text: string): Omit<ParsedInvoice, "raw_text"> {
       if (!nums || nums.length < 2) continue;
 
       // Remove numbers from the line to get the product name
-      const namepart = line
+      const namepart = sanitiseProductName(
+        line
         .replace(/\d[\d,]*(?:\.\d+)?/g, " ")
         .replace(/\s{2,}/g, " ")
-        .trim();
+        .trim()
+      );
 
-      if (!namepart || namepart.length < 2) continue;
+      if (!isMeaningfulProductName(namepart)) continue;
 
       const values = nums.map(parseNum);
       let qty = 0, unit_price = 0, total = 0;
@@ -236,9 +271,11 @@ function parseInvoiceText(text: string): Omit<ParsedInvoice, "raw_text"> {
       if (!m) continue;
       const [, name, a, b, c] = m;
       if (/total|tax|gst|cgst|sgst|igst|discount|freight|subtotal/i.test(name)) continue;
+      const cleanName = sanitiseProductName(name);
+      if (!isMeaningfulProductName(cleanName)) continue;
       const qty = parseNum(a), unit_price = parseNum(b), total = parseNum(c);
       if (qty <= 0 || unit_price <= 0) continue;
-      products.push({ product_name: name.trim(), quantity: qty, unit_price, total });
+      products.push({ product_name: cleanName, quantity: qty, unit_price, total });
     }
   }
 
@@ -254,9 +291,10 @@ function parseInvoiceText(text: string): Omit<ParsedInvoice, "raw_text"> {
         const nums = context.match(/\d[\d,]*(?:\.\d+)?/g)?.map(parseNum) || [];
         const nameMatch = context.match(/(?:item|product|description)[:\s]+([^0-9]+)/i);
         if (nameMatch && nums.length >= 2) {
+          const cleanName = sanitiseProductName(nameMatch[1]);
           const qty = nums[0], unit_price = nums[1], total = nums[2] ?? qty * unit_price;
-          if (qty > 0 && unit_price > 0) {
-            products.push({ product_name: nameMatch[1].trim(), quantity: qty, unit_price, total });
+          if (qty > 0 && unit_price > 0 && isMeaningfulProductName(cleanName)) {
+            products.push({ product_name: cleanName, quantity: qty, unit_price, total });
           }
         }
       }

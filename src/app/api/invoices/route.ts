@@ -71,8 +71,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
+    const normalisedItems = items.map((item: any) => ({
+      product_id: item.product_id || null,
+      product_name: String(item.product_name || "").trim(),
+      quantity: Number(item.quantity) || 0,
+      unit_cost: Number(item.unit_cost) || 0,
+      total_cost: Number(item.total_cost) || 0,
+    }));
+
+    if (normalisedItems.some((item: any) => !item.product_name || item.quantity <= 0 || item.unit_cost < 0 || item.total_cost < 0)) {
+      return NextResponse.json({ error: "Each invoice item must include a product name, quantity and cost" }, { status: 400 });
+    }
+
     // Calculate total amount
-    const total_amount = items.reduce((sum: number, item: any) => sum + (item.total_cost || 0), 0);
+    const total_amount = normalisedItems.reduce((sum: number, item: any) => sum + item.total_cost, 0);
 
     // Get current timestamp for created_at and updated_at
     const currentDate = new Date().toISOString();
@@ -96,9 +108,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Create invoice items
-    const invoiceItems = items.map((item: any) => ({
+    const invoiceItems = normalisedItems.map((item: any) => ({
       invoice_id: invoice.invoice_id,
       product_id: item.product_id,
+      product_name: item.product_name,
       quantity: item.quantity,
       unit_cost: item.unit_cost,
       total_cost: item.total_cost,
@@ -115,7 +128,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Update stock quantities
-    for (const item of items) {
+    for (const item of normalisedItems) {
+      if (!item.product_id) continue;
+
       const { data: stockData } = await supabase
         .from("stocks")
         .select("quantity")

@@ -44,7 +44,7 @@ export async function GET(
       created_at: invoice.created_at,
       total_amount: invoice.total_amount,
       items: (items || []).map((item: any) => ({
-        product_name: item.products?.product_name || "Unknown Product",
+        product_name: item.products?.product_name || item.product_name || "Unknown Product",
         quantity: item.quantity,
         unit_cost: item.unit_cost,
         total_cost: item.total_cost,
@@ -78,6 +78,8 @@ export async function DELETE(
     // Update stock quantities (subtract the quantities that were added)
     if (items && items.length > 0) {
       for (const item of items) {
+        if (!item.product_id) continue;
+
         const { data: stockData } = await supabase
           .from("stocks")
           .select("quantity")
