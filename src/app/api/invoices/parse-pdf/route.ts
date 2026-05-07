@@ -31,22 +31,21 @@ export type ParsedInvoice = {
 
 /** Try to parse a date string into YYYY-MM-DD; returns empty string if fail */
 function normaliseDate(raw: string): string {
+  const trimmed = raw.trim();
   // Already ISO
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) return raw.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
 
-  // DD/MM/YYYY or DD-MM-YYYY
-  const dmy = raw.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+  // DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
+  const dmy = trimmed.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
   if (dmy) {
     const [, d, m, y] = dmy;
     const year = y.length === 2 ? `20${y}` : y;
-    return `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-  }
-
-  // MM/DD/YYYY (US format fallback)
-  const mdy = raw.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-  if (mdy) {
-    const [, m, d, y] = mdy;
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    const month = parseInt(m);
+    const day = parseInt(d);
+    // Validate day and month
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    }
   }
 
   // Month name formats: "31 January 2025" or "January 31, 2025"
@@ -57,17 +56,24 @@ function normaliseDate(raw: string): string {
     jan: "01", feb: "02", mar: "03", apr: "04", jun: "06",
     jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
   };
-  const named = raw.match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/);
+  const named = trimmed.match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/);
   if (named) {
     const [, d, mName, y] = named;
     const m = months[mName.toLowerCase()];
     if (m) return `${y}-${m}-${d.padStart(2, "0")}`;
   }
-  const named2 = raw.match(/([A-Za-z]+)\s+(\d{1,2})[,\s]+(\d{4})/);
+  const named2 = trimmed.match(/([A-Za-z]+)\s+(\d{1,2})[,\s]+(\d{4})/);
   if (named2) {
     const [, mName, d, y] = named2;
     const m = months[mName.toLowerCase()];
     if (m) return `${y}-${m}-${d.padStart(2, "0")}`;
+  }
+
+  // European format: DD/MM/YYYY with leading zeros
+  const dmyAlt = trimmed.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (dmyAlt) {
+    const [, d, m, y] = dmyAlt;
+    return `${y}-${m}-${d}`;
   }
 
   return "";
@@ -136,9 +142,10 @@ function parseInvoiceText(text: string): Omit<ParsedInvoice, "raw_text"> {
   let supplier_name = "";
   let delivery_date = "";
   let invoice_number = "";
-  const products: ParsedProduct[] = [];
+  let products: ParsedProduct[] = [];
 
   // ── Supplier / Vendor name ──────────────────────────────────────────────
+  // Look in entire document (supplier often at top OR bottom)
   const supplierPatterns = [
     /supplier\s*(?:name)?[:\-]\s*(.+)/i,
     /vendor\s*(?:name)?[:\-]\s*(.+)/i,
@@ -149,7 +156,11 @@ function parseInvoiceText(text: string): Omit<ParsedInvoice, "raw_text"> {
     /manufacturer[:\-]\s*(.+)/i,
     /distributor[:\-]\s*(.+)/i,
     /shipped\s*(?:from|by)[:\-]\s*(.+)/i,
+    /party\s*(?:name)?[:\-]\s*(.+)/i,
+    /registered\s*name[:\-]\s*(.+)/i,
   ];
+
+  // First try: explicit labels
   for (const line of lines) {
     for (const pat of supplierPatterns) {
       const m = line.match(pat);
@@ -157,11 +168,27 @@ function parseInvoiceText(text: string): Omit<ParsedInvoice, "raw_text"> {
     }
     if (supplier_name) break;
   }
-  // Fallback: first non-empty line that doesn't look like a label or number
+
+  // Second try: look for company names with keywords
   if (!supplier_name) {
-    for (const line of lines.slice(0, 6)) {
-      if (!/^\d/.test(line) && !/invoice|receipt|bill|tax|gst|date|no\.|number/i.test(line) && line.length > 3) {
-        supplier_name = line;
+    for (const line of lines) {
+      // Skip common table/label lines and short lines
+      if (line.length < 5) continue;
+      if (/^\d+|description|hsn|rate|qty|disc|amount|igst|discount|total|customer|shipping|invoice|date|reference|sale order|no\:|place of supply/i.test(line)) continue;
+
+      // Look for lines with company keywords followed by "LIMITED"
+      if (/(?:macfos|company|business|firm|pvt|ltd|inc|corp).*limited/i.test(line)) {
+        supplier_name = line.trim();
+        break;
+      }
+    }
+  }
+
+  // Third try: look for robu.in or similar domain names
+  if (!supplier_name) {
+    for (const line of lines) {
+      if (/robu\.?in|info@|website/i.test(line)) {
+        supplier_name = line.match(/robu\.?in/i) ? 'robu.in' : line.trim();
         break;
       }
     }
@@ -178,7 +205,8 @@ function parseInvoiceText(text: string): Omit<ParsedInvoice, "raw_text"> {
     /order\s*date[:\-]\s*(.+)/i,
     /date[:\-]\s*(.+)/i,
   ];
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     for (const pat of datePatterns) {
       const m = line.match(pat);
       if (m) {
@@ -187,90 +215,129 @@ function parseInvoiceText(text: string): Omit<ParsedInvoice, "raw_text"> {
       }
     }
     if (delivery_date) break;
+
+    // If the date label is on this line but empty, check next line
+    if (/^(?:invoice\s*date|delivery\s*date|bill\s*date|order\s*date)[:\-]?\s*$/i.test(line) && i + 1 < lines.length) {
+      const nextLine = lines[i + 1];
+      const d = extractDate(nextLine);
+      if (d) { delivery_date = d; break; }
+    }
   }
 
   // ── Invoice number ──────────────────────────────────────────────────────
   const invPatterns = [
-    /invoice\s*(?:no|number|#)[:\-\s]*([A-Z0-9\/\-]+)/i,
-    /inv\s*(?:no|#)[:\-\s]*([A-Z0-9\/\-]+)/i,
-    /bill\s*(?:no|number|#)[:\-\s]*([A-Z0-9\/\-]+)/i,
-    /order\s*(?:no|number|#)[:\-\s]*([A-Z0-9\/\-]+)/i,
-    /receipt\s*(?:no|number|#)[:\-\s]*([A-Z0-9\/\-]+)/i,
+    /invoice\s*(?:no|number|#|num)[:\-\s]*([A-Z0-9\/\-\s]+)/i,
+    /inv\s*(?:no|#|number)[:\-\s]*([A-Z0-9\/\-\s]+)/i,
+    /bill\s*(?:no|number|#)[:\-\s]*([A-Z0-9\/\-\s]+)/i,
+    /order\s*(?:no|number|#)[:\-\s]*([A-Z0-9\/\-\s]+)/i,
+    /receipt\s*(?:no|number|#)[:\-\s]*([A-Z0-9\/\-\s]+)/i,
+    /po\s*(?:no|number|#)[:\-\s]*([A-Z0-9\/\-\s]+)/i,
+    /reference\s*(?:no|number|#)[:\-\s]*([A-Z0-9\/\-\s]+)/i,
   ];
   for (const line of lines) {
     for (const pat of invPatterns) {
       const m = line.match(pat);
-      if (m) { invoice_number = m[1].trim(); break; }
+      if (m) {
+        const raw = m[1].trim();
+        invoice_number = raw.split(/[\s\n]/)[0].substring(0, 50);
+        break;
+      }
     }
     if (invoice_number) break;
   }
 
   // ── Product line items ──────────────────────────────────────────────────
-  // Strategy 1: Detect table header row then parse rows below it
-  const headerIdx = lines.findIndex((l) =>
-    /(?:item|product|description|particulars).+(?:qty|quantity).+(?:rate|price|unit).+(?:amount|total)/i.test(l) ||
-    /(?:qty|quantity).+(?:rate|price|unit).+(?:amount|total)/i.test(l)
-  );
+  // Strategy 1: Detect numbered item rows (like "1 \t Product Name")
+  for (let i = 0; i < lines.length - 1; i++) {
+    const line = lines[i];
 
-  if (headerIdx !== -1) {
-    // Parse lines after the header until we hit a total/summary line
-    for (let i = headerIdx + 1; i < lines.length; i++) {
-      const line = lines[i];
-      if (/^\s*(sub[\s-]?total|grand\s*total|total\s*amount|net\s*amount|balance|taxes?|gst|cgst|sgst|igst|discount|freight|shipping|vat)\b/i.test(line)) break;
+    // Look for pattern: digit(s) followed by tab/multiple spaces, then product name
+    const itemMatch = line.match(/^(\d+)\s{2,}(.+)$/);
+    if (!itemMatch) continue;
 
-      // A product line should have at least 3 numeric values (qty, unit price, total)
-      const nums = line.match(/\d[\d,]*(?:\.\d+)?/g);
-      if (!nums || nums.length < 2) continue;
+    const itemNum = parseInt(itemMatch[1]);
+    if (itemNum < 1 || itemNum > 999) continue;
 
-      // Remove numbers from the line to get the product name
-      const namepart = sanitiseProductName(
-        line
-        .replace(/\d[\d,]*(?:\.\d+)?/g, " ")
-        .replace(/\s{2,}/g, " ")
-        .trim()
-      );
+    let productName = itemMatch[2].trim();
+    let priceLineIdx = i + 1;
 
-      if (!isMeaningfulProductName(namepart)) continue;
+    // Handle multi-line product names (collect until we hit a price line)
+    while (priceLineIdx < lines.length) {
+      const nextLine = lines[priceLineIdx];
 
-      const values = nums.map(parseNum);
-      let qty = 0, unit_price = 0, total = 0;
-
-      if (values.length >= 3) {
-        // Try to find qty × unit_price = total relationship
-        let found = false;
-        for (let a = 0; a < values.length - 2 && !found; a++) {
-          for (let b = a + 1; b < values.length - 1 && !found; b++) {
-            for (let c = b + 1; c < values.length && !found; c++) {
-              if (values[a] > 0 && values[b] > 0 && Math.abs(values[a] * values[b] - values[c]) < 1) {
-                qty = values[a]; unit_price = values[b]; total = values[c]; found = true;
-              }
-            }
-          }
-        }
-        if (!found) {
-          // fallback: last 3 values
-          [qty, unit_price, total] = values.slice(-3);
-        }
-      } else {
-        [qty, unit_price] = values;
-        total = qty * unit_price;
+      // Check if this looks like a price line (has currency symbols or numbers like HSN codes)
+      if (/₹|[0-9]{5,}|^\d+\s+₹/.test(nextLine)) {
+        break;
       }
 
-      if (qty <= 0 || unit_price <= 0) continue;
+      // If it's a short line and looks like product name continuation, append
+      if (nextLine.length < 100 && !/^\d|discount|total|tax|gst|igst/i.test(nextLine)) {
+        productName += " " + nextLine;
+        priceLineIdx++;
+      } else {
+        break;
+      }
+    }
 
-      products.push({ product_name: namepart, quantity: qty, unit_price, total });
+    // Now extract price data from the price line(s)
+    if (priceLineIdx < lines.length) {
+      const priceLine = lines[priceLineIdx];
+      const nums = priceLine.match(/\d[\d,]*(?:\.\d+)?/g);
+
+      if (nums && nums.length >= 3) {
+        // Format: HSN Rate Qty Disc Amount IGST
+        // We need Qty (usually 3rd-5th number), Rate (2nd number), Amount (around 5th)
+        const values = nums.map(parseNum);
+
+        let qty = 0, unit_price = 0, total = 0;
+
+        // Common pattern: HSN(code) Rate Qty Amount IGST(%)
+        // Find Qty by looking for which multiplication matches: Qty * Rate = Amount
+        for (let a = 0; a < Math.min(values.length - 1, 5); a++) {
+          for (let b = 0; b < Math.min(values.length - 1, 5); b++) {
+            if (a === b) continue;
+            for (let c = 0; c < values.length; c++) {
+              if (c === a || c === b) continue;
+              // Check if a * b = c (approximately, with some tolerance)
+              if (values[a] > 0 && values[b] > 0 && Math.abs(values[a] * values[b] - values[c]) < values[c] * 0.05) {
+                qty = values[a];
+                unit_price = values[b];
+                total = values[c];
+                break;
+              }
+            }
+            if (qty > 0) break;
+          }
+          if (qty > 0) break;
+        }
+
+        // Fallback: assume Qty is small number (typically 1-100), Rate is larger
+        if (qty <= 0 && values.length >= 3) {
+          const candidates = values.filter(v => v > 0);
+          if (candidates.length >= 3) {
+            qty = candidates[0];
+            unit_price = candidates[1];
+            total = candidates[candidates.length - 1];
+          }
+        }
+
+        const cleanName = sanitiseProductName(productName);
+        if (qty > 0 && unit_price > 0 && isMeaningfulProductName(cleanName)) {
+          products.push({ product_name: cleanName, quantity: qty, unit_price, total });
+        }
+      }
     }
   }
 
-  // Strategy 2: Pattern-based product matching across all lines
+  // Strategy 2: Flexible pattern-based matching (tabs or multiple spaces)
   if (products.length === 0) {
-    // Match lines like: "Product Name   5   200.00   1000.00"
-    const linePattern = /^(.+?)\s{2,}(\d[\d,]*(?:\.\d+)?)\s+(\d[\d,]*(?:\.\d+)?)\s+(\d[\d,]*(?:\.\d+)?)$/;
+    const linePattern = /^(.+?)\s+(\d[\d,]*(?:\.\d+)?)\s+(\d[\d,]*(?:\.\d+)?)\s+(\d[\d,]*(?:\.\d+)?)$/;
     for (const line of lines) {
+      if (!line.trim()) continue;
       const m = line.match(linePattern);
       if (!m) continue;
       const [, name, a, b, c] = m;
-      if (/total|tax|gst|cgst|sgst|igst|discount|freight|subtotal/i.test(name)) continue;
+      if (/total|tax|gst|cgst|sgst|igst|discount|freight|subtotal|hsn|rate|qty|desc/i.test(name)) continue;
       const cleanName = sanitiseProductName(name);
       if (!isMeaningfulProductName(cleanName)) continue;
       const qty = parseNum(a), unit_price = parseNum(b), total = parseNum(c);
@@ -279,27 +346,64 @@ function parseInvoiceText(text: string): Omit<ParsedInvoice, "raw_text"> {
     }
   }
 
-  // Strategy 3: Look for Qty/Rate/Amount on separate adjacent lines
+  // Strategy 3: Header detection (for other invoice formats)
   if (products.length === 0) {
-    for (let i = 0; i < lines.length; i++) {
-      const qtyLine = lines[i].match(/(?:qty|quantity)[:\s]+(\d[\d,]*(?:\.\d+)?)/i);
-      const rateLine = lines[i].match(/(?:rate|price|unit\s*price)[:\s]+(\d[\d,]*(?:\.\d+)?)/i);
-      const totalLine = lines[i].match(/(?:amount|total)[:\s]+(\d[\d,]*(?:\.\d+)?)/i);
-      if (qtyLine || rateLine || totalLine) {
-        // Try to grab context ± 3 lines
-        const context = lines.slice(Math.max(0, i - 2), i + 3).join(" ");
-        const nums = context.match(/\d[\d,]*(?:\.\d+)?/g)?.map(parseNum) || [];
-        const nameMatch = context.match(/(?:item|product|description)[:\s]+([^0-9]+)/i);
-        if (nameMatch && nums.length >= 2) {
-          const cleanName = sanitiseProductName(nameMatch[1]);
-          const qty = nums[0], unit_price = nums[1], total = nums[2] ?? qty * unit_price;
-          if (qty > 0 && unit_price > 0 && isMeaningfulProductName(cleanName)) {
-            products.push({ product_name: cleanName, quantity: qty, unit_price, total });
+    const headerIdx = lines.findIndex((l) =>
+      /(?:item|product|description|particulars).+(?:qty|quantity).+(?:rate|price|unit).+(?:amount|total)/i.test(l) ||
+      /(?:qty|quantity).+(?:rate|price|unit).+(?:amount|total)/i.test(l)
+    );
+
+    if (headerIdx !== -1) {
+      for (let i = headerIdx + 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (/^\s*(sub[\s-]?total|grand\s*total|total\s*amount|net\s*amount|balance|taxes?|gst|cgst|sgst|igst|discount|freight|shipping|vat)\b/i.test(line)) break;
+        if (!line.trim()) continue;
+
+        const nums = line.match(/\d[\d,]*(?:\.\d+)?/g);
+        if (!nums || nums.length < 2) continue;
+
+        const namepart = sanitiseProductName(
+          line.replace(/\d[\d,]*(?:\.\d+)?/g, " ").trim()
+        );
+
+        if (!isMeaningfulProductName(namepart)) continue;
+
+        const values = nums.map(parseNum);
+        let qty = 0, unit_price = 0, total = 0;
+
+        if (values.length >= 3) {
+          let found = false;
+          for (let a = 0; a < values.length - 2 && !found; a++) {
+            for (let b = a + 1; b < values.length - 1 && !found; b++) {
+              for (let c = b + 1; c < values.length && !found; c++) {
+                if (values[a] > 0 && values[b] > 0 && Math.abs(values[a] * values[b] - values[c]) < 1) {
+                  qty = values[a]; unit_price = values[b]; total = values[c]; found = true;
+                }
+              }
+            }
           }
+          if (!found) {
+            [qty, unit_price, total] = values.slice(-3);
+          }
+        } else {
+          [qty, unit_price] = values;
+          total = qty * unit_price;
         }
+
+        if (qty <= 0 || unit_price <= 0) continue;
+        products.push({ product_name: namepart, quantity: qty, unit_price, total });
       }
     }
   }
+
+  // Remove duplicates and ensure unique products
+  const seen = new Set<string>();
+  products = products.filter((p) => {
+    const key = sanitiseProductName(p.product_name).toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 
   return { supplier_name, delivery_date, invoice_number, products };
 }
