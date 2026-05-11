@@ -1,4 +1,5 @@
 ﻿"use client";
+import { authFetch } from "@/contexts/UserContext";
 
 import { useEffect, useState, useRef } from "react";
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
@@ -181,7 +182,7 @@ export default function LendingPage() {
 
   async function fetchDepartments() {
     try {
-      const res = await fetch("/api/departments");
+      const res = await authFetch("/api/departments");
       if (res.ok) {
         const data = await res.json();
         setDepartments(data || []);
@@ -193,7 +194,7 @@ export default function LendingPage() {
 
   async function fetchProducts() {
     try {
-      const res = await fetch("/api/products");
+      const res = await authFetch("/api/products");
       if (res.ok) {
         const data = await res.json();
         setProducts(data || []);
@@ -205,7 +206,7 @@ export default function LendingPage() {
 
   async function fetchStaffList() {
     try {
-      const res = await fetch("/api/staffs");
+      const res = await authFetch("/api/staffs");
       if (res.ok) {
         const data = await res.json();
         setStaffList(data || []);
@@ -218,7 +219,7 @@ export default function LendingPage() {
   async function fetchLendingRecords() {
     try {
       setLoading(true);
-      const res = await fetch(`/api/lending?period=${timeFilter.toLowerCase()}`);
+      const res = await authFetch(`/api/lending?period=${timeFilter.toLowerCase()}`);
       if (res.ok) {
         const data = await res.json();
         const fetched = data.records || [];
@@ -307,7 +308,7 @@ export default function LendingPage() {
     setRecords(updated);
     applyStats(updated);
     try {
-      const res = await fetch(`/api/lending/${id}`, { method: "DELETE" });
+      const res = await authFetch(`/api/lending/${id}`, { method: "DELETE" });
       if (!res.ok) {
         setRecords(prevRecords);
         applyStats(prevRecords);
@@ -362,7 +363,7 @@ export default function LendingPage() {
     applyStats(updated);
     setDamageLoading(true);
     try {
-      const res = await fetch(`/api/lending/${record.id}/damage`, {
+      const res = await authFetch(`/api/lending/${record.id}/damage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -409,7 +410,7 @@ export default function LendingPage() {
     applyStats(updated);
     setLostLoading(true);
     try {
-      const res = await fetch(`/api/lending/${record.id}/lost`, {
+      const res = await authFetch(`/api/lending/${record.id}/lost`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -447,7 +448,7 @@ export default function LendingPage() {
     setEditQtyStr('');
     setEditFormData({});
     try {
-      const res = await fetch(`/api/lending/${editFormData.id}`, {
+      const res = await authFetch(`/api/lending/${editFormData.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -490,7 +491,7 @@ export default function LendingPage() {
 
   const checkStock = async (index: number, productId: string, requestedQuantity: number) => {
     try {
-      const res = await fetch(`/api/stocks/${productId}`);
+      const res = await authFetch(`/api/stocks/${productId}`);
       if (res.ok) {
         const data = await res.json();
         const availableStock = data.quantity || 0;
@@ -569,7 +570,7 @@ export default function LendingPage() {
 
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/lending", {
+      const res = await authFetch("/api/lending", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -658,7 +659,7 @@ export default function LendingPage() {
     try {
       // Send remaining balance + product_id so the backend updates only this item
       const body: any = { return_date: returnDate, quantity: remaining, product_id: productId };
-      const res = await fetch(`/api/lending/${recordId}`, {
+      const res = await authFetch(`/api/lending/${recordId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

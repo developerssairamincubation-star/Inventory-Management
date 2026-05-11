@@ -224,9 +224,9 @@ export default function StaffsPage() {
                         display: "flex", alignItems: "center", justifyContent: "center",
                         fontSize: 12, fontWeight: 700, color: "#fff", flexShrink: 0,
                       }}>
-                        {s.staff_name.charAt(0).toUpperCase()}
+                        {(s.staff_name || "?").charAt(0).toUpperCase()}
                       </div>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{s.staff_name}</span>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{s.staff_name || "—"}</span>
                     </div>
                   </td>
                   <td style={{ padding: "12px 16px", fontSize: 13, color: "var(--muted)" }}>{s.employee_id || "—"}</td>

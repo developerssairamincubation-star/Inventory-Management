@@ -1,4 +1,5 @@
 ﻿"use client";
+import { authFetch } from "@/contexts/UserContext";
 
 import { useEffect, useState } from "react";
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
@@ -98,7 +99,7 @@ export default function BillingPage() {
   async function fetchInvoices() {
     try {
       setLoading(true);
-      const res = await fetch("/api/invoices");
+      const res = await authFetch("/api/invoices");
       if (res.ok) {
         const data = await res.json();
         setInvoices(data.invoices || []);
@@ -112,7 +113,7 @@ export default function BillingPage() {
 
   async function fetchProducts() {
     try {
-      const res = await fetch("/api/products");
+      const res = await authFetch("/api/products");
       if (res.ok) {
         const data = await res.json();
         // API returns array directly, not wrapped in {products: [...]}
@@ -125,7 +126,7 @@ export default function BillingPage() {
 
   async function fetchNextInvoiceNo() {
     try {
-      const res = await fetch("/api/invoices/next-number");
+      const res = await authFetch("/api/invoices/next-number");
       if (res.ok) {
         const data = await res.json();
         setInvoiceNo(data.invoice_no);
@@ -213,7 +214,7 @@ export default function BillingPage() {
 
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/invoices", {
+      const res = await authFetch("/api/invoices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -285,7 +286,7 @@ export default function BillingPage() {
   const fetchInvoiceDetails = async (invoiceId: string) => {
     try {
       setLoadingDetail(true);
-      const res = await fetch(`/api/invoices/${invoiceId}`);
+      const res = await authFetch(`/api/invoices/${invoiceId}`);
       if (res.ok) {
         const data = await res.json();
         setSelectedInvoice(data);
@@ -307,7 +308,7 @@ export default function BillingPage() {
     }
 
     try {
-      const res = await fetch(`/api/invoices/${invoiceId}`, {
+      const res = await authFetch(`/api/invoices/${invoiceId}`, {
         method: "DELETE",
       });
 

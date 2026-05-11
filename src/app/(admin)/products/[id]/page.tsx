@@ -231,14 +231,14 @@ function EditModal({
   const [addCatLoading, setAddCatLoading] = useState(false)
 
   useEffect(() => {
-    fetch('/api/categories').then(r => r.ok ? r.json() : []).then(d => setCategories(Array.isArray(d) ? d : []))
+    authFetch('/api/categories').then(r => r.ok ? r.json() : []).then(d => setCategories(Array.isArray(d) ? d : []))
   }, [])
 
   const handleCreateCat = async () => {
     if (!newCatName.trim() || addCatLoading) return
     setAddCatLoading(true)
     try {
-      const res = await fetch('/api/categories', {
+      const res = await authFetch('/api/categories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category_name: newCatName.trim() }),
@@ -271,7 +271,7 @@ function EditModal({
         const formData = new FormData()
         formData.append('file', imageFile)
         formData.append('folder', 'products')
-        const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData })
+        const uploadRes = await authFetch('/api/upload', { method: 'POST', body: formData })
         if (uploadRes.ok) {
           const uploadData = await uploadRes.json()
           image_url = uploadData.url
@@ -280,7 +280,7 @@ function EditModal({
         }
       }
 
-      const res = await fetch(`/api/products/${product.product_id}`, {
+      const res = await authFetch(`/api/products/${product.product_id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -298,7 +298,7 @@ function EditModal({
       const updated = await res.json()
       const originalStock = product.stocks?.quantity ?? 0
       if (stockQuantity !== '' && Number(stockQuantity) !== originalStock) {
-        await fetch(`/api/products/${product.product_id}/update-stock`, {
+        await authFetch(`/api/products/${product.product_id}/update-stock`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ newStock: Number(stockQuantity) }),
@@ -510,7 +510,7 @@ export default function ProductDetailPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/products/${id}?period=${period}`)
+      const res = await authFetch(`/api/products/${id}?period=${period}`)
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.error || 'Product not found')
@@ -530,7 +530,7 @@ export default function ProductDetailPage() {
   const fetchLendingSummary = async (period: LendingPeriod) => {
     setSummaryLoading(true)
     try {
-      const res = await fetch(`/api/products/${id}?period=${period}`)
+      const res = await authFetch(`/api/products/${id}?period=${period}`)
       if (res.ok) {
         const data = await res.json()
         setLendingSummary(data.lendingSummary)
@@ -545,7 +545,7 @@ export default function ProductDetailPage() {
   const handleDelete = async () => {
     setDeleting(true)
     try {
-      const res = await fetch(`/api/products/${id}`, { method: 'DELETE' })
+      const res = await authFetch(`/api/products/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error(await res.text())
       router.push('/products')
     } catch (err) {

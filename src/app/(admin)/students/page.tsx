@@ -224,9 +224,9 @@ export default function StudentsPage() {
                         display: "flex", alignItems: "center", justifyContent: "center",
                         fontSize: 12, fontWeight: 700, color: "#fff", flexShrink: 0,
                       }}>
-                        {s.student_name.charAt(0).toUpperCase()}
+                        {(s.student_name || "?").charAt(0).toUpperCase()}
                       </div>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{s.student_name}</span>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{s.student_name || "—"}</span>
                     </div>
                   </td>
                   <td style={{ padding: "12px 16px", fontSize: 13, color: "var(--muted)" }}>{s.student_number || "—"}</td>
