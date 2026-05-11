@@ -1,32 +1,46 @@
 "use client";
 
-import { onAuthStateChanged, type User } from "firebase/auth";
-import { auth } from "@/lib/firebase";
-import { useEffect, useState } from "react";
+import { useUser } from "@/contexts/UserContext";
 import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
-export default function ProtectedRoute({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { firebaseUser, appUser, loading } = useUser();
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (firebaseUser) => {
-      if (!firebaseUser) {
-        router.replace("/login");
-      }
-      setUser(firebaseUser);
-      setChecked(true);
-    });
-    return () => unsub();
-  }, []);
+    if (loading) return;
+    if (!firebaseUser) {
+      router.replace("/login");
+    }
+  }, [firebaseUser, loading, router]);
 
-  // Never render children until auth is confirmed AND user exists.
-  // This prevents any flash of protected content.
-  if (!checked || !user) return null;
+  if (loading) return null;
+  if (!firebaseUser) return null;
+
+  // User is authenticated in Firebase but not registered in our users table
+  if (!appUser) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          height: "100vh",
+          background: "var(--bg)",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <p style={{ fontSize: 15, color: "var(--text)", fontWeight: 600 }}>
+          Access denied
+        </p>
+        <p style={{ fontSize: 13, color: "var(--muted)" }}>
+          Your account has not been activated. Please contact the system administrator.
+        </p>
+      </div>
+    );
+  }
+
   return <>{children}</>;
 }

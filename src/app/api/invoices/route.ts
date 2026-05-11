@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 
 export async function GET(request: NextRequest) {
+  const user = await getAuthUser(request)
+  if (!user) return unauthorizedResponse()
+
   try {
     const supabase = getSupabaseAdmin();
 
-    // Fetch all invoices
     const { data: invoicesData, error: invoicesError } = await supabase
       .from("purchase_invoice")
       .select("*")
+      .eq("user_id", user.user_id)
       .order("created_at", { ascending: false });
 
     if (invoicesError) {
@@ -21,7 +25,6 @@ export async function GET(request: NextRequest) {
 
     const invoiceIds = invoicesData.map((inv: any) => inv.invoice_id);
 
-    // Fetch invoice items for all invoices
     const { data: itemsData, error: itemsError } = await supabase
       .from("purchase_invoice_item")
       .select("*")
@@ -31,7 +34,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: itemsError.message }, { status: 500 });
     }
 
-    // Build items map
     const itemsMap = new Map<string, any[]>();
     (itemsData || []).forEach((item: any) => {
       if (!itemsMap.has(item.invoice_id)) {
@@ -40,10 +42,8 @@ export async function GET(request: NextRequest) {
       itemsMap.get(item.invoice_id)!.push(item);
     });
 
-    // Build invoice response with items count and total
     const invoices = invoicesData.map((invoice: any) => {
       const items = itemsMap.get(invoice.invoice_id) || [];
-      
       return {
         invoice_id: invoice.invoice_id,
         invoice_number: invoice.invoice_number,
@@ -61,6 +61,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const user = await getAuthUser(request)
+  if (!user) return unauthorizedResponse()
+
   try {
     const supabase = getSupabaseAdmin();
     const body = await request.json();
@@ -83,13 +86,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Each invoice item must include a product name, quantity and cost" }, { status: 400 });
     }
 
-    // Calculate total amount
     const total_amount = normalisedItems.reduce((sum: number, item: any) => sum + item.total_cost, 0);
-
-    // Get current timestamp for created_at and updated_at
     const currentDate = new Date().toISOString();
 
-    // Create invoice with total_amount
     const { data: invoice, error: invoiceError } = await supabase
       .from("purchase_invoice")
       .insert({
@@ -97,6 +96,7 @@ export async function POST(request: NextRequest) {
         supplier_name,
         received_date,
         total_amount,
+        user_id: user.user_id,
         created_at: currentDate,
         updated_at: currentDate,
       })
@@ -107,7 +107,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: invoiceError.message }, { status: 500 });
     }
 
-    // Create invoice items
     const invoiceItems = normalisedItems.map((item: any) => ({
       invoice_id: invoice.invoice_id,
       product_id: item.product_id,
@@ -122,12 +121,10 @@ export async function POST(request: NextRequest) {
       .insert(invoiceItems);
 
     if (itemsError) {
-      // Rollback: delete the invoice if items insertion fails
       await supabase.from("purchase_invoice").delete().eq("invoice_id", invoice.invoice_id);
       return NextResponse.json({ error: itemsError.message }, { status: 500 });
     }
 
-    // Update stock quantities
     for (const item of normalisedItems) {
       if (!item.product_id) continue;
 
@@ -138,24 +135,14 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (stockData) {
-        // Update existing stock
         await supabase
           .from("stocks")
-          .update({ 
-            quantity: stockData.quantity + item.quantity,
-            updated_at: currentDate 
-          })
+          .update({ quantity: stockData.quantity + item.quantity, updated_at: currentDate })
           .eq("product_id", item.product_id);
       } else {
-        // Create new stock entry
         await supabase
           .from("stocks")
-          .insert({
-            product_id: item.product_id,
-            quantity: item.quantity,
-            created_at: currentDate,
-            updated_at: currentDate,
-          });
+          .insert({ product_id: item.product_id, quantity: item.quantity, created_at: currentDate, updated_at: currentDate });
       }
     }
 

@@ -1,42 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const user = await getAuthUser(request)
+  if (!user) return unauthorizedResponse()
+
   try {
     const supabase = getSupabaseAdmin();
     const { id: invoiceId } = await params;
 
-    // Fetch invoice details
     const { data: invoice, error: invoiceError } = await supabase
       .from("purchase_invoice")
       .select("*")
       .eq("invoice_id", invoiceId)
+      .eq("user_id", user.user_id)
       .single();
 
     if (invoiceError || !invoice) {
       return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     }
 
-    // Fetch invoice items with product names
     const { data: items, error: itemsError } = await supabase
       .from("purchase_invoice_item")
-      .select(`
-        *,
-        products (
-          product_name
-        )
-      `)
+      .select(`*, products (product_name)`)
       .eq("invoice_id", invoiceId);
 
     if (itemsError) {
       return NextResponse.json({ error: itemsError.message }, { status: 500 });
     }
 
-    // Format the response
-    const invoiceDetail = {
+    return NextResponse.json({
       invoice_id: invoice.invoice_id,
       invoice_number: invoice.invoice_number,
       supplier_name: invoice.supplier_name,
@@ -49,9 +46,7 @@ export async function GET(
         unit_cost: item.unit_cost,
         total_cost: item.total_cost,
       })),
-    };
-
-    return NextResponse.json(invoiceDetail);
+    });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -61,62 +56,56 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const user = await getAuthUser(request)
+  if (!user) return unauthorizedResponse()
+
   try {
     const supabase = getSupabaseAdmin();
     const { id: invoiceId } = await params;
 
-    // First, get all items from this invoice to update stock
-    const { data: items, error: itemsError } = await supabase
+    // Verify ownership before deleting
+    const { data: invoice } = await supabase
+      .from("purchase_invoice")
+      .select("invoice_id")
+      .eq("invoice_id", invoiceId)
+      .eq("user_id", user.user_id)
+      .single();
+
+    if (!invoice) {
+      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    }
+
+    const { data: items } = await supabase
       .from("purchase_invoice_item")
       .select("product_id, quantity")
       .eq("invoice_id", invoiceId);
 
-    if (itemsError) {
-      return NextResponse.json({ error: itemsError.message }, { status: 500 });
-    }
-
-    // Update stock quantities (subtract the quantities that were added)
     if (items && items.length > 0) {
       for (const item of items) {
         if (!item.product_id) continue;
-
         const { data: stockData } = await supabase
           .from("stocks")
           .select("quantity")
           .eq("product_id", item.product_id)
           .single();
-
         if (stockData) {
-          const newQuantity = Math.max(0, stockData.quantity - item.quantity);
           await supabase
             .from("stocks")
-            .update({ 
-              quantity: newQuantity,
-              updated_date: new Date().toISOString()
-            })
+            .update({ quantity: Math.max(0, stockData.quantity - item.quantity) })
             .eq("product_id", item.product_id);
         }
       }
     }
 
-    // Delete invoice items
-    const { error: deleteItemsError } = await supabase
-      .from("purchase_invoice_item")
-      .delete()
-      .eq("invoice_id", invoiceId);
+    await supabase.from("purchase_invoice_item").delete().eq("invoice_id", invoiceId);
 
-    if (deleteItemsError) {
-      return NextResponse.json({ error: deleteItemsError.message }, { status: 500 });
-    }
-
-    // Delete invoice
-    const { error: deleteInvoiceError } = await supabase
+    const { error } = await supabase
       .from("purchase_invoice")
       .delete()
       .eq("invoice_id", invoiceId);
 
-    if (deleteInvoiceError) {
-      return NextResponse.json({ error: deleteInvoiceError.message }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     return NextResponse.json({ message: "Invoice deleted successfully" });
