@@ -8,7 +8,7 @@ type Department = { department_id: string; department_name: string };
 
 type Student = {
   student_id: string;
-  student_name: string;
+  name: string;
   student_number: string | null;
   email: string | null;
   phone_number: string | null;
@@ -17,7 +17,7 @@ type Student = {
 };
 
 type StudentForm = {
-  student_name: string;
+  name: string;
   student_number: string;
   email: string;
   phone_number: string;
@@ -25,7 +25,7 @@ type StudentForm = {
 };
 
 const EMPTY_FORM: StudentForm = {
-  student_name: "",
+  name: "",
   student_number: "",
   email: "",
   phone_number: "",
@@ -112,7 +112,7 @@ export default function StudentsPage() {
   function openEdit(s: Student) {
     setEditStudent(s);
     setForm({
-      student_name: s.student_name,
+      name: s.name,
       student_number: s.student_number || "",
       email: s.email || "",
       phone_number: s.phone_number || "",
@@ -224,9 +224,9 @@ export default function StudentsPage() {
                         display: "flex", alignItems: "center", justifyContent: "center",
                         fontSize: 12, fontWeight: 700, color: "#fff", flexShrink: 0,
                       }}>
-                        {(s.student_name || "?").charAt(0).toUpperCase()}
+                        {(s.name || "?").charAt(0).toUpperCase()}
                       </div>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{s.student_name || "—"}</span>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{s.name || "—"}</span>
                     </div>
                   </td>
                   <td style={{ padding: "12px 16px", fontSize: 13, color: "var(--muted)" }}>{s.student_number || "—"}</td>
@@ -260,7 +260,7 @@ export default function StudentsPage() {
           {error && <ErrorBox msg={error} />}
           <form onSubmit={handleAdd} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Field label="Full Name" labelStyle={labelStyle}>
-              <input style={inputStyle} value={form.student_name} onChange={e => setForm(f => ({ ...f, student_name: e.target.value }))} required placeholder="Enter full name" />
+              <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required placeholder="Enter full name" />
             </Field>
             <Field label="Student Number" labelStyle={labelStyle}>
               <input style={inputStyle} value={form.student_number} onChange={e => setForm(f => ({ ...f, student_number: e.target.value }))} placeholder="e.g. 2024CS001" />
@@ -288,7 +288,7 @@ export default function StudentsPage() {
           {error && <ErrorBox msg={error} />}
           <form onSubmit={handleEdit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Field label="Full Name" labelStyle={labelStyle}>
-              <input style={inputStyle} value={form.student_name} onChange={e => setForm(f => ({ ...f, student_name: e.target.value }))} required />
+              <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
             </Field>
             <Field label="Student Number" labelStyle={labelStyle}>
               <input style={inputStyle} value={form.student_number} onChange={e => setForm(f => ({ ...f, student_number: e.target.value }))} />

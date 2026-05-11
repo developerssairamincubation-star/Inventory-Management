@@ -8,7 +8,7 @@ type Department = { department_id: string; department_name: string };
 
 type Staff = {
   staff_id: string;
-  staff_name: string;
+  name: string;
   employee_id: string | null;
   email: string | null;
   phone_number: string | null;
@@ -17,7 +17,7 @@ type Staff = {
 };
 
 type StaffForm = {
-  staff_name: string;
+  name: string;
   employee_id: string;
   email: string;
   phone_number: string;
@@ -25,7 +25,7 @@ type StaffForm = {
 };
 
 const EMPTY_FORM: StaffForm = {
-  staff_name: "",
+  name: "",
   employee_id: "",
   email: "",
   phone_number: "",
@@ -112,7 +112,7 @@ export default function StaffsPage() {
   function openEdit(s: Staff) {
     setEditStaff(s);
     setForm({
-      staff_name: s.staff_name,
+      name: s.name,
       employee_id: s.employee_id || "",
       email: s.email || "",
       phone_number: s.phone_number || "",
@@ -224,9 +224,9 @@ export default function StaffsPage() {
                         display: "flex", alignItems: "center", justifyContent: "center",
                         fontSize: 12, fontWeight: 700, color: "#fff", flexShrink: 0,
                       }}>
-                        {(s.staff_name || "?").charAt(0).toUpperCase()}
+                        {(s.name || "?").charAt(0).toUpperCase()}
                       </div>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{s.staff_name || "—"}</span>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{s.name || "—"}</span>
                     </div>
                   </td>
                   <td style={{ padding: "12px 16px", fontSize: 13, color: "var(--muted)" }}>{s.employee_id || "—"}</td>
@@ -260,7 +260,7 @@ export default function StaffsPage() {
           {error && <ErrorBox msg={error} />}
           <form onSubmit={handleAdd} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Field label="Full Name" labelStyle={labelStyle}>
-              <input style={inputStyle} value={form.staff_name} onChange={e => setForm(f => ({ ...f, staff_name: e.target.value }))} required placeholder="Enter full name" />
+              <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required placeholder="Enter full name" />
             </Field>
             <Field label="Employee ID" labelStyle={labelStyle}>
               <input style={inputStyle} value={form.employee_id} onChange={e => setForm(f => ({ ...f, employee_id: e.target.value }))} placeholder="e.g. EMP001" />
@@ -288,7 +288,7 @@ export default function StaffsPage() {
           {error && <ErrorBox msg={error} />}
           <form onSubmit={handleEdit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Field label="Full Name" labelStyle={labelStyle}>
-              <input style={inputStyle} value={form.staff_name} onChange={e => setForm(f => ({ ...f, staff_name: e.target.value }))} required />
+              <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
             </Field>
             <Field label="Employee ID" labelStyle={labelStyle}>
               <input style={inputStyle} value={form.employee_id} onChange={e => setForm(f => ({ ...f, employee_id: e.target.value }))} />
