@@ -1,4 +1,5 @@
 ﻿"use client";
+import { authFetch } from "@/contexts/UserContext";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -70,7 +71,7 @@ export default function ProductsPage() {
     let mounted = true;
     async function fetchProducts() {
       try {
-        const res = await fetch("/api/products");
+        const res = await authFetch("/api/products");
         if (res.ok) {
           const data = await res.json();
           if (mounted) setProducts(data || []);
@@ -85,7 +86,7 @@ export default function ProductsPage() {
     }
     async function fetchCategories() {
       try {
-        const res = await fetch('/api/categories');
+        const res = await authFetch('/api/categories');
         if (res.ok) {
           const data = await res.json();
           if (mounted) setCategories(data || []);
@@ -193,7 +194,7 @@ export default function ProductsPage() {
     if (!newCategoryName.trim() || addCategoryLoading) return;
     setAddCategoryLoading(true);
     try {
-      const res = await fetch('/api/categories', {
+      const res = await authFetch('/api/categories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category_name: newCategoryName.trim() }),
@@ -295,7 +296,7 @@ export default function ProductsPage() {
       if (additionalStock !== '' && additionalStock !== 0) body.additionalStock = Number(additionalStock);
       if (newUnitCost !== '' && newUnitCost !== selectedProduct.unit_cost) body.unitCost = Number(newUnitCost);
       const productId = selectedProduct.product_id || selectedProduct.id;
-      const res = await fetch(`/api/products/${productId}/update-stock`, {
+      const res = await authFetch(`/api/products/${productId}/update-stock`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -486,7 +487,7 @@ export default function ProductsPage() {
                         const formData = new FormData();
                         formData.append('file', item.imageFile);
                         formData.append('folder', 'products');
-                        const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+                        const uploadRes = await authFetch('/api/upload', { method: 'POST', body: formData });
                         if (uploadRes.ok) {
                           const uploadData = await uploadRes.json();
                           image_url = uploadData.url;
@@ -516,7 +517,7 @@ export default function ProductsPage() {
                       category_id: item.category_id || undefined,
                     };
 
-                    const res = await fetch('/api/products', { 
+                    const res = await authFetch('/api/products', { 
                       method: 'POST', 
                       headers: { 'Content-Type': 'application/json' }, 
                       body: JSON.stringify(body) 
@@ -1116,7 +1117,7 @@ export default function ProductsPage() {
                                   const formData = new FormData();
                                   formData.append('file', item.imageFile);
                                   formData.append('folder', 'products');
-                                  const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+                                  const uploadRes = await authFetch('/api/upload', { method: 'POST', body: formData });
                                   if (uploadRes.ok) {
                                     const uploadData = await uploadRes.json();
                                     image_url = uploadData.url;
@@ -1146,7 +1147,7 @@ export default function ProductsPage() {
                                 category_id: item.category_id || undefined,
                               };
 
-                              const res = await fetch('/api/products', { 
+                              const res = await authFetch('/api/products', { 
                                 method: 'POST', 
                                 headers: { 'Content-Type': 'application/json' }, 
                                 body: JSON.stringify(body) 

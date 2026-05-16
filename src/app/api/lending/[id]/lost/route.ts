@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const user = await getAuthUser(request)
+  if (!user) return unauthorizedResponse()
+
   try {
     const supabase = getSupabaseAdmin();
     const { id } = await params;
@@ -12,13 +16,19 @@ export async function POST(
     const { product_id, lost_quantity } = body;
 
     if (!product_id || !lost_quantity || lost_quantity < 1) {
-      return NextResponse.json(
-        { error: "product_id and lost_quantity (≥1) are required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "product_id and lost_quantity (≥1) are required" }, { status: 400 });
     }
 
-    // 1. Get the current lending_item row for this order + product
+    // Verify order ownership
+    const { data: order } = await supabase
+      .from("lending_order")
+      .select("lending_order_id")
+      .eq("lending_order_id", id)
+      .eq("issued_by_user_id", user.user_id)
+      .single();
+
+    if (!order) return NextResponse.json({ error: "Lending record not found" }, { status: 404 });
+
     const { data: lendingItem, error: lendingItemError } = await supabase
       .from("lending_item")
       .select("quantity, lost_quantity")
@@ -27,67 +37,31 @@ export async function POST(
       .single();
 
     if (lendingItemError || !lendingItem) {
-      return NextResponse.json(
-        { error: "Lending item not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Lending item not found" }, { status: 404 });
     }
 
     if (lost_quantity > lendingItem.quantity) {
-      return NextResponse.json(
-        { error: `Lost quantity (${lost_quantity}) exceeds lent quantity (${lendingItem.quantity})` },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `Lost quantity (${lost_quantity}) exceeds lent quantity (${lendingItem.quantity})` }, { status: 400 });
     }
 
     const newLentQuantity = lendingItem.quantity - lost_quantity;
     const newItemLostQty = (lendingItem.lost_quantity || 0) + lost_quantity;
 
-    // 2. Update lending_item: reduce quantity, increment lost_quantity
-    //    (quantity can reach 0 — constraint was relaxed to >= 0)
-    const { error: lendingUpdateError } = await supabase
+    await supabase
       .from("lending_item")
       .update({ quantity: newLentQuantity, lost_quantity: newItemLostQty })
       .eq("lend_order_id", id)
       .eq("product_id", product_id);
 
-    if (lendingUpdateError) {
-      console.error("Error updating lending item:", lendingUpdateError);
-      return NextResponse.json({ error: lendingUpdateError.message }, { status: 500 });
-    }
-
-    // 3. Update lending_order status
     if (newLentQuantity === 0) {
-      const { error: orderStatusError } = await supabase
-        .from("lending_order")
-        .update({ status: "LOST" })
-        .eq("lending_order_id", id);
-
-      if (orderStatusError) {
-        console.error("Error updating lending order status:", orderStatusError);
-        return NextResponse.json({ error: orderStatusError.message }, { status: 500 });
-      }
+      await supabase.from("lending_order").update({ status: "LOST" }).eq("lending_order_id", id);
     } else {
-      const { data: lendingOrder } = await supabase
-        .from("lending_order")
-        .select("status")
-        .eq("lending_order_id", id)
-        .single();
-
+      const { data: lendingOrder } = await supabase.from("lending_order").select("status").eq("lending_order_id", id).single();
       if (lendingOrder && (lendingOrder.status === "PENDING" || lendingOrder.status === "PARTIALLY_DAMAGED")) {
-        const { error: orderStatusError } = await supabase
-          .from("lending_order")
-          .update({ status: "PARTIALLY_LOST" })
-          .eq("lending_order_id", id);
-
-        if (orderStatusError) {
-          console.error("Error updating lending order status:", orderStatusError);
-          return NextResponse.json({ error: orderStatusError.message }, { status: 500 });
-        }
+        await supabase.from("lending_order").update({ status: "PARTIALLY_LOST" }).eq("lending_order_id", id);
       }
     }
 
-    // 3. Reduce stocks.quantity and increase stocks.lost_quantity
     const { data: stockData, error: stockFetchError } = await supabase
       .from("stocks")
       .select("quantity, lost_quantity")
@@ -95,7 +69,6 @@ export async function POST(
       .single();
 
     if (stockFetchError || !stockData) {
-      console.error("Error fetching stock:", stockFetchError);
       return NextResponse.json({ error: "Stock record not found" }, { status: 404 });
     }
 
@@ -104,21 +77,13 @@ export async function POST(
 
     const { error: stockUpdateError } = await supabase
       .from("stocks")
-      .update({
-        quantity: newStockQuantity,
-        lost_quantity: newLostQuantity,
-      })
+      .update({ quantity: newStockQuantity, lost_quantity: newLostQuantity })
       .eq("product_id", product_id);
 
     if (stockUpdateError) {
-      // If lost_quantity column doesn't exist yet, fall back to just reducing quantity
       if (stockUpdateError.code === "42703") {
-        await supabase
-          .from("stocks")
-          .update({ quantity: newStockQuantity })
-          .eq("product_id", product_id);
+        await supabase.from("stocks").update({ quantity: newStockQuantity }).eq("product_id", product_id);
       } else {
-        console.error("Error updating stock:", stockUpdateError);
         return NextResponse.json({ error: stockUpdateError.message }, { status: 500 });
       }
     }
@@ -131,10 +96,6 @@ export async function POST(
       orderStatus: newLentQuantity === 0 ? "LOST" : "PARTIALLY_LOST",
     });
   } catch (error) {
-    console.error("Error processing lost request:", error);
-    return NextResponse.json(
-      { error: "Failed to mark items as lost" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to mark items as lost" }, { status: 500 });
   }
 }

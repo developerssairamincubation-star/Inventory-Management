@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import Link from "next/link";
@@ -6,6 +6,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { useUser } from "@/contexts/UserContext";
 import {
   LayoutDashboard,
   Box,
@@ -16,10 +17,11 @@ import {
   LogOut,
   ChevronsLeft,
   ChevronsRight,
+  ShieldCheck,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-type NavItem = { label: string; href: string; icon: LucideIcon };
+type NavItem = { label: string; href: string; icon: LucideIcon; adminOnly?: boolean };
 
 const nav: NavItem[] = [
   { label: "Dashboard",          href: "/dashboard", icon: LayoutDashboard    },
@@ -28,6 +30,7 @@ const nav: NavItem[] = [
   { label: "Student Management", href: "/students",  icon: Users              },
   { label: "Staff Management",   href: "/staffs",    icon: UserPen            },
   { label: "Invoice Details",    href: "/billing",   icon: ReceiptIndianRupee },
+  { label: "User Management",    href: "/admin/users", icon: ShieldCheck, adminOnly: true },
 ];
 
 const SIDEBAR_BG = '#1E2938';
@@ -36,21 +39,22 @@ const HOVER_BG   = '#4A5365';
 export default function Sidebar() {
   const pathname  = usePathname();
   const router    = useRouter();
+  const { appUser } = useUser();
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('sidebar-collapsed') === 'true';
   });
-  const [hovered,   setHovered]   = useState<string | null>(null);
+  const [hovered, setHovered] = useState<string | null>(null);
 
   const handleLogout = async () => {
     await signOut(auth);
     router.push("/login");
   };
 
+  const visibleNav = nav.filter(item => !item.adminOnly || appUser?.role === 'super_admin');
   const w = collapsed ? 60 : 210;
 
   return (
-    /* Wrapper — flex child that owns the width; overflow visible so button can protrude */
     <div
       style={{
         position: 'relative',
@@ -90,29 +94,23 @@ export default function Sidebar() {
             style={{ display: 'flex', alignItems: 'center', textDecoration: 'none', cursor: 'pointer' }}
             title="Go to Dashboard"
           >
-          <Image
-            src="/Logo.svg"
-            alt="Logo"
-            width={42}
-            height={42}
-            style={{ flexShrink: 0 }}
-          />
-          {!collapsed && (
-            <div style={{ overflow: 'hidden', marginLeft: 10 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: '#fff', letterSpacing: '-0.01em', lineHeight: 1.2, whiteSpace: 'nowrap' }}>
-                Inventory
+            <Image src="/Logo.svg" alt="Logo" width={42} height={42} style={{ flexShrink: 0 }} />
+            {!collapsed && (
+              <div style={{ overflow: 'hidden', marginLeft: 10 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: '#fff', letterSpacing: '-0.01em', lineHeight: 1.2, whiteSpace: 'nowrap' }}>
+                  Inventory
+                </div>
+                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', marginTop: 3, letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                  Management System
+                </div>
               </div>
-              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', marginTop: 3, letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-                Management System
-              </div>
-            </div>
-          )}
+            )}
           </Link>
         </div>
 
         {/* Nav items */}
         <nav style={{ flex: 1, paddingTop: 8 }}>
-          {nav.map((item) => {
+          {visibleNav.map((item) => {
             const active  = pathname === item.href || pathname.startsWith(item.href + '/');
             const isHover = hovered === item.href;
             const Icon    = item.icon;
@@ -142,17 +140,13 @@ export default function Sidebar() {
                 }}
               >
                 <Icon size={18} strokeWidth={active ? 2.5 : 1.8} style={{ flexShrink: 0 }} />
-                {!collapsed && (
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {item.label}
-                  </span>
-                )}
+                {!collapsed && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</span>}
               </Link>
             );
           })}
         </nav>
 
-        {/* Logout button */}
+        {/* Logout */}
         <div style={{ paddingBottom: 16, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 8 }}>
           <button
             onClick={handleLogout}
@@ -184,7 +178,7 @@ export default function Sidebar() {
         </div>
       </aside>
 
-      {/* Toggle button — protrudes outside the right edge */}
+      {/* Collapse toggle */}
       <button
         onClick={() => setCollapsed(prev => {
           const next = !prev;
@@ -211,10 +205,7 @@ export default function Sidebar() {
           padding: 0,
         }}
       >
-        {collapsed
-          ? <ChevronsRight size={13} strokeWidth={2.5} />
-          : <ChevronsLeft  size={13} strokeWidth={2.5} />
-        }
+        {collapsed ? <ChevronsRight size={13} strokeWidth={2.5} /> : <ChevronsLeft size={13} strokeWidth={2.5} />}
       </button>
     </div>
   );

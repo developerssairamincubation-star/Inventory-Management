@@ -1,12 +1,15 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import getSupabaseAdmin from '@/lib/supabaseServer'
+import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const user = await getAuthUser(req)
+  if (!user) return unauthorizedResponse()
+
   try {
     const supabaseAdmin = getSupabaseAdmin()
-    // Select products with stock information (no category join — use separate lookup)
     const { data, error } = await supabaseAdmin
       .from('products')
       .select(`
@@ -14,6 +17,7 @@ export async function GET() {
         stocks (quantity),
         product_image (image_url)
       `)
+      .eq('user_id', user.user_id)
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -21,7 +25,6 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    // Batch-fetch category names for all unique category_ids
     const categoryIds = [...new Set((data || []).map((p: any) => p.category_id).filter(Boolean))]
     const categoryMap: Record<string, string> = {}
     if (categoryIds.length > 0) {
@@ -31,10 +34,9 @@ export async function GET() {
           .select('category_id, category_name')
           .in('category_id', categoryIds)
         ;(cats || []).forEach((c: any) => { categoryMap[c.category_id] = c.category_name })
-      } catch { /* category table may not exist yet — skip */ }
+      } catch { /* category table may not exist yet */ }
     }
 
-    // Flatten product_image into image_url and attach category_name
     const normalized = (data || []).map((p: any) => ({
       ...p,
       image_url: p.product_image?.[0]?.image_url ?? null,
@@ -49,38 +51,31 @@ export async function GET() {
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+  const user = await getAuthUser(req)
+  if (!user) return unauthorizedResponse()
+
   try {
     const body = await req.json()
-    // Log incoming payload for debugging (avoid logging huge blobs in production)
-    try {
-      console.log('[products] POST body:', JSON.stringify(body))
-    } catch (e) {
-      console.log('[products] POST body (non-serializable)')
-    }
     const supabaseAdmin = getSupabaseAdmin()
 
-    // Map incoming fields to DB schema
     const product_name = body.name ?? body.product_name
     const serial_number = body.sku ?? body.serial_number
     const unit_cost = body.cost ?? body.unit_cost
     const low_stock_threshold = body.low_stock_threshold ?? body.lowStockThreshold ?? null
-    // image_url is set after the client uploads to S3 via /api/upload
     const image_url: string | null = body.image_url ?? null
     const returnable = typeof body.returnable === 'boolean' ? body.returnable : null
-    // consumable is NOT NULL in the DB — derive from returnable if not explicitly provided
-    const consumable  = typeof body.consumable  === 'boolean' ? body.consumable
-                      : returnable !== null ? !returnable
-                      : false
+    const consumable = typeof body.consumable === 'boolean' ? body.consumable
+      : returnable !== null ? !returnable
+      : false
     const quantity = body.quantity ?? body.initial_quantity ?? null
     const category_id = body.category_id ?? null
 
-    // Validate required fields
     if (!product_name || unit_cost == null || quantity == null) {
       return NextResponse.json({ error: 'Missing required fields: product_name, unit_cost, quantity' }, { status: 400 })
     }
 
-    // Generate product_code in format STIC001, STIC002, etc.
+    // Product code is globally sequential to avoid conflicts
     const { data: lastProduct } = await supabaseAdmin
       .from('products')
       .select('product_code')
@@ -89,88 +84,57 @@ export async function POST(req: Request) {
       .limit(1)
       .maybeSingle()
 
-    console.log('[products] lastProduct lookup result:', JSON.stringify(lastProduct))
-
     let nextProductNumber = 1
-    if (lastProduct && lastProduct.product_code) {
+    if (lastProduct?.product_code) {
       const lastNumber = parseInt(lastProduct.product_code.replace('STIC', ''))
-      if (!isNaN(lastNumber)) {
-        nextProductNumber = lastNumber + 1
-      }
+      if (!isNaN(lastNumber)) nextProductNumber = lastNumber + 1
     }
     const product_code = `STIC${String(nextProductNumber).padStart(3, '0')}`
 
-    // Insert product row (image_url lives in product_image table, not here)
     const { data: product, error: prodErr } = await supabaseAdmin
       .from('products')
-      .insert([
-        {
-          product_code,
-          product_name,
-          unit_cost,
-          serial_number: serial_number ?? undefined,
-          low_stock_threshold: low_stock_threshold ?? undefined,
-          returnable: returnable ?? undefined,
-          consumable: consumable,
-          category_id: category_id ?? undefined,
-        },
-      ])
+      .insert([{
+        product_code,
+        product_name,
+        unit_cost,
+        serial_number: serial_number ?? undefined,
+        low_stock_threshold: low_stock_threshold ?? undefined,
+        returnable: returnable ?? undefined,
+        consumable,
+        category_id: category_id ?? undefined,
+        user_id: user.user_id,
+      }])
       .select()
       .single()
 
-    console.log('[products] insert product response:', { product, prodErr })
-
     if (prodErr || !product) {
-      console.error('Supabase error (insert product):', prodErr)
       return NextResponse.json({ error: prodErr?.message || 'Failed to create product' }, { status: 500 })
     }
 
-    // Get the product_id from the inserted product
     const product_id = (product as any).product_id ?? (product as any).id
-
     if (!product_id) {
       return NextResponse.json({ error: 'Failed to retrieve product ID after creation' }, { status: 500 })
     }
 
-    // Insert stock row referencing created product
     const { data: stock, error: stockErr } = await supabaseAdmin
       .from('stocks')
-      .insert([
-        {
-          product_id: product_id,
-          quantity: Number(quantity),
-        },
-      ])
+      .insert([{ product_id, quantity: Number(quantity) }])
       .select()
       .single()
 
     if (stockErr) {
-      console.error('Supabase error (insert stock):', stockErr)
-      // Attempt rollback of created product
-      try {
-        await supabaseAdmin.from('products').delete().match({ product_id: product_id })
-      } catch (delErr) {
-        console.error('Failed to rollback product after stock insert failure', delErr)
-      }
+      await supabaseAdmin.from('products').delete().match({ product_id })
       return NextResponse.json({ error: stockErr.message || 'Failed to create stock record' }, { status: 500 })
     }
 
-    // Insert into product_image table if an image_url was provided
     if (image_url) {
-      const { data: imgData, error: imgErr } = await supabaseAdmin
+      const { error: imgErr } = await supabaseAdmin
         .from('product_image')
         .insert([{ product_id, image_url }])
         .select()
-      if (imgErr) {
-        console.error('Supabase error (insert product_image):', imgErr)
-      } else {
-        console.log('[products] inserted product_image:', imgData)
-      }
-    } else {
-      console.log('[products] no image_url provided; skipping product_image insert')
+      if (imgErr) console.error('Supabase error (insert product_image):', imgErr)
     }
 
-    // Return combined result (merge image_url into product for the client)
     return NextResponse.json({ product: { ...product, image_url: image_url ?? null }, stock }, { status: 201 })
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Invalid JSON' }, { status: 400 })
