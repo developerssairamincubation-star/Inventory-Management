@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
+import { authFetch } from '@/contexts/UserContext'
 
 interface DashboardStats {
   totalProducts: number
@@ -96,7 +97,7 @@ export default function Dashboard() {
 
   const fetchDashboardStats = async () => {
     try {
-      const response = await fetch('/api/dashboard/stats')
+      const response = await authFetch('/api/dashboard/stats')
       if (!response.ok) throw new Error('Failed to fetch stats')
       const data = await response.json()
       setStats(data)
@@ -109,7 +110,7 @@ export default function Dashboard() {
 
   const fetchLowStockProducts = async () => {
     try {
-      const response = await fetch('/api/dashboard/low-stock')
+      const response = await authFetch('/api/dashboard/low-stock')
       if (!response.ok) throw new Error('Failed to fetch low stock products')
       const data = await response.json()
       setLowStockProducts(data)
@@ -120,7 +121,7 @@ export default function Dashboard() {
 
   const fetchOverdueAlerts = async () => {
     try {
-      const response = await fetch('/api/dashboard/overdue')
+      const response = await authFetch('/api/dashboard/overdue')
       if (!response.ok) throw new Error('Failed to fetch overdue alerts')
       const data = await response.json()
       setOverdueAlerts(data)
@@ -131,7 +132,7 @@ export default function Dashboard() {
 
   const fetchTopLentProducts = async (period: string = 'Monthly') => {
     try {
-      const response = await fetch(`/api/dashboard/top-lent?period=${period.toLowerCase()}`)
+      const response = await authFetch(`/api/dashboard/top-lent?period=${period.toLowerCase()}`)
       if (!response.ok) throw new Error('Failed to fetch top lent products')
       const data = await response.json()
       setTopLentProducts(data)
