@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useUser } from "@/contexts/UserContext";
 import { authFetch } from "@/contexts/UserContext";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, UserCheck, UserX, Shield, User } from "lucide-react";
+import { Plus, Pencil, UserCheck, UserX, Shield, User, Building2, Save } from "lucide-react";
 
 type AppUser = {
   user_id: string;
@@ -22,6 +22,11 @@ type AddUserForm = {
   role: "user" | "super_admin";
 };
 
+type Department = {
+  department_id: string;
+  department_name: string;
+};
+
 export default function UserManagementPage() {
   const { appUser, loading } = useUser();
   const router = useRouter();
@@ -35,6 +40,14 @@ export default function UserManagementPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [deptDrafts, setDeptDrafts] = useState<Record<string, string>>({});
+  const [deptFetching, setDeptFetching] = useState(true);
+  const [deptSavingId, setDeptSavingId] = useState<string | null>(null);
+  const [addingDept, setAddingDept] = useState(false);
+  const [newDeptName, setNewDeptName] = useState("");
+  const [deptError, setDeptError] = useState("");
+
   useEffect(() => {
     if (!loading && appUser?.role !== "super_admin") {
       router.replace("/dashboard");
@@ -44,6 +57,7 @@ export default function UserManagementPage() {
   useEffect(() => {
     if (appUser?.role === "super_admin") {
       loadUsers();
+      loadDepartments();
     }
   }, [appUser]);
 
@@ -57,6 +71,23 @@ export default function UserManagementPage() {
       setError("Failed to load users");
     } finally {
       setFetching(false);
+    }
+  }
+
+  async function loadDepartments() {
+    setDeptFetching(true);
+    setDeptError("");
+    try {
+      const res = await authFetch("/api/departments");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load departments");
+      const rows: Department[] = Array.isArray(data) ? data : [];
+      setDepartments(rows);
+      setDeptDrafts(Object.fromEntries(rows.map((d) => [d.department_id, d.department_name])));
+    } catch (err: any) {
+      setDeptError(err.message || "Failed to load departments");
+    } finally {
+      setDeptFetching(false);
     }
   }
 
@@ -102,6 +133,55 @@ export default function UserManagementPage() {
     }
   }
 
+  async function handleUpdateDepartment(departmentId: string) {
+    const department_name = (deptDrafts[departmentId] || "").trim();
+    if (!department_name) {
+      setDeptError("Department name cannot be empty");
+      return;
+    }
+
+    setDeptSavingId(departmentId);
+    setDeptError("");
+    try {
+      const res = await authFetch(`/api/departments/${departmentId}`, {
+        method: "PUT",
+        body: JSON.stringify({ department_name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update department");
+      await loadDepartments();
+    } catch (err: any) {
+      setDeptError(err.message || "Failed to update department");
+    } finally {
+      setDeptSavingId(null);
+    }
+  }
+
+  async function handleAddDepartment() {
+    const department_name = newDeptName.trim();
+    if (!department_name) {
+      setDeptError("Department name cannot be empty");
+      return;
+    }
+
+    setAddingDept(true);
+    setDeptError("");
+    try {
+      const res = await authFetch("/api/departments", {
+        method: "POST",
+        body: JSON.stringify({ department_name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to add department");
+      setNewDeptName("");
+      await loadDepartments();
+    } catch (err: any) {
+      setDeptError(err.message || "Failed to add department");
+    } finally {
+      setAddingDept(false);
+    }
+  }
+
   function openEdit(u: AppUser) {
     setEditUser(u);
     setEditForm({ full_name: u.full_name, role: u.role, is_active: u.is_active });
@@ -135,9 +215,9 @@ export default function UserManagementPage() {
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: "var(--text)", margin: 0 }}>User Management</h1>
+          <h1 style={{ fontSize: 20, fontWeight: 700, color: "var(--text)", margin: 0 }}>Admin Settings</h1>
           <p style={{ fontSize: 13, color: "var(--muted)", margin: "4px 0 0" }}>
-            Manage system users and their access levels
+            Manage system users and department settings
           </p>
         </div>
         <button
@@ -282,6 +362,107 @@ export default function UserManagementPage() {
           </div>
         </div>
       )}
+
+      {/* Department settings */}
+      <div style={{ marginTop: 24, background: "var(--bg)", borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Building2 size={16} color="var(--muted)" />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>Departments</div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>View and update department names used across the system</div>
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600 }}>
+              {departments.length} total
+            </div>
+          </div>
+
+          <div style={{ padding: 16, borderBottom: "1px solid var(--border)", display: "flex", gap: 8 }}>
+            <input
+              style={{ ...inputStyle, margin: 0 }}
+              value={newDeptName}
+              onChange={(e) => setNewDeptName(e.target.value)}
+              placeholder="Add a new department"
+            />
+            <button
+              type="button"
+              onClick={handleAddDepartment}
+              disabled={addingDept}
+              style={{
+                padding: "8px 14px",
+                background: "#1E2938",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: addingDept ? "not-allowed" : "pointer",
+                opacity: addingDept ? 0.7 : 1,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {addingDept ? "Adding..." : "Add Department"}
+            </button>
+          </div>
+
+          {deptError && (
+            <div style={{ margin: 16, marginBottom: 0, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 6, padding: "8px 12px", fontSize: 13, color: "#dc2626" }}>
+              {deptError}
+            </div>
+          )}
+
+          {deptFetching ? (
+            <div style={{ padding: 24, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>Loading departments...</div>
+          ) : departments.length === 0 ? (
+            <div style={{ padding: 24, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>No departments found.</div>
+          ) : (
+            <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+              {departments.map((dept) => {
+                const draft = deptDrafts[dept.department_id] ?? dept.department_name;
+                const changed = draft.trim() !== dept.department_name;
+                const isSaving = deptSavingId === dept.department_id;
+
+                return (
+                  <div key={dept.department_id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+                    <input
+                      style={{ ...inputStyle, margin: 0 }}
+                      value={draft}
+                      onChange={(e) =>
+                        setDeptDrafts((prev) => ({
+                          ...prev,
+                          [dept.department_id]: e.target.value,
+                        }))
+                      }
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateDepartment(dept.department_id)}
+                      disabled={isSaving || !changed || draft.trim() === ""}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid var(--border)",
+                        background: changed ? "#1E2938" : "transparent",
+                        color: changed ? "#fff" : "var(--muted)",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: isSaving || !changed || draft.trim() === "" ? "not-allowed" : "pointer",
+                        opacity: isSaving ? 0.7 : 1,
+                      }}
+                    >
+                      <Save size={12} />
+                      {isSaving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+      </div>
 
       {/* Edit User Modal */}
       {editUser && (

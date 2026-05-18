@@ -30,7 +30,7 @@ const nav: NavItem[] = [
   { label: "Student Management", href: "/students",  icon: Users              },
   { label: "Staff Management",   href: "/staffs",    icon: UserPen            },
   { label: "Invoice Details",    href: "/billing",   icon: ReceiptIndianRupee },
-  { label: "User Management",    href: "/admin/users", icon: ShieldCheck, adminOnly: true },
+  { label: "Admin Settings",     href: "/admin/settings", icon: ShieldCheck, adminOnly: true },
 ];
 
 const SIDEBAR_BG = '#1E2938';

@@ -91,12 +91,18 @@ export async function authFetch(url: string, init: RequestInit = {}): Promise<Re
   const fbUser = auth.currentUser;
   if (!fbUser) throw new Error("Not authenticated");
   const token = await fbUser.getIdToken();
+
+  const headers = new Headers(init.headers);
+  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+
+  if (!isFormData && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  headers.set("Authorization", `Bearer ${token}`);
+
   return fetch(url, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...((init.headers as Record<string, string>) || {}),
-      Authorization: `Bearer ${token}`,
-    },
+    headers,
   });
 }

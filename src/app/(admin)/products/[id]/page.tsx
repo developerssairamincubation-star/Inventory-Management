@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import ImageCropModal from '@/components/ImageCropModal'
+import { authFetch } from '@/contexts/UserContext'
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from 'lucide-react'
 
 interface ProductDetail {
