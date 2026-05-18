@@ -89,9 +89,15 @@ export async function GET(request: NextRequest) {
           student_name: student?.name || "—",
           department: department?.department_name || "—",
           mentor: mentorMap.get(order.mentor_staff_id) || "—",
-          product_name: "—", quantity: 0,
-          borrow_date: order.created_at, return_date: order.return_date,
-          status: order.status || "PENDING", mobile: "—",
+          product_name: "—",
+          quantity: 0,
+          original_quantity: 0,
+          damaged_quantity: 0,
+          lost_quantity: 0,
+          borrow_date: order.created_at,
+          return_date: order.return_date,
+          status: order.status || "PENDING",
+          mobile: "—",
         }];
       }
 
