@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { firebaseUser, appUser, loading } = useUser();
+  const { firebaseUser, appUser, loading, appUserLoading } = useUser();
   const router = useRouter();
 
   useEffect(() => {
@@ -15,7 +15,7 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     }
   }, [firebaseUser, loading, router]);
 
-  if (loading) return null;
+  if (loading || appUserLoading) return null;
   if (!firebaseUser) return null;
 
   // User is authenticated in Firebase but not registered in our users table

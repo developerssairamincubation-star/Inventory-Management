@@ -1,6 +1,6 @@
 "use client";
 
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { sendPasswordResetEmail, signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -15,6 +15,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [pressed, setPressed] = useState(false); //added state for button press
   const [showPassword, setShowPassword] = useState(false);
+  const [sendingReset, setSendingReset] = useState(false);
   const emailRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -37,6 +38,25 @@ export default function LoginPage() {
       router.push("/dashboard");
     } catch (err: any) {
       showToast(err.message || "Login failed. Please try again.", "error");
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      showToast("Please enter your email first.", "error");
+      emailRef.current?.focus();
+      return;
+    }
+
+    setSendingReset(true);
+    try {
+      await sendPasswordResetEmail(auth, trimmedEmail);
+      showToast("Password reset email sent. Please check your inbox.", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to send reset email.", "error");
+    } finally {
+      setSendingReset(false);
     }
   };
 
@@ -111,6 +131,17 @@ export default function LoginPage() {
               tabIndex={-1}
             >
               {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+
+          <div className="flex justify-end -mt-[38px] mb-[36px]">
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              disabled={sendingReset}
+              className="text-[13px] text-[#3759C1] hover:underline disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {sendingReset ? "Sending..." : "Forgot password?"}
             </button>
           </div>
 

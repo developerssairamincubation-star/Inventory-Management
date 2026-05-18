@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useUser } from "@/contexts/UserContext";
 import { authFetch } from "@/contexts/UserContext";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, UserCheck, UserX, Shield, User, Building2, Save } from "lucide-react";
+import { Plus, Pencil, UserCheck, UserX, Shield, User, Building2, Trash2 } from "lucide-react";
 
 type AppUser = {
   user_id: string;
@@ -41,9 +41,11 @@ export default function UserManagementPage() {
   const [error, setError] = useState("");
 
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [deptDrafts, setDeptDrafts] = useState<Record<string, string>>({});
   const [deptFetching, setDeptFetching] = useState(true);
   const [deptSavingId, setDeptSavingId] = useState<string | null>(null);
+  const [deptDeletingId, setDeptDeletingId] = useState<string | null>(null);
+  const [deptEditId, setDeptEditId] = useState<string | null>(null);
+  const [deptEditValue, setDeptEditValue] = useState("");
   const [addingDept, setAddingDept] = useState(false);
   const [newDeptName, setNewDeptName] = useState("");
   const [deptError, setDeptError] = useState("");
@@ -83,7 +85,6 @@ export default function UserManagementPage() {
       if (!res.ok) throw new Error(data.error || "Failed to load departments");
       const rows: Department[] = Array.isArray(data) ? data : [];
       setDepartments(rows);
-      setDeptDrafts(Object.fromEntries(rows.map((d) => [d.department_id, d.department_name])));
     } catch (err: any) {
       setDeptError(err.message || "Failed to load departments");
     } finally {
@@ -133,27 +134,65 @@ export default function UserManagementPage() {
     }
   }
 
-  async function handleUpdateDepartment(departmentId: string) {
-    const department_name = (deptDrafts[departmentId] || "").trim();
+  function handleStartEditDepartment(dept: Department) {
+    setDeptEditId(dept.department_id);
+    setDeptEditValue(dept.department_name);
+    setDeptError("");
+  }
+
+  function handleCancelEditDepartment() {
+    setDeptEditId(null);
+    setDeptEditValue("");
+  }
+
+  async function handleUpdateDepartment() {
+    if (!deptEditId) return;
+
+    const department_name = deptEditValue.trim();
     if (!department_name) {
       setDeptError("Department name cannot be empty");
       return;
     }
 
-    setDeptSavingId(departmentId);
+    setDeptSavingId(deptEditId);
     setDeptError("");
     try {
-      const res = await authFetch(`/api/departments/${departmentId}`, {
+      const res = await authFetch(`/api/departments/${deptEditId}`, {
         method: "PUT",
         body: JSON.stringify({ department_name }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to update department");
+      handleCancelEditDepartment();
       await loadDepartments();
     } catch (err: any) {
       setDeptError(err.message || "Failed to update department");
     } finally {
       setDeptSavingId(null);
+    }
+  }
+
+  async function handleDeleteDepartment(dept: Department) {
+    const confirmed = window.confirm(`Delete department \"${dept.department_name}\"?`);
+    if (!confirmed) return;
+
+    setDeptDeletingId(dept.department_id);
+    setDeptError("");
+    try {
+      const res = await authFetch(`/api/departments/${dept.department_id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete department");
+
+      if (deptEditId === dept.department_id) {
+        handleCancelEditDepartment();
+      }
+      await loadDepartments();
+    } catch (err: any) {
+      setDeptError(err.message || "Failed to delete department");
+    } finally {
+      setDeptDeletingId(null);
     }
   }
 
@@ -419,44 +458,116 @@ export default function UserManagementPage() {
           ) : (
             <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
               {departments.map((dept) => {
-                const draft = deptDrafts[dept.department_id] ?? dept.department_name;
-                const changed = draft.trim() !== dept.department_name;
                 const isSaving = deptSavingId === dept.department_id;
+                const isDeleting = deptDeletingId === dept.department_id;
+                const isEditing = deptEditId === dept.department_id;
+                const changed = deptEditValue.trim() !== dept.department_name;
 
                 return (
-                  <div key={dept.department_id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
-                    <input
-                      style={{ ...inputStyle, margin: 0 }}
-                      value={draft}
-                      onChange={(e) =>
-                        setDeptDrafts((prev) => ({
-                          ...prev,
-                          [dept.department_id]: e.target.value,
-                        }))
-                      }
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleUpdateDepartment(dept.department_id)}
-                      disabled={isSaving || !changed || draft.trim() === ""}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "8px 12px",
-                        borderRadius: 8,
-                        border: "1px solid var(--border)",
-                        background: changed ? "#1E2938" : "transparent",
-                        color: changed ? "#fff" : "var(--muted)",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: isSaving || !changed || draft.trim() === "" ? "not-allowed" : "pointer",
-                        opacity: isSaving ? 0.7 : 1,
-                      }}
-                    >
-                      <Save size={12} />
-                      {isSaving ? "Saving..." : "Save"}
-                    </button>
+                  <div key={dept.department_id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center" }}>
+                    {isEditing ? (
+                      <input
+                        style={{ ...inputStyle, margin: 0 }}
+                        value={deptEditValue}
+                        onChange={(e) => setDeptEditValue(e.target.value)}
+                      />
+                    ) : (
+                      <div style={{ ...inputStyle, margin: 0, display: "flex", alignItems: "center", minHeight: 38 }}>
+                        {dept.department_name}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {isEditing ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={handleUpdateDepartment}
+                            disabled={isSaving || !changed || deptEditValue.trim() === ""}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "8px 12px",
+                              borderRadius: 8,
+                              border: "1px solid var(--border)",
+                              background: "#1E2938",
+                              color: "#fff",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              cursor: isSaving || !changed || deptEditValue.trim() === "" ? "not-allowed" : "pointer",
+                              opacity: isSaving || !changed || deptEditValue.trim() === "" ? 0.7 : 1,
+                            }}
+                          >
+                            {isSaving ? "Saving..." : "Update"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelEditDepartment}
+                            disabled={isSaving}
+                            style={{
+                              padding: "8px 12px",
+                              borderRadius: 8,
+                              border: "1px solid var(--border)",
+                              background: "transparent",
+                              color: "var(--text)",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              cursor: isSaving ? "not-allowed" : "pointer",
+                              opacity: isSaving ? 0.7 : 1,
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditDepartment(dept)}
+                            disabled={!!deptEditId || isDeleting}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "8px 12px",
+                              borderRadius: 8,
+                              border: "1px solid var(--border)",
+                              background: "transparent",
+                              color: "var(--text)",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              cursor: !!deptEditId || isDeleting ? "not-allowed" : "pointer",
+                              opacity: !!deptEditId || isDeleting ? 0.7 : 1,
+                            }}
+                          >
+                            <Pencil size={12} />
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteDepartment(dept)}
+                            disabled={!!deptEditId || isDeleting}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "8px 12px",
+                              borderRadius: 8,
+                              border: "1px solid rgba(220,38,38,0.35)",
+                              background: "rgba(220,38,38,0.08)",
+                              color: "#dc2626",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              cursor: !!deptEditId || isDeleting ? "not-allowed" : "pointer",
+                              opacity: !!deptEditId || isDeleting ? 0.7 : 1,
+                            }}
+                          >
+                            <Trash2 size={12} />
+                            {isDeleting ? "Deleting..." : "Delete"}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 );
               })}

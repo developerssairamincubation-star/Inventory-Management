@@ -38,3 +38,32 @@ export async function PUT(
     return fromError(error)
   }
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const user = await getAuthUser(req)
+  if (!user) return unauthorizedResponse()
+  if (user.role !== 'super_admin') return forbiddenResponse()
+
+  try {
+    const { id } = await params
+    const supabase = getSupabaseAdmin()
+
+    const { data, error } = await supabase
+      .from('departments')
+      .delete()
+      .eq('department_id', id)
+      .select('department_id')
+      .single()
+
+    if (error || !data) {
+      throw new ApiError(404, 'NOT_FOUND', 'Department not found or cannot be deleted')
+    }
+
+    return ok({ success: true })
+  } catch (error) {
+    return fromError(error)
+  }
+}

@@ -15,6 +15,7 @@ type UserContextValue = {
   firebaseUser: User | null;
   appUser: AppUser | null;
   loading: boolean;
+  appUserLoading: boolean;
   token: string | null;
   refetch: () => Promise<void>;
 };
@@ -23,6 +24,7 @@ const UserContext = createContext<UserContextValue>({
   firebaseUser: null,
   appUser: null,
   loading: true,
+  appUserLoading: false,
   token: null,
   refetch: async () => {},
 });
@@ -32,8 +34,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [appUserLoading, setAppUserLoading] = useState(false);
 
   async function fetchAppUser(fbUser: User) {
+    setAppUserLoading(true);
     try {
       const idToken = await fbUser.getIdToken();
       setToken(idToken);
@@ -48,17 +52,21 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       }
     } catch {
       setAppUser(null);
+    } finally {
+      setAppUserLoading(false);
     }
   }
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      setLoading(true);
       setFirebaseUser(fbUser);
       if (fbUser) {
         await fetchAppUser(fbUser);
       } else {
         setAppUser(null);
         setToken(null);
+        setAppUserLoading(false);
       }
       setLoading(false);
     });
@@ -72,7 +80,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <UserContext.Provider value={{ firebaseUser, appUser, loading, token, refetch }}>
+    <UserContext.Provider value={{ firebaseUser, appUser, loading, appUserLoading, token, refetch }}>
       {children}
     </UserContext.Provider>
   );
