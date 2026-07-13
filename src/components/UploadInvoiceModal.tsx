@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import ImageCropModal from "@/components/ImageCropModal";
 import { useToast } from "@/components/ui/Toast";
+import { authFetch } from "@/contexts/UserContext";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -148,11 +149,11 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
 
   // ── Fetch next invoice number on mount ───────────────────────────────────
   useEffect(() => {
-    fetch("/api/invoices/next-number")
+    authFetch("/api/invoices/next-number")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (d?.invoice_no) setAutoInvoiceNo(d.invoice_no); })
       .catch(() => {});    // Fetch categories
-    fetch("/api/categories")
+    authFetch("/api/categories")
       .then((r) => r.ok ? r.json() : [])
       .then((d) => setCategories(Array.isArray(d) ? d : []))
       .catch(() => {});  }, []);
@@ -171,7 +172,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
       try {
         const fd = new FormData();
         fd.append("pdf", file);
-        const res = await fetch("/api/invoices/parse-pdf", { method: "POST", body: fd });
+        const res = await authFetch("/api/invoices/parse-pdf", { method: "POST", body: fd });
         if (!res.ok) {
           const e = await res.json();
           setParseError(e.error || "Failed to parse PDF");
@@ -347,7 +348,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
             const fd = new FormData();
             fd.append("file", dec.newProductImageFile);
             fd.append("folder", "products");
-            const uploadRes = await fetch("/api/upload", { method: "POST", body: fd });
+              const uploadRes = await authFetch("/api/upload", { method: "POST", body: fd });
             if (uploadRes.ok) {
               const uploadData = await uploadRes.json();
               image_url = uploadData.url;
@@ -365,11 +366,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
           else if (d.type === "returnable") { body.consumable = false; body.returnable = true; }
           else if (d.type === "both") { body.consumable = true; body.returnable = true; }
           if (d.category_id) body.category_id = d.category_id;
-          const res = await fetch("/api/products", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
+          const res = await authFetch("/api/products", { method: "POST", body: JSON.stringify(body) });
           if (!res.ok) {
             const e = await res.json();
             throw new Error(`Failed to create "${d.product_name}": ${e.error}`);
@@ -397,11 +394,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
       }
 
       const invNo = invoiceNumber.trim() || autoInvoiceNo;
-      const res = await fetch("/api/invoices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ invoice_number: invNo, supplier_name: supplierName, received_date: deliveryDate, items: invoiceItems }),
-      });
+      const res = await authFetch("/api/invoices", { method: "POST", body: JSON.stringify({ invoice_number: invNo, supplier_name: supplierName, received_date: deliveryDate, items: invoiceItems }) });
       if (!res.ok) {
         const e = await res.json();
         throw new Error(e.error || "Failed to create invoice");

@@ -1,0 +1,37 @@
+name: Deploy DIT Environment
+
+# Trigger the pipeline only when code is pushed to the development branch
+on:
+  push:
+    branches: [ "development" ]
+
+jobs:
+  deploy:
+    # Tell GitHub to use the local runner sitting on Node 5
+    runs-on: self-hosted
+
+    steps:
+      # Step 1: Pull the latest code onto Node 5
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Securely copy all project files over your local switch to Node 3
+      - name: Copy files to Node 3
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DIT_SSH_HOST }}
+          username: ${{ secrets.DIT_SSH_USER }}
+          key: ${{ secrets.DIT_SSH_KEY }}
+          source: "."
+          target: "/opt/inventory-management-dit"
+
+      # Step 3: Command Node 3 to build and restart the containers
+      - name: Execute Docker Compose on Node 3
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DIT_SSH_HOST }}
+          username: ${{ secrets.DIT_SSH_USER }}
+          key: ${{ secrets.DIT_SSH_KEY }}
+          script: |
+            cd /opt/inventory-management-dit
+            docker compose -f docker-compose.yml up -d --build --remove-orphans

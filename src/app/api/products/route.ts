@@ -64,10 +64,22 @@ export async function POST(req: NextRequest) {
     const unit_cost = body.cost ?? body.unit_cost
     const low_stock_threshold = body.low_stock_threshold ?? body.lowStockThreshold ?? null
     const image_url: string | null = body.image_url ?? null
-    const returnable = typeof body.returnable === 'boolean' ? body.returnable : null
-    const consumable = typeof body.consumable === 'boolean' ? body.consumable
-      : returnable !== null ? !returnable
-      : false
+    // Determine `returnable` / `consumable` only when provided or derivable.
+    // If neither is provided, leave them undefined so DB defaults apply.
+    const hasReturnable = typeof body.returnable === 'boolean'
+    const hasConsumable = typeof body.consumable === 'boolean'
+    let returnable: boolean | undefined = undefined
+    let consumable: boolean | undefined = undefined
+    if (hasReturnable) {
+      returnable = body.returnable
+    }
+    if (hasConsumable) {
+      consumable = body.consumable
+    }
+    // If only consumable provided, derive returnable as inverse
+    if (!hasReturnable && hasConsumable) {
+      returnable = !body.consumable
+    }
     const quantity = body.quantity ?? body.initial_quantity ?? null
     const category_id = body.category_id ?? null
 
@@ -91,19 +103,21 @@ export async function POST(req: NextRequest) {
     }
     const product_code = `STIC${String(nextProductNumber).padStart(3, '0')}`
 
+    const insertData: any = {
+      product_code,
+      product_name,
+      unit_cost,
+      user_id: user.user_id,
+    }
+    if (consumable !== undefined) insertData.consumable = consumable
+    if (returnable !== undefined) insertData.returnable = returnable
+    if (serial_number) insertData.serial_number = serial_number
+    if (low_stock_threshold !== null && low_stock_threshold !== undefined) insertData.low_stock_threshold = low_stock_threshold
+    if (category_id) insertData.category_id = category_id
+
     const { data: product, error: prodErr } = await supabaseAdmin
       .from('products')
-      .insert([{
-        product_code,
-        product_name,
-        unit_cost,
-        serial_number: serial_number ?? undefined,
-        low_stock_threshold: low_stock_threshold ?? undefined,
-        returnable: returnable ?? undefined,
-        consumable,
-        category_id: category_id ?? undefined,
-        user_id: user.user_id,
-      }])
+      .insert([insertData])
       .select()
       .single()
 

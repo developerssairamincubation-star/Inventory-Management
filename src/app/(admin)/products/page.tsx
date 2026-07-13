@@ -1,9 +1,10 @@
 ﻿"use client";
 import { authFetch } from "@/contexts/UserContext";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ImageCropModal from "@/components/ImageCropModal";
+import UploadProductsCsvModal from "@/components/UploadProductsCsvModal";
 
 interface ProductItem {
   id: string;
@@ -33,6 +34,8 @@ export default function ProductsPage() {
   const [listCurrentPage, setListCurrentPage] = useState(1);
   const [listShowAll, setListShowAll] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [showAddMenu, setShowAddMenu] = useState(false);
 
   // Categories
   const [categories, setCategories] = useState<{category_id: string; category_name: string}[]>([]);
@@ -42,18 +45,20 @@ export default function ProductsPage() {
   const [addCategoryForContext, setAddCategoryForContext] = useState<{type: 'modal'|'inline'; itemId: string} | null>(null);
 
   // Multi-item product addition
-  const [productItems, setProductItems] = useState<ProductItem[]>([{
-    id: '1',
-    productName: '',
-    sku: '',
-    quantity: '',
-    cost: '',
-    lowStockThreshold: '',
-    returnable: null,
-    imageFile: null,
-    imagePreview: null,
-    category_id: '',
-  }]);
+  const [productItems, setProductItems] = useState<ProductItem[]>(
+    Array.from({ length: 5 }, (_, i) => ({
+      id: String(i + 1),
+      productName: '',
+      sku: '',
+      quantity: '',
+      cost: '',
+      lowStockThreshold: '',
+      returnable: null,
+      imageFile: null,
+      imagePreview: null,
+      category_id: '',
+    }))
+  );
 
   // Image crop modal state
   const [cropSrc, setCropSrc] = useState<string | null>(null);
@@ -67,23 +72,29 @@ export default function ProductsPage() {
   const [additionalStock, setAdditionalStock] = useState<number | ''>('');
   const [newUnitCost, setNewUnitCost] = useState<number | ''>('');
 
+  const handleApplyCsvItems = (items: ProductItem[]) => {
+    setProductItems(items.length > 0 ? items : productItems);
+    if (!isModalOpen) setIsModalOpen(true);
+  };
+
+  const fetchProducts = useCallback(async () => {
+    try {
+      const res = await authFetch("/api/products");
+      if (res.ok) {
+        const data = await res.json();
+        setProducts(data || []);
+      } else {
+        console.error("Failed to fetch products", await res.text());
+      }
+    } catch (error) {
+      console.error("Failed to fetch products", error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     let mounted = true;
-    async function fetchProducts() {
-      try {
-        const res = await authFetch("/api/products");
-        if (res.ok) {
-          const data = await res.json();
-          if (mounted) setProducts(data || []);
-        } else {
-          console.error("Failed to fetch products", await res.text());
-        }
-      } catch (error) {
-        console.error("Failed to fetch products", error);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    }
     async function fetchCategories() {
       try {
         const res = await authFetch('/api/categories');
@@ -95,10 +106,8 @@ export default function ProductsPage() {
     }
     fetchProducts();
     fetchCategories();
-    return () => {
-      mounted = false;
-    };
-  }, []);
+    return () => { mounted = false };
+  }, [fetchProducts]);
 
   // Helper functions for multi-item management
   const addNewProductItem = () => {
@@ -138,8 +147,8 @@ export default function ProductsPage() {
   };
 
   const resetProductItems = () => {
-    setProductItems([{
-      id: '1',
+    const defaultItems = Array.from({ length: 5 }, (_, i) => ({
+      id: String(i + 1),
       productName: '',
       sku: '',
       quantity: '',
@@ -149,7 +158,8 @@ export default function ProductsPage() {
       imageFile: null,
       imagePreview: null,
       category_id: '',
-    }]);
+    }));
+    setProductItems(defaultItems);
   };
 
   const resetInlineItem = () => {
@@ -228,6 +238,22 @@ export default function ProductsPage() {
       return product[singleKey] ?? product;
     }
     return product;
+  };
+
+  const normaliseName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const findExistingMatch = (name: string) => {
+    if (!name.trim()) return null;
+    const n = normaliseName(name);
+    const list = products.map(normalizeProduct);
+    return (
+      list.find((p) => normaliseName(String(p.product_name || p.name || "")) === n) ??
+      list.find((p) => {
+        const pn = normaliseName(String(p.product_name || p.name || ""));
+        return pn.includes(n) || n.includes(pn);
+      }) ??
+      null
+    );
   };
 
   // Filter and sort products
@@ -434,12 +460,30 @@ export default function ProductsPage() {
               List
             </button>
           </div>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            style={{ padding: '5px 14px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}
-          >
-            + Add Product
-          </button>
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setShowAddMenu((v) => !v)}
+              style={{ padding: '5px 14px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+            >
+              + Add Product ▾
+            </button>
+            {showAddMenu && (
+              <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 6, background: '#fff', border: '1px solid var(--border)', boxShadow: '0 6px 18px rgba(0,0,0,0.12)', zIndex: 20, minWidth: 180 }}>
+                <button
+                  onClick={() => { setShowAddMenu(false); setIsModalOpen(true); }}
+                  style={{ width: '100%', textAlign: 'left', padding: '8px 10px', fontSize: 12, background: '#fff', border: 'none', cursor: 'pointer' }}
+                >
+                  Manual Entry
+                </button>
+                <button
+                  onClick={() => { setShowAddMenu(false); setShowCsvModal(true); }}
+                  style={{ width: '100%', textAlign: 'left', padding: '8px 10px', fontSize: 12, background: '#fff', borderTop: '1px solid var(--border)', borderLeft: 'none', borderRight: 'none', borderBottom: 'none', cursor: 'pointer' }}
+                >
+                  Import from CSV
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -479,6 +523,52 @@ export default function ProductsPage() {
                 try {
                   // Process each product item
                   for (const item of productItems) {
+                    const matched = findExistingMatch(item.productName || "");
+                    const matchedId = matched?.product_id ?? matched?.id ?? null;
+
+                    // Update existing product if match found
+                    if (matchedId) {
+                      const updateBody: any = {};
+                      if (item.productName) updateBody.product_name = item.productName;
+                      if (item.sku) updateBody.serial_number = item.sku;
+                      if (item.lowStockThreshold !== '') updateBody.low_stock_threshold = Number(item.lowStockThreshold);
+                      if (item.returnable !== null) updateBody.returnable = !!item.returnable;
+                      if (item.category_id) updateBody.category_id = item.category_id;
+
+                      if (Object.keys(updateBody).length > 0) {
+                        const updRes = await authFetch(`/api/products/${matchedId}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(updateBody),
+                        });
+                        if (updRes.ok) {
+                          const updated = await updRes.json();
+                          setProducts((p) => p.map((prod) => {
+                            const pid = prod.product_id || prod.id;
+                            return pid === matchedId ? { ...prod, ...updated } : prod;
+                          }));
+                        }
+                      }
+
+                      const additionalStock = item.quantity === '' ? undefined : Number(item.quantity);
+                      const unitCost = item.cost === '' ? undefined : Number(item.cost);
+                      if (additionalStock !== undefined || unitCost !== undefined) {
+                        const stockRes = await authFetch(`/api/products/${matchedId}/update-stock`, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ additionalStock, unitCost }),
+                        });
+                        if (stockRes.ok) {
+                          const result = await stockRes.json();
+                          setProducts((p) => p.map((prod) => {
+                            const pid = prod.product_id || prod.id;
+                            return pid === matchedId ? { ...prod, ...result.product } : prod;
+                          }));
+                        }
+                      }
+                      continue;
+                    }
+
                     let image_url: string | undefined = undefined;
                     
                     // Upload image if exists
@@ -569,7 +659,10 @@ export default function ProductsPage() {
 
               {/* Product Items */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '50vh', overflowY: 'auto', paddingRight: 4 }}>
-                {productItems.map((item, index) => (
+                {productItems.map((item, index) => {
+                  const matched = findExistingMatch(item.productName || "");
+                  const matchedName = matched?.product_name ?? matched?.name ?? null;
+                  return (
                   <div key={item.id} style={{ 
                     display: 'grid', 
                     gridTemplateColumns: '40px 50px 2fr 1.5fr 1fr 1fr 1fr 80px 1.2fr 1.2fr 40px', 
@@ -623,13 +716,20 @@ export default function ProductsPage() {
                     </div>
 
                     {/* Product Name */}
-                    <input 
-                      required
-                      value={item.productName} 
-                      onChange={(e) => updateProductItem(item.id, 'productName', e.target.value)} 
-                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
-                      placeholder="Product name"
-                    />
+                    <div>
+                      <input 
+                        required
+                        value={item.productName} 
+                        onChange={(e) => updateProductItem(item.id, 'productName', e.target.value)} 
+                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
+                        placeholder="Product name"
+                      />
+                      {matchedName && (
+                        <div style={{ fontSize: 10, color: 'var(--accent)', marginTop: 4 }}>
+                          Found in inventory: {matchedName}
+                        </div>
+                      )}
+                    </div>
 
                     {/* SKU */}
                     <input 
@@ -750,7 +850,8 @@ export default function ProductsPage() {
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Add Item Button */}
@@ -765,11 +866,26 @@ export default function ProductsPage() {
                     background: 'var(--bg)', 
                     color: 'var(--accent)', 
                     cursor: 'pointer',
-                    fontWeight: 600,
-                    width: '100%'
+                    fontWeight: 600
                   }}
                 >
                   + Add Item
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCsvModal(true)}
+                  style={{
+                    marginLeft: 8,
+                    padding: '6px 12px',
+                    fontSize: 11,
+                    border: '1px dashed var(--border)',
+                    background: 'var(--bg)',
+                    color: 'var(--fg)',
+                    cursor: 'pointer',
+                    fontWeight: 600
+                  }}
+                >
+                  Bulk Upload (CSV)
                 </button>
               </div>
 
@@ -1026,13 +1142,25 @@ export default function ProductsPage() {
                       </label>
                     </td>
                     <td style={td}>
-                      <input 
-                        value={item.productName} 
-                        onChange={(e) => updateInlineItem(item.id, 'productName', e.target.value)} 
-                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
-                        placeholder="Product name"
-                        autoFocus
-                      />
+                      <div>
+                        <input 
+                          value={item.productName} 
+                          onChange={(e) => updateInlineItem(item.id, 'productName', e.target.value)} 
+                          style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
+                          placeholder="Product name"
+                          autoFocus
+                        />
+                        {(() => {
+                          const matched = findExistingMatch(item.productName || "");
+                          const matchedName = matched?.product_name ?? matched?.name ?? null;
+                          if (!matchedName) return null;
+                          return (
+                            <div style={{ fontSize: 10, color: 'var(--accent)', marginTop: 4 }}>
+                              Found in inventory: {matchedName}
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </td>
                     <td style={td}>
                       <input 
@@ -1110,6 +1238,52 @@ export default function ProductsPage() {
                             setSaving(true);
                             
                             try {
+                              const matched = findExistingMatch(item.productName || "");
+                              const matchedId = matched?.product_id ?? matched?.id ?? null;
+                              if (matchedId) {
+                                const updateBody: any = {};
+                                if (item.productName) updateBody.product_name = item.productName;
+                                if (item.sku) updateBody.serial_number = item.sku;
+                                if (item.lowStockThreshold !== '') updateBody.low_stock_threshold = Number(item.lowStockThreshold);
+                                if (item.returnable !== null) updateBody.returnable = !!item.returnable;
+                                if (item.category_id) updateBody.category_id = item.category_id;
+
+                                if (Object.keys(updateBody).length > 0) {
+                                  const updRes = await authFetch(`/api/products/${matchedId}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(updateBody),
+                                  });
+                                  if (updRes.ok) {
+                                    const updated = await updRes.json();
+                                    setProducts((p) => p.map((prod) => {
+                                      const pid = prod.product_id || prod.id;
+                                      return pid === matchedId ? { ...prod, ...updated } : prod;
+                                    }));
+                                  }
+                                }
+
+                                const additionalStock = item.quantity === '' ? undefined : Number(item.quantity);
+                                const unitCost = item.cost === '' ? undefined : Number(item.cost);
+                                if (additionalStock !== undefined || unitCost !== undefined) {
+                                  const stockRes = await authFetch(`/api/products/${matchedId}/update-stock`, {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ additionalStock, unitCost }),
+                                  });
+                                  if (stockRes.ok) {
+                                    const result = await stockRes.json();
+                                    setProducts((p) => p.map((prod) => {
+                                      const pid = prod.product_id || prod.id;
+                                      return pid === matchedId ? { ...prod, ...result.product } : prod;
+                                    }));
+                                  }
+                                }
+
+                                removeInlineItem(item.id);
+                                return;
+                              }
+
                               let image_url: string | undefined = undefined;
                               
                               if (item.imageFile) {
@@ -1218,6 +1392,12 @@ export default function ProductsPage() {
               >
                 + Add Item
               </button>
+              <button
+                onClick={() => setShowCsvModal(true)}
+                style={{ padding: '5px 12px', fontSize: 11, border: '1px dashed var(--border)', background: 'var(--bg)', color: 'var(--fg)', cursor: 'pointer', fontWeight: 600 }}
+              >
+                Bulk Upload (CSV)
+              </button>
               {filteredProducts.length > 0 && (
                 <span>Showing {listShowAll ? filteredProducts.length : `${Math.min(listStartIdx + 1, filteredProducts.length)}–${Math.min(listEndIdx, filteredProducts.length)}`} of {filteredProducts.length}</span>
               )}
@@ -1252,6 +1432,16 @@ export default function ProductsPage() {
               )}
             </div>
           </div>
+          {showCsvModal && (
+            <UploadProductsCsvModal
+              onClose={() => setShowCsvModal(false)}
+              onApply={(items) => {
+                handleApplyCsvItems(items);
+                setShowCsvModal(false);
+              }}
+              categories={categories}
+            />
+          )}
         </div>
       )}
     </div>
