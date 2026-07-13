@@ -19,6 +19,19 @@ interface ProductItem {
   category_id: string;
 }
 
+const createEmptyProductItem = (id: string): ProductItem => ({
+  id,
+  productName: '',
+  sku: '',
+  quantity: '',
+  cost: '',
+  lowStockThreshold: '',
+  returnable: null,
+  imageFile: null,
+  imagePreview: null,
+  category_id: '',
+});
+
 export default function ProductsPage() {
   const router = useRouter();
   const [products, setProducts] = useState<any[]>([]);
@@ -46,18 +59,7 @@ export default function ProductsPage() {
 
   // Multi-item product addition
   const [productItems, setProductItems] = useState<ProductItem[]>(
-    Array.from({ length: 5 }, (_, i) => ({
-      id: String(i + 1),
-      productName: '',
-      sku: '',
-      quantity: '',
-      cost: '',
-      lowStockThreshold: '',
-      returnable: null,
-      imageFile: null,
-      imagePreview: null,
-      category_id: '',
-    }))
+    Array.from({ length: 5 }, (_, i) => createEmptyProductItem(String(i + 1)))
   );
 
   // Image crop modal state
@@ -111,18 +113,7 @@ export default function ProductsPage() {
 
   // Helper functions for multi-item management
   const addNewProductItem = () => {
-    setProductItems(prev => [...prev, {
-      id: Date.now().toString(),
-      productName: '',
-      sku: '',
-      quantity: '',
-      cost: '',
-      lowStockThreshold: '',
-      returnable: null,
-      imageFile: null,
-      imagePreview: null,
-      category_id: '',
-    }]);
+    setProductItems(prev => [...prev, createEmptyProductItem(Date.now().toString())]);
   };
 
   const removeProductItem = (id: string) => {
@@ -147,18 +138,9 @@ export default function ProductsPage() {
   };
 
   const resetProductItems = () => {
-    const defaultItems = Array.from({ length: 5 }, (_, i) => ({
-      id: String(i + 1),
-      productName: '',
-      sku: '',
-      quantity: '',
-      cost: '',
-      lowStockThreshold: '',
-      returnable: null,
-      imageFile: null,
-      imagePreview: null,
-      category_id: '',
-    }));
+    const defaultItems: ProductItem[] = Array.from({ length: 5 }, (_, i) =>
+      createEmptyProductItem(String(i + 1))
+    );
     setProductItems(defaultItems);
   };
 
@@ -167,18 +149,7 @@ export default function ProductsPage() {
   };
 
   const addNewInlineItem = () => {
-    setInlineItems(prev => [...prev, {
-      id: `inline-${Date.now()}`,
-      productName: '',
-      sku: '',
-      quantity: '',
-      cost: '',
-      lowStockThreshold: '',
-      returnable: null,
-      imageFile: null,
-      imagePreview: null,
-      category_id: '',
-    }]);
+    setInlineItems(prev => [...prev, createEmptyProductItem(`inline-${Date.now()}`)]);
   };
 
   const removeInlineItem = (id: string) => {
