@@ -15,7 +15,37 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Step 2: Securely copy all project files over your local switch to Node 3
+      # Step 2: Materialize runtime secrets for Docker Compose on Node 3
+      - name: Write .env file on Node 3
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DIT_SSH_HOST }}
+          username: ${{ secrets.DIT_SSH_USER }}
+          key: ${{ secrets.DIT_SSH_KEY }}
+          script: |
+            mkdir -p /opt/inventory-management-dit
+            cat > /opt/inventory-management-dit/.env <<'EOF'
+            NEXT_PUBLIC_FIREBASE_API_KEY=${{ secrets.NEXT_PUBLIC_FIREBASE_API_KEY }}
+            NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${{ secrets.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+            NEXT_PUBLIC_FIREBASE_PROJECT_ID=${{ secrets.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}
+            NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=${{ secrets.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET }}
+            NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
+            NEXT_PUBLIC_FIREBASE_APP_ID=${{ secrets.NEXT_PUBLIC_FIREBASE_APP_ID }}
+            NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=${{ secrets.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID }}
+            NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+            AWS_REGION=${{ secrets.AWS_REGION }}
+            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            AWS_S3_BUCKET_NAME=${{ secrets.AWS_S3_BUCKET_NAME }}
+            AWS_S3_ENDPOINT=${{ secrets.AWS_S3_ENDPOINT }}
+            FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
+            FIREBASE_CLIENT_EMAIL=${{ secrets.FIREBASE_CLIENT_EMAIL }}
+            FIREBASE_PRIVATE_KEY=${{ secrets.FIREBASE_PRIVATE_KEY }}
+            EOF
+
+      # Step 3: Securely copy all project files over your local switch to Node 3
       - name: Copy files to Node 3
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -23,9 +53,10 @@ jobs:
           username: ${{ secrets.DIT_SSH_USER }}
           key: ${{ secrets.DIT_SSH_KEY }}
           source: "."
+          exclude: ".env,.env.*"
           target: "/opt/inventory-management-dit"
 
-      # Step 3: Command Node 3 to build and restart the containers
+      # Step 4: Command Node 3 to build and restart the containers
       - name: Execute Docker Compose on Node 3
         uses: appleboy/ssh-action@v1.0.3
         with:
