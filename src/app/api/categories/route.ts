@@ -1,7 +1,9 @@
 import { NextRequest } from 'next/server'
+import { asc } from 'drizzle-orm'
+import { db } from '@/db/client'
+import { category } from '@/db/schema'
 import { ApiError } from '@/lib/api/errors'
 import { fromError, created, ok } from '@/lib/api/response'
-import getSupabaseAdmin from '@/lib/supabaseServer'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 
 export const dynamic = 'force-dynamic'
@@ -11,20 +13,11 @@ export async function GET(req: NextRequest) {
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabaseAdmin = getSupabaseAdmin()
-    const { data, error } = await supabaseAdmin
-      .from('category')
-      .select('*')
-      .order('category_name', { ascending: true })
-
-    if (error) {
-      console.warn('Supabase categories warning:', error.message)
-      return ok([])
-    }
-
-    return ok(data ?? [])
+    const rows = await db.select().from(category).orderBy(asc(category.category_name))
+    return ok(rows)
   } catch (error) {
-    return fromError(error)
+    console.warn('Category list warning:', error instanceof Error ? error.message : error)
+    return ok([])
   }
 }
 
@@ -38,19 +31,9 @@ export async function POST(req: NextRequest) {
     if (!category_name) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'category_name is required')
     }
-    const supabaseAdmin = getSupabaseAdmin()
-    const { data, error } = await supabaseAdmin
-      .from('category')
-      .insert([{ category_name }])
-      .select()
-      .single()
-    if (error) {
-      if (error.code === 'PGRST205' || error.message?.includes('schema cache')) {
-        throw new ApiError(503, 'DEPENDENCY_NOT_READY', 'Category table not set up yet.')
-      }
-      throw new ApiError(500, 'DATABASE_ERROR', error.message)
-    }
-    return created(data)
+
+    const [row] = await db.insert(category).values({ category_name }).returning()
+    return created(row)
   } catch (error) {
     return fromError(error)
   }

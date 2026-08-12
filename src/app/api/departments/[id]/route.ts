@@ -1,5 +1,7 @@
 import { NextRequest } from 'next/server'
-import { getSupabaseAdmin } from '@/lib/supabaseServer'
+import { eq } from 'drizzle-orm'
+import { db } from '@/db/client'
+import { departments } from '@/db/schema'
 import { ApiError } from '@/lib/api/errors'
 import { fromError, ok } from '@/lib/api/response'
 import { forbiddenResponse, getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
@@ -21,19 +23,17 @@ export async function PUT(
       throw new ApiError(400, 'VALIDATION_ERROR', 'department_name is required')
     }
 
-    const supabase = getSupabaseAdmin()
-    const { data, error } = await supabase
-      .from('departments')
-      .update({ department_name })
-      .eq('department_id', id)
-      .select('department_id, department_name')
-      .single()
+    const [row] = await db
+      .update(departments)
+      .set({ department_name })
+      .where(eq(departments.department_id, id))
+      .returning({ department_id: departments.department_id, department_name: departments.department_name })
 
-    if (error || !data) {
+    if (!row) {
       throw new ApiError(404, 'NOT_FOUND', 'Department not found')
     }
 
-    return ok(data)
+    return ok(row)
   } catch (error) {
     return fromError(error)
   }
@@ -49,16 +49,13 @@ export async function DELETE(
 
   try {
     const { id } = await params
-    const supabase = getSupabaseAdmin()
 
-    const { data, error } = await supabase
-      .from('departments')
-      .delete()
-      .eq('department_id', id)
-      .select('department_id')
-      .single()
+    const [row] = await db
+      .delete(departments)
+      .where(eq(departments.department_id, id))
+      .returning({ department_id: departments.department_id })
 
-    if (error || !data) {
+    if (!row) {
       throw new ApiError(404, 'NOT_FOUND', 'Department not found or cannot be deleted')
     }
 

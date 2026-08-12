@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
-import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import { asc } from "drizzle-orm";
+import { db } from "@/db/client";
+import { departments } from "@/db/schema";
 import { ApiError } from '@/lib/api/errors'
 import { created, fromError, ok } from '@/lib/api/response'
 import { forbiddenResponse, getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
@@ -9,15 +11,12 @@ export async function GET(req: NextRequest) {
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabase = getSupabaseAdmin();
-    const { data: departments, error } = await supabase
-      .from("departments")
-      .select("department_id, department_name")
-      .order("department_name", { ascending: true });
+    const rows = await db
+      .select({ department_id: departments.department_id, department_name: departments.department_name })
+      .from(departments)
+      .orderBy(asc(departments.department_name))
 
-    if (error) throw new ApiError(500, 'DATABASE_ERROR', error.message)
-
-    return ok(departments || []);
+    return ok(rows)
   } catch (error) {
     return fromError(error)
   }
@@ -36,16 +35,12 @@ export async function POST(req: NextRequest) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'department_name is required')
     }
 
-    const supabase = getSupabaseAdmin()
-    const { data, error } = await supabase
-      .from('departments')
-      .insert({ department_name })
-      .select('department_id, department_name')
-      .single()
+    const [row] = await db
+      .insert(departments)
+      .values({ department_name })
+      .returning({ department_id: departments.department_id, department_name: departments.department_name })
 
-    if (error) throw new ApiError(500, 'DATABASE_ERROR', error.message)
-
-    return created(data)
+    return created(row)
   } catch (error) {
     return fromError(error)
   }
