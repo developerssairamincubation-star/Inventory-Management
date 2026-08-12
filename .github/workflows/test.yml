@@ -1,0 +1,76 @@
+name: Test
+
+# Runs on PRs targeting development (including the migration branch's
+# eventual PR) so the branch can't merge with a red suite. Uses a
+# GitHub-hosted runner (not the self-hosted DIT deploy runner) since this
+# stack is fully ephemeral per run — no real secrets involved, only
+# throwaway local credentials for containers that live for the run's duration.
+on:
+  pull_request:
+    branches: ["development", "main"]
+  push:
+    branches: ["feature/postgres-minio-jwt-migration"]
+
+env:
+  POSTGRES_DB: inventory
+  POSTGRES_TEST_DB: inventory_test
+  POSTGRES_USER: inventory_app
+  POSTGRES_PASSWORD: ci_local_only_password
+  POSTGRES_HOST_PORT: 5433
+  MINIO_ROOT_USER: minioadmin
+  MINIO_ROOT_PASSWORD: ci_local_only_password
+  MINIO_BUCKET_NAME: inventory-assets
+  DATABASE_URL: postgresql://inventory_app:ci_local_only_password@localhost:5433/inventory
+  DATABASE_TEST_URL: postgresql://inventory_app:ci_local_only_password@localhost:5433/inventory_test
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start Postgres, MinIO, Mailpit
+        run: docker compose up -d postgres minio mailpit
+
+      - name: Wait for Postgres to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' inventory-management-postgres-1 2>/dev/null || echo "starting")
+            [ "$status" = "healthy" ] && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become healthy in time" >&2
+          docker compose logs postgres
+          exit 1
+
+      - name: Migrate dev + test databases, bootstrap MinIO bucket
+        run: |
+          docker compose up flyway
+          docker compose up flyway-seed
+          docker compose up flyway-test
+          docker compose up minio-init
+
+      - name: Run Vitest
+        run: npm test
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright e2e (once specs exist, from Phase 4 onward)
+        run: |
+          if find e2e -name '*.spec.ts' 2>/dev/null | grep -q .; then
+            npm run test:e2e
+          else
+            echo "No e2e specs yet — added starting Phase 4. Skipping."
+          fi
+
+      - name: Docker compose logs (on failure)
+        if: failure()
+        run: docker compose logs
