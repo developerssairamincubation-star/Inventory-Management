@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import getSupabaseAdmin from '@/lib/supabaseServer'
+import { and, eq, getTableColumns } from 'drizzle-orm'
+import { db } from '@/db/client'
+import { products, stocks } from '@/db/schema'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 
 export async function PATCH(
@@ -14,8 +16,6 @@ export async function PATCH(
     const body = await request.json()
     const { additionalStock, unitCost, newStock } = body
 
-    const supabaseAdmin = getSupabaseAdmin()
-
     if (additionalStock !== undefined && (typeof additionalStock !== 'number' || additionalStock < 0)) {
       return NextResponse.json({ error: 'Invalid additional stock value' }, { status: 400 })
     }
@@ -26,64 +26,31 @@ export async function PATCH(
       return NextResponse.json({ error: 'Invalid unit cost value' }, { status: 400 })
     }
 
-    // Verify product ownership
-    const { data: owned } = await supabaseAdmin
-      .from('products')
-      .select('product_id')
-      .eq('product_id', id)
-      .eq('user_id', user.user_id)
-      .single()
-
+    const [owned] = await db.select({ product_id: products.product_id }).from(products).where(and(eq(products.product_id, id), eq(products.user_id, user.user_id)))
     if (!owned) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
 
-    const { data: currentStock, error: stockError } = await supabaseAdmin
-      .from('stocks')
-      .select('quantity')
-      .eq('product_id', id)
-      .single()
-
-    if (stockError) {
-      return NextResponse.json({ error: stockError.message }, { status: 500 })
+    const [currentStock] = await db.select({ quantity: stocks.quantity }).from(stocks).where(eq(stocks.product_id, id))
+    if (!currentStock) {
+      return NextResponse.json({ error: 'Stock record not found' }, { status: 500 })
     }
 
     if (newStock !== undefined || additionalStock !== undefined) {
-      const newQuantity = newStock !== undefined
-        ? newStock
-        : (currentStock?.quantity || 0) + (additionalStock as number)
-
-      const { error: updateStockError } = await supabaseAdmin
-        .from('stocks')
-        .update({ quantity: newQuantity })
-        .eq('product_id', id)
-
-      if (updateStockError) {
-        return NextResponse.json({ error: updateStockError.message }, { status: 500 })
-      }
+      const newQuantity = newStock !== undefined ? newStock : (currentStock.quantity || 0) + (additionalStock as number)
+      await db.update(stocks).set({ quantity: newQuantity }).where(eq(stocks.product_id, id))
     }
 
     if (unitCost !== undefined) {
-      const { error: updateCostError } = await supabaseAdmin
-        .from('products')
-        .update({ unit_cost: unitCost })
-        .eq('product_id', id)
-
-      if (updateCostError) {
-        return NextResponse.json({ error: updateCostError.message }, { status: 500 })
-      }
+      await db.update(products).set({ unit_cost: String(unitCost) }).where(eq(products.product_id, id))
     }
 
-    const { data: updatedProduct, error: productError } = await supabaseAdmin
-      .from('products')
-      .select('*, stocks (quantity)')
-      .eq('product_id', id)
-      .single()
-
-    if (productError) {
-      return NextResponse.json({ error: productError.message }, { status: 500 })
-    }
+    const [updatedProduct] = await db
+      .select({ ...getTableColumns(products), stocks: { quantity: stocks.quantity } })
+      .from(products)
+      .leftJoin(stocks, eq(stocks.product_id, products.product_id))
+      .where(eq(products.product_id, id))
 
     return NextResponse.json({ success: true, product: updatedProduct })
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to update stock' }, { status: 500 })
   }
 }

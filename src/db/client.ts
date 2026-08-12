@@ -30,3 +30,11 @@ if (process.env.NODE_ENV !== "production") {
 
 export const db = drizzle(pool, { schema: { ...schema, ...relations } });
 export { pool };
+
+// Shared type for helpers that must work both as `db.transaction(async (tx)
+// => ...)` participants and as standalone calls with the top-level `db` —
+// e.g. src/lib/idSequences.ts's allocateNextCode, called from inside the
+// products POST route's transaction.
+export type DbClient = typeof db;
+export type Tx = Parameters<Parameters<DbClient["transaction"]>[0]>[0];
+export type DbOrTx = DbClient | Tx;

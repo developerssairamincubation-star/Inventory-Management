@@ -10,7 +10,7 @@
 // as invalid, not theft.
 import { randomBytes, createHash } from "crypto";
 import { eq, and, isNull } from "drizzle-orm";
-import type { db as DbType } from "@/db/client";
+import type { DbOrTx } from "@/db/client";
 import { sessions } from "@/db/schema";
 
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -35,7 +35,7 @@ export interface IssuedSession {
 }
 
 export async function createSession(
-  db: typeof DbType,
+  db: DbOrTx,
   userId: string,
   meta: SessionMeta = {},
 ): Promise<IssuedSession> {
@@ -62,7 +62,7 @@ export type RotateResult =
   | { status: "reused"; userId: string };
 
 export async function rotateSession(
-  db: typeof DbType,
+  db: DbOrTx,
   rawToken: string,
   meta: SessionMeta = {},
 ): Promise<RotateResult> {
@@ -90,12 +90,12 @@ export async function rotateSession(
   return { status: "rotated", userId: row.user_id, ...next };
 }
 
-export async function revokeSession(db: typeof DbType, rawToken: string): Promise<void> {
+export async function revokeSession(db: DbOrTx, rawToken: string): Promise<void> {
   const tokenHash = hashToken(rawToken);
   await db.update(sessions).set({ revoked_at: new Date() }).where(eq(sessions.token_hash, tokenHash));
 }
 
-export async function revokeAllSessionsForUser(db: typeof DbType, userId: string): Promise<void> {
+export async function revokeAllSessionsForUser(db: DbOrTx, userId: string): Promise<void> {
   await db
     .update(sessions)
     .set({ revoked_at: new Date() })

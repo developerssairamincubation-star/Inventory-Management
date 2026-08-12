@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import getSupabaseAdmin from '@/lib/supabaseServer'
+import { desc, eq, getTableColumns } from 'drizzle-orm'
+import { db } from '@/db/client'
+import { products, stocks, product_image, category } from '@/db/schema'
+import { allocateNextCode } from '@/lib/idSequences'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 
 export const dynamic = 'force-dynamic'
@@ -9,45 +12,22 @@ export async function GET(req: NextRequest) {
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabaseAdmin = getSupabaseAdmin()
-    const { data, error } = await supabaseAdmin
-      .from('products')
-      .select(`
-        *,
-        stocks (quantity),
-        product_image (image_url)
-      `)
-      .eq('user_id', user.user_id)
-      .order('created_at', { ascending: false })
+    const rows = await db
+      .select({
+        ...getTableColumns(products),
+        image_url: product_image.image_url,
+        category_name: category.category_name,
+      })
+      .from(products)
+      .leftJoin(product_image, eq(product_image.product_id, products.product_id))
+      .leftJoin(category, eq(category.category_id, products.category_id))
+      .where(eq(products.user_id, user.user_id))
+      .orderBy(desc(products.created_at))
 
-    if (error) {
-      console.error('Supabase error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    const categoryIds = [...new Set((data || []).map((p: any) => p.category_id).filter(Boolean))]
-    const categoryMap: Record<string, string> = {}
-    if (categoryIds.length > 0) {
-      try {
-        const { data: cats } = await supabaseAdmin
-          .from('category')
-          .select('category_id, category_name')
-          .in('category_id', categoryIds)
-        ;(cats || []).forEach((c: any) => { categoryMap[c.category_id] = c.category_name })
-      } catch { /* category table may not exist yet */ }
-    }
-
-    const normalized = (data || []).map((p: any) => ({
-      ...p,
-      image_url: p.product_image?.[0]?.image_url ?? null,
-      product_image: undefined,
-      category_name: p.category_id ? (categoryMap[p.category_id] ?? null) : null,
-    }))
-
-    return NextResponse.json(normalized)
-  } catch (err: any) {
+    return NextResponse.json(rows)
+  } catch (err) {
     console.error('Server error:', err)
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 })
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal Server Error' }, { status: 500 })
   }
 }
 
@@ -57,7 +37,6 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const supabaseAdmin = getSupabaseAdmin()
 
     const product_name = body.name ?? body.product_name
     const serial_number = body.sku ?? body.serial_number
@@ -68,18 +47,12 @@ export async function POST(req: NextRequest) {
     // If neither is provided, leave them undefined so DB defaults apply.
     const hasReturnable = typeof body.returnable === 'boolean'
     const hasConsumable = typeof body.consumable === 'boolean'
-    let returnable: boolean | undefined = undefined
-    let consumable: boolean | undefined = undefined
-    if (hasReturnable) {
-      returnable = body.returnable
-    }
-    if (hasConsumable) {
-      consumable = body.consumable
-    }
-    // If only consumable provided, derive returnable as inverse
-    if (!hasReturnable && hasConsumable) {
-      returnable = !body.consumable
-    }
+    let returnable: boolean | undefined
+    let consumable: boolean | undefined
+    if (hasReturnable) returnable = body.returnable
+    if (hasConsumable) consumable = body.consumable
+    if (!hasReturnable && hasConsumable) returnable = !body.consumable
+
     const quantity = body.quantity ?? body.initial_quantity ?? null
     const category_id = body.category_id ?? null
 
@@ -87,70 +60,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields: product_name, unit_cost, quantity' }, { status: 400 })
     }
 
-    // Product code is globally sequential to avoid conflicts
-    const { data: lastProduct } = await supabaseAdmin
-      .from('products')
-      .select('product_code')
-      .not('product_code', 'is', null)
-      .order('product_code', { ascending: false })
-      .limit(1)
-      .maybeSingle()
+    const result = await db.transaction(async (tx) => {
+      const product_code = await allocateNextCode(tx, 'product_code')
 
-    let nextProductNumber = 1
-    if (lastProduct?.product_code) {
-      const lastNumber = parseInt(lastProduct.product_code.replace('STIC', ''))
-      if (!isNaN(lastNumber)) nextProductNumber = lastNumber + 1
-    }
-    const product_code = `STIC${String(nextProductNumber).padStart(3, '0')}`
+      const insertData: typeof products.$inferInsert = {
+        product_code,
+        product_name,
+        unit_cost: String(unit_cost),
+        user_id: user.user_id,
+      }
+      if (consumable !== undefined) insertData.consumable = consumable
+      if (returnable !== undefined) insertData.returnable = returnable
+      if (serial_number) insertData.serial_number = serial_number
+      if (low_stock_threshold !== null && low_stock_threshold !== undefined) insertData.low_stock_threshold = low_stock_threshold
+      if (category_id) insertData.category_id = category_id
 
-    const insertData: any = {
-      product_code,
-      product_name,
-      unit_cost,
-      user_id: user.user_id,
-    }
-    if (consumable !== undefined) insertData.consumable = consumable
-    if (returnable !== undefined) insertData.returnable = returnable
-    if (serial_number) insertData.serial_number = serial_number
-    if (low_stock_threshold !== null && low_stock_threshold !== undefined) insertData.low_stock_threshold = low_stock_threshold
-    if (category_id) insertData.category_id = category_id
+      const [product] = await tx.insert(products).values(insertData).returning()
 
-    const { data: product, error: prodErr } = await supabaseAdmin
-      .from('products')
-      .insert([insertData])
-      .select()
-      .single()
+      const [stock] = await tx.insert(stocks).values({ product_id: product.product_id, quantity: Number(quantity) }).returning()
 
-    if (prodErr || !product) {
-      return NextResponse.json({ error: prodErr?.message || 'Failed to create product' }, { status: 500 })
-    }
+      if (image_url) {
+        await tx.insert(product_image).values({ product_id: product.product_id, image_url })
+      }
 
-    const product_id = (product as any).product_id ?? (product as any).id
-    if (!product_id) {
-      return NextResponse.json({ error: 'Failed to retrieve product ID after creation' }, { status: 500 })
-    }
+      return { product, stock }
+    })
 
-    const { data: stock, error: stockErr } = await supabaseAdmin
-      .from('stocks')
-      .insert([{ product_id, quantity: Number(quantity) }])
-      .select()
-      .single()
-
-    if (stockErr) {
-      await supabaseAdmin.from('products').delete().match({ product_id })
-      return NextResponse.json({ error: stockErr.message || 'Failed to create stock record' }, { status: 500 })
-    }
-
-    if (image_url) {
-      const { error: imgErr } = await supabaseAdmin
-        .from('product_image')
-        .insert([{ product_id, image_url }])
-        .select()
-      if (imgErr) console.error('Supabase error (insert product_image):', imgErr)
-    }
-
-    return NextResponse.json({ product: { ...product, image_url: image_url ?? null }, stock }, { status: 201 })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Invalid JSON' }, { status: 400 })
+    return NextResponse.json({ product: { ...result.product, image_url: image_url ?? null }, stock: result.stock }, { status: 201 })
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Invalid JSON' }, { status: 400 })
   }
 }

@@ -1,8 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSupabaseAdmin } from '@/lib/supabaseServer'
+import { and, desc, eq, inArray } from 'drizzle-orm'
+import { db } from '@/db/client'
+import {
+  products,
+  product_image,
+  stocks,
+  category,
+  lending_item,
+  lending_order,
+  students,
+  staffs,
+  departments,
+} from '@/db/schema'
+import { deleteFromS3, getS3KeyFromUrl } from '@/lib/s3'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 
 export const dynamic = 'force-dynamic'
+
+function getFromDate(period: string): Date {
+  const now = new Date()
+  switch (period) {
+    case 'daily': { const d = new Date(now); d.setHours(0, 0, 0, 0); return d }
+    case 'weekly': { const d = new Date(now); d.setDate(now.getDate() - 7); return d }
+    case 'yearly': { const d = new Date(now); d.setFullYear(now.getFullYear() - 1); return d }
+    case 'monthly':
+    default: { const d = new Date(now); d.setMonth(now.getMonth() - 1); return d }
+  }
+}
+
+const FINAL_STATUSES = ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST', 'DAMAGED', 'LOST', 'CONSUMABLE']
 
 export async function GET(
   request: NextRequest,
@@ -12,118 +38,141 @@ export async function GET(
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabase = getSupabaseAdmin()
     const { id } = await params
-
     const { searchParams } = new URL(request.url)
     const period = searchParams.get('period') || 'monthly'
+    const fromDate = getFromDate(period)
 
-    const now = new Date()
-    let fromDate: Date
-    switch (period) {
-      case 'daily':   fromDate = new Date(now); fromDate.setHours(0, 0, 0, 0); break
-      case 'weekly':  fromDate = new Date(now); fromDate.setDate(now.getDate() - 7); break
-      case 'yearly':  fromDate = new Date(now); fromDate.setFullYear(now.getFullYear() - 1); break
-      case 'monthly':
-      default:        fromDate = new Date(now); fromDate.setMonth(now.getMonth() - 1); break
+    const [product] = await db
+      .select()
+      .from(products)
+      .where(and(eq(products.product_id, id), eq(products.user_id, user.user_id)))
+
+    if (!product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
     }
 
-    const { data: product, error: productError } = await supabase
-      .from('products')
-      .select('*')
-      .eq('product_id', id)
-      .eq('user_id', user.user_id)
-      .single()
-
-    if (productError || !product) {
-      return NextResponse.json({ error: productError?.message || 'Product not found' }, { status: 404 })
-    }
-
-    const { data: productImage } = await supabase
-      .from('product_image')
-      .select('image_url')
-      .eq('product_id', id)
-      .maybeSingle()
-
-    const { data: stockRow } = await supabase
-      .from('stocks')
-      .select('quantity, damaged_quantity, lost_quantity')
-      .eq('product_id', id)
-      .maybeSingle()
+    const [image] = await db.select({ image_url: product_image.image_url }).from(product_image).where(eq(product_image.product_id, id))
+    const [stockRow] = await db
+      .select({ quantity: stocks.quantity, damaged_quantity: stocks.damaged_quantity, lost_quantity: stocks.lost_quantity })
+      .from(stocks)
+      .where(eq(stocks.product_id, id))
 
     const stockData = stockRow
       ? { quantity: stockRow.quantity ?? 0, damaged_quantity: stockRow.damaged_quantity ?? 0, lost_quantity: stockRow.lost_quantity ?? 0 }
       : { quantity: 0, damaged_quantity: 0, lost_quantity: 0 }
 
-    const categoryId = product.category_id ?? null
     let categoryName: string | null = null
-    if (categoryId) {
-      try {
-        const { data: catRow } = await supabase.from('category').select('category_name').eq('category_id', categoryId).maybeSingle()
-        categoryName = catRow?.category_name ?? null
-      } catch { /* category table may not exist yet */ }
+    if (product.category_id) {
+      const [catRow] = await db.select({ category_name: category.category_name }).from(category).where(eq(category.category_id, product.category_id))
+      categoryName = catRow?.category_name ?? null
     }
 
-    const enrichedProduct = { ...product, image_url: productImage?.image_url ?? null, stocks: stockData, category_name: categoryName }
+    const enrichedProduct = { ...product, image_url: image?.image_url ?? null, stocks: stockData, category_name: categoryName }
 
-    const { data: lendingItems } = await supabase
-      .from('lending_item')
-      .select('lend_order_id, quantity, original_quantity, damaged_quantity, lost_quantity')
-      .eq('product_id', id)
+    const lendingItems = await db
+      .select({
+        lend_order_id: lending_item.lend_order_id,
+        quantity: lending_item.quantity,
+        original_quantity: lending_item.original_quantity,
+        damaged_quantity: lending_item.damaged_quantity,
+        lost_quantity: lending_item.lost_quantity,
+      })
+      .from(lending_item)
+      .where(eq(lending_item.product_id, id))
 
-    const orderIds = lendingItems?.map((li: any) => li.lend_order_id) || []
+    const orderIds = lendingItems.map((li) => li.lend_order_id)
 
-    let borrowingHistory: any[] = []
-    let lendingSummary = { totalLent: 0, returned: 0 }
+    type BorrowingHistoryRow = {
+      sno: number
+      lending_order_id: string
+      borrower_name: string
+      borrower_type: string
+      department: string
+      borrow_date: Date
+      return_date: string | null
+      due_date: string | null
+      status: string
+      quantity: number
+      original_quantity: number
+      damaged_quantity: number
+      lost_quantity: number
+      mentor: string
+    }
+
+    let borrowingHistory: BorrowingHistoryRow[] = []
+    const lendingSummary = { totalLent: 0, returned: 0 }
 
     if (orderIds.length > 0) {
-      const { data: orders } = await supabase
-        .from('lending_order')
-        .select('lending_order_id, created_at, due_date, return_date, status, borrower_type, borrower_student_id, borrower_staff_id, mentor_staff_id')
-        .in('lending_order_id', orderIds)
-        .eq('issued_by_user_id', user.user_id)
-        .order('created_at', { ascending: false })
+      const orders = await db
+        .select({
+          lending_order_id: lending_order.lending_order_id,
+          created_at: lending_order.created_at,
+          due_date: lending_order.due_date,
+          return_date: lending_order.return_date,
+          status: lending_order.status,
+          borrower_type: lending_order.borrower_type,
+          borrower_student_id: lending_order.borrower_student_id,
+          borrower_staff_id: lending_order.borrower_staff_id,
+          mentor_staff_id: lending_order.mentor_staff_id,
+        })
+        .from(lending_order)
+        .where(and(inArray(lending_order.lending_order_id, orderIds), eq(lending_order.issued_by_user_id, user.user_id)))
+        .orderBy(desc(lending_order.created_at))
 
-      if (orders && orders.length > 0) {
+      if (orders.length > 0) {
         const qtyByOrder = new Map<string, number>()
         const origQtyByOrder = new Map<string, number>()
         const damagedByOrder = new Map<string, number>()
         const lostByOrder = new Map<string, number>()
-        lendingItems?.forEach((li: any) => {
+        for (const li of lendingItems) {
           const currentQty = li.quantity ?? 0
-          const origQty = (li.original_quantity != null && li.original_quantity > 0) ? li.original_quantity : currentQty
+          const origQty = li.original_quantity != null && li.original_quantity > 0 ? li.original_quantity : currentQty
           qtyByOrder.set(li.lend_order_id, currentQty)
           origQtyByOrder.set(li.lend_order_id, origQty)
           damagedByOrder.set(li.lend_order_id, li.damaged_quantity ?? 0)
           lostByOrder.set(li.lend_order_id, li.lost_quantity ?? 0)
-        })
+        }
 
-        const ordersInPeriod = orders.filter((o: any) => new Date(o.created_at) >= fromDate)
-        lendingSummary.totalLent = ordersInPeriod.reduce((s: number, o: any) => s + (origQtyByOrder.get(o.lending_order_id) || 0), 0)
+        const ordersInPeriod = orders.filter((o) => o.created_at >= fromDate)
+        lendingSummary.totalLent = ordersInPeriod.reduce((s, o) => s + (origQtyByOrder.get(o.lending_order_id) || 0), 0)
         lendingSummary.returned = ordersInPeriod
-          .filter((o: any) => ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST'].includes(o.status))
-          .reduce((s: number, o: any) => {
+          .filter((o) => ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST'].includes(o.status))
+          .reduce((s, o) => {
             const orig = origQtyByOrder.get(o.lending_order_id) || 0
-            const dmg  = damagedByOrder.get(o.lending_order_id) || 0
-            const lst  = lostByOrder.get(o.lending_order_id) || 0
+            const dmg = damagedByOrder.get(o.lending_order_id) || 0
+            const lst = lostByOrder.get(o.lending_order_id) || 0
             return s + Math.max(0, orig - dmg - lst)
           }, 0)
 
-        const studentIds = [...new Set(orders.filter((o: any) => o.borrower_type === 'STUDENT' && o.borrower_student_id).map((o: any) => o.borrower_student_id))]
-        const staffIds = [...new Set(orders.filter((o: any) => o.borrower_type === 'STAFF' && o.borrower_staff_id).map((o: any) => o.borrower_staff_id))]
-        const mentorIds = [...new Set(orders.filter((o: any) => o.mentor_staff_id).map((o: any) => o.mentor_staff_id))]
+        const studentIds = [...new Set(orders.filter((o) => o.borrower_type === 'STUDENT' && o.borrower_student_id).map((o) => o.borrower_student_id as string))]
+        const staffIds = [...new Set(orders.filter((o) => o.borrower_type === 'STAFF' && o.borrower_staff_id).map((o) => o.borrower_staff_id as string))]
+        const mentorIds = [...new Set(orders.filter((o) => o.mentor_staff_id).map((o) => o.mentor_staff_id as string))]
         const allStaffIds = [...new Set([...staffIds, ...mentorIds])]
 
-        const [{ data: students }, { data: allStaffs }] = await Promise.all([
-          studentIds.length > 0 ? supabase.from('students').select('student_id, name, departments(department_name)').in('student_id', studentIds) : Promise.resolve({ data: [] }),
-          allStaffIds.length > 0 ? supabase.from('staffs').select('staff_id, name').in('staff_id', allStaffIds) : Promise.resolve({ data: [] }),
+        const [studentRows, staffRows] = await Promise.all([
+          studentIds.length > 0
+            ? db
+                .select({
+                  student_id: students.student_id,
+                  name: students.name,
+                  departments: { department_name: departments.department_name },
+                })
+                .from(students)
+                .leftJoin(departments, eq(departments.department_id, students.department_id))
+                .where(inArray(students.student_id, studentIds))
+            : Promise.resolve([]),
+          allStaffIds.length > 0
+            ? db.select({ staff_id: staffs.staff_id, name: staffs.name }).from(staffs).where(inArray(staffs.staff_id, allStaffIds))
+            : Promise.resolve([]),
         ])
 
-        const studentMap = new Map<string, any>((students || []).map((s: any) => [s.student_id, s]))
-        const staffMap = new Map<string, any>((allStaffs || []).map((s: any) => [s.staff_id, s]))
+        const studentMap = new Map(studentRows.map((s) => [s.student_id, s]))
+        const staffMap = new Map(staffRows.map((s) => [s.staff_id, s]))
 
-        borrowingHistory = orders.map((order: any, idx: number) => {
-          let borrowerName = '—'; let department = '—'
+        borrowingHistory = orders.map((order, idx) => {
+          let borrowerName = '—'
+          let department = '—'
           if (order.borrower_type === 'STUDENT' && order.borrower_student_id) {
             const student = studentMap.get(order.borrower_student_id)
             borrowerName = student?.name || '—'
@@ -132,12 +181,11 @@ export async function GET(
             borrowerName = staffMap.get(order.borrower_staff_id)?.name || '—'
             department = 'Staff'
           }
-          const mentor = order.mentor_staff_id ? (staffMap.get(order.mentor_staff_id)?.name || '—') : '—'
+          const mentor = order.mentor_staff_id ? staffMap.get(order.mentor_staff_id)?.name || '—' : '—'
           const currentQty = qtyByOrder.get(order.lending_order_id) ?? 0
           const originalQty = origQtyByOrder.get(order.lending_order_id) ?? currentQty
           const damagedQty = damagedByOrder.get(order.lending_order_id) || 0
           const lostQty = lostByOrder.get(order.lending_order_id) || 0
-          const FINAL_STATUSES = ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST', 'DAMAGED', 'LOST', 'CONSUMABLE']
           const isFullyReturned = FINAL_STATUSES.includes(order.status)
           return {
             sno: idx + 1,
@@ -160,9 +208,9 @@ export async function GET(
     }
 
     return NextResponse.json({ product: enrichedProduct, lendingSummary, borrowingHistory })
-  } catch (err: any) {
+  } catch (err) {
     console.error('Error fetching product detail:', err)
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 })
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal Server Error' }, { status: 500 })
   }
 }
 
@@ -174,45 +222,44 @@ export async function PUT(
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabase = getSupabaseAdmin()
     const { id } = await params
     const body = await request.json()
 
-    const updateData: any = {}
+    const updateData: Partial<typeof products.$inferInsert> = {}
     if (body.product_name !== undefined) updateData.product_name = body.product_name
     if (body.serial_number !== undefined) updateData.serial_number = body.serial_number
-    if (body.unit_cost !== undefined) updateData.unit_cost = body.unit_cost
+    if (body.unit_cost !== undefined) updateData.unit_cost = String(body.unit_cost)
     if (body.low_stock_threshold !== undefined) updateData.low_stock_threshold = body.low_stock_threshold
     if (body.returnable !== undefined) updateData.returnable = body.returnable
     if (body.category_id !== undefined) updateData.category_id = body.category_id
 
-    const { data, error } = await supabase
-      .from('products')
-      .update(updateData)
-      .eq('product_id', id)
-      .eq('user_id', user.user_id)
-      .select()
-      .single()
+    const [updated] = await db
+      .update(products)
+      .set(updateData)
+      .where(and(eq(products.product_id, id), eq(products.user_id, user.user_id)))
+      .returning()
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!updated) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    }
 
     let returnedImageUrl: string | null = null
     if (body.image_url !== undefined) {
-      const { data: existing } = await supabase.from('product_image').select('image_url').eq('product_id', id).maybeSingle()
+      const [existing] = await db.select({ image_url: product_image.image_url }).from(product_image).where(eq(product_image.product_id, id))
       if (existing) {
-        await supabase.from('product_image').update({ image_url: body.image_url }).eq('product_id', id)
+        await db.update(product_image).set({ image_url: body.image_url }).where(eq(product_image.product_id, id))
       } else {
-        await supabase.from('product_image').insert([{ product_id: id, image_url: body.image_url }])
+        await db.insert(product_image).values({ product_id: id, image_url: body.image_url })
       }
       returnedImageUrl = body.image_url
     } else {
-      const { data: img } = await supabase.from('product_image').select('image_url').eq('product_id', id).maybeSingle()
+      const [img] = await db.select({ image_url: product_image.image_url }).from(product_image).where(eq(product_image.product_id, id))
       returnedImageUrl = img?.image_url ?? null
     }
 
-    return NextResponse.json({ ...data, image_url: returnedImageUrl })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 })
+    return NextResponse.json({ ...updated, image_url: returnedImageUrl })
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal Server Error' }, { status: 500 })
   }
 }
 
@@ -224,34 +271,37 @@ export async function DELETE(
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabase = getSupabaseAdmin()
     const { id } = await params
 
-    // Verify ownership
-    const { data: owned } = await supabase
-      .from('products')
-      .select('product_id')
-      .eq('product_id', id)
-      .eq('user_id', user.user_id)
-      .single()
-
+    const [owned] = await db.select({ product_id: products.product_id }).from(products).where(and(eq(products.product_id, id), eq(products.user_id, user.user_id)))
     if (!owned) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
 
-    const { data: lendingItems } = await supabase.from('lending_item').select('lend_order_id').eq('product_id', id)
-    const orderIds = [...new Set((lendingItems || []).map((li: any) => li.lend_order_id))]
+    const images = await db.select({ image_url: product_image.image_url }).from(product_image).where(eq(product_image.product_id, id))
 
-    await supabase.from('lending_item').delete().eq('product_id', id)
+    const items = await db.select({ lend_order_id: lending_item.lend_order_id }).from(lending_item).where(eq(lending_item.product_id, id))
+    const orderIds = [...new Set(items.map((li) => li.lend_order_id))]
+
+    await db.delete(lending_item).where(eq(lending_item.product_id, id))
     if (orderIds.length > 0) {
-      await supabase.from('lending_order').delete().in('lending_order_id', orderIds)
+      await db.delete(lending_order).where(inArray(lending_order.lending_order_id, orderIds))
     }
-    await supabase.from('stocks').delete().eq('product_id', id)
-    await supabase.from('product_image').delete().eq('product_id', id)
-    const { error } = await supabase.from('products').delete().eq('product_id', id)
+    await db.delete(stocks).where(eq(stocks.product_id, id))
+    await db.delete(product_image).where(eq(product_image.product_id, id))
+    await db.delete(products).where(eq(products.product_id, id))
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    for (const img of images) {
+      const key = getS3KeyFromUrl(img.image_url)
+      if (key) {
+        try {
+          await deleteFromS3(key)
+        } catch (err) {
+          console.error('Failed to delete product image from storage:', err)
+        }
+      }
+    }
 
     return NextResponse.json({ success: true })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 })
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal Server Error' }, { status: 500 })
   }
 }

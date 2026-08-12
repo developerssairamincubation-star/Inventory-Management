@@ -4,12 +4,12 @@
 // the row for the statement's duration, serializing concurrent callers —
 // no separate SELECT ... FOR UPDATE needed.
 import { sql, eq } from "drizzle-orm";
-import type { db as DbType } from "@/db/client";
+import type { DbOrTx } from "@/db/client";
 import { id_sequences } from "@/db/schema";
 
 export type SequenceKey = "product_code" | "invoice_number";
 
-export async function allocateNextCode(db: typeof DbType, key: SequenceKey): Promise<string> {
+export async function allocateNextCode(db: DbOrTx, key: SequenceKey): Promise<string> {
   const [row] = await db
     .update(id_sequences)
     .set({ current_value: sql`${id_sequences.current_value} + 1` })

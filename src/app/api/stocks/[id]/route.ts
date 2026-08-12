@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import { eq } from 'drizzle-orm'
+import { db } from '@/db/client'
+import { stocks } from '@/db/schema'
 import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 
 export async function GET(
@@ -10,21 +12,16 @@ export async function GET(
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabase = getSupabaseAdmin();
     const { id } = await params;
 
-    const { data, error } = await supabase
-      .from("stocks")
-      .select("quantity")
-      .eq("product_id", id)
-      .single();
+    const [row] = await db.select({ quantity: stocks.quantity }).from(stocks).where(eq(stocks.product_id, id))
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!row) {
+      return NextResponse.json({ error: 'Stock record not found' }, { status: 500 });
     }
 
-    return NextResponse.json(data);
-  } catch (error) {
+    return NextResponse.json(row);
+  } catch {
     return NextResponse.json({ error: "Failed to fetch stock" }, { status: 500 });
   }
 }
