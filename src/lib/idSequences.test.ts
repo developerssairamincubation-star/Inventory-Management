@@ -17,7 +17,7 @@ describe("idSequences", () => {
 
   it("never allocates the same code twice under concurrent callers", async () => {
     const results = await Promise.all(
-      Array.from({ length: 10 }, () => allocateNextCode(db, "invoice_number")),
+      Array.from({ length: 10 }, () => allocateNextCode(db, "product_code")),
     );
     expect(new Set(results).size).toBe(10);
   });

@@ -3,6 +3,13 @@
 -- JS" pattern, which is race-prone under concurrent requests: a single
 -- `UPDATE ... RETURNING` locks the row for the statement's duration, so
 -- concurrent callers are serialized by Postgres instead of racing in app code.
+--
+-- product_code is a single global sequence (one row, seeded below).
+-- invoice_number is scoped PER USER (matches the original app's
+-- `.eq('user_id', ...)` query in invoices/next-number) — rows are created
+-- on demand with sequence_key = 'invoice_number:<user_id>' via an atomic
+-- upsert (see src/lib/idSequences.ts allocateNextInvoiceNumber), not
+-- pre-seeded here.
 
 CREATE TABLE id_sequences (
   sequence_key  TEXT   PRIMARY KEY,
@@ -15,5 +22,4 @@ CREATE TABLE id_sequences (
 );
 
 INSERT INTO id_sequences (sequence_key, current_value, prefix, pad_width) VALUES
-  ('product_code',   0, 'STIC', 3),
-  ('invoice_number', 0, 'INV',  3);
+  ('product_code', 0, 'STIC', 3);
