@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db/client";
+import { lending_order, lending_item, stocks } from "@/db/schema";
 import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 
 export async function POST(
@@ -10,7 +12,6 @@ export async function POST(
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabase = getSupabaseAdmin();
     const { id } = await params;
     const body = await request.json();
     const { product_id, damaged_quantity } = body;
@@ -19,24 +20,11 @@ export async function POST(
       return NextResponse.json({ error: "product_id and damaged_quantity (≥1) are required" }, { status: 400 });
     }
 
-    // Verify order ownership
-    const { data: order } = await supabase
-      .from("lending_order")
-      .select("lending_order_id")
-      .eq("lending_order_id", id)
-      .eq("issued_by_user_id", user.user_id)
-      .single();
-
+    const [order] = await db.select({ lending_order_id: lending_order.lending_order_id }).from(lending_order).where(and(eq(lending_order.lending_order_id, id), eq(lending_order.issued_by_user_id, user.user_id)))
     if (!order) return NextResponse.json({ error: "Lending record not found" }, { status: 404 });
 
-    const { data: lendingItem, error: lendingItemError } = await supabase
-      .from("lending_item")
-      .select("quantity, damaged_quantity")
-      .eq("lend_order_id", id)
-      .eq("product_id", product_id)
-      .single();
-
-    if (lendingItemError || !lendingItem) {
+    const [lendingItem] = await db.select({ quantity: lending_item.quantity, damaged_quantity: lending_item.damaged_quantity }).from(lending_item).where(and(eq(lending_item.lend_order_id, id), eq(lending_item.product_id, product_id)))
+    if (!lendingItem) {
       return NextResponse.json({ error: "Lending item not found" }, { status: 404 });
     }
 
@@ -44,45 +32,30 @@ export async function POST(
       return NextResponse.json({ error: `Damaged quantity (${damaged_quantity}) exceeds lent quantity (${lendingItem.quantity})` }, { status: 400 });
     }
 
-    const newLentQuantity = lendingItem.quantity - damaged_quantity;
-    const newItemDamagedQty = (lendingItem.damaged_quantity || 0) + damaged_quantity;
-
-    await supabase
-      .from("lending_item")
-      .update({ quantity: newLentQuantity, damaged_quantity: newItemDamagedQty })
-      .eq("lend_order_id", id)
-      .eq("product_id", product_id);
-
-    if (newLentQuantity === 0) {
-      await supabase.from("lending_order").update({ status: "DAMAGED" }).eq("lending_order_id", id);
-    } else {
-      const { data: lendingOrder } = await supabase.from("lending_order").select("status").eq("lending_order_id", id).single();
-      if (lendingOrder && lendingOrder.status === "PENDING") {
-        await supabase.from("lending_order").update({ status: "PARTIALLY_DAMAGED" }).eq("lending_order_id", id);
-      }
-    }
-
-    const { data: stockData, error: stockFetchError } = await supabase
-      .from("stocks")
-      .select("quantity, damaged_quantity")
-      .eq("product_id", product_id)
-      .single();
-
-    if (stockFetchError || !stockData) {
+    const [stockData] = await db.select({ quantity: stocks.quantity, damaged_quantity: stocks.damaged_quantity }).from(stocks).where(eq(stocks.product_id, product_id))
+    if (!stockData) {
       return NextResponse.json({ error: "Stock record not found" }, { status: 404 });
     }
 
+    const newLentQuantity = lendingItem.quantity - damaged_quantity;
+    const newItemDamagedQty = (lendingItem.damaged_quantity || 0) + damaged_quantity;
     const newStockQuantity = Math.max(0, (stockData.quantity || 0) - damaged_quantity);
     const newDamagedQuantity = (stockData.damaged_quantity || 0) + damaged_quantity;
 
-    const { error: stockUpdateError } = await supabase
-      .from("stocks")
-      .update({ quantity: newStockQuantity, damaged_quantity: newDamagedQuantity })
-      .eq("product_id", product_id);
+    await db.transaction(async (tx) => {
+      await tx.update(lending_item).set({ quantity: newLentQuantity, damaged_quantity: newItemDamagedQty }).where(and(eq(lending_item.lend_order_id, id), eq(lending_item.product_id, product_id)))
 
-    if (stockUpdateError) {
-      return NextResponse.json({ error: stockUpdateError.message }, { status: 500 });
-    }
+      if (newLentQuantity === 0) {
+        await tx.update(lending_order).set({ status: "DAMAGED" }).where(eq(lending_order.lending_order_id, id))
+      } else {
+        const [lendingOrderRow] = await tx.select({ status: lending_order.status }).from(lending_order).where(eq(lending_order.lending_order_id, id))
+        if (lendingOrderRow && lendingOrderRow.status === "PENDING") {
+          await tx.update(lending_order).set({ status: "PARTIALLY_DAMAGED" }).where(eq(lending_order.lending_order_id, id))
+        }
+      }
+
+      await tx.update(stocks).set({ quantity: newStockQuantity, damaged_quantity: newDamagedQuantity }).where(eq(stocks.product_id, product_id))
+    })
 
     return NextResponse.json({
       success: true,
@@ -92,7 +65,7 @@ export async function POST(
       newDamagedQuantity,
       orderStatus: newLentQuantity === 0 ? "DAMAGED" : "PARTIALLY_DAMAGED",
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Failed to mark items as damaged" }, { status: 500 });
   }
 }

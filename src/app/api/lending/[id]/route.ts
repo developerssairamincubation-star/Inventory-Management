@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import { and, eq, sql } from "drizzle-orm";
+import { db } from "@/db/client";
+import { lending_order, lending_item, stocks } from "@/db/schema";
 import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 
 export async function DELETE(
@@ -10,48 +12,25 @@ export async function DELETE(
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabase = getSupabaseAdmin();
     const { id } = await params;
 
-    // Verify ownership
-    const { data: order } = await supabase
-      .from("lending_order")
-      .select("lending_order_id")
-      .eq("lending_order_id", id)
-      .eq("issued_by_user_id", user.user_id)
-      .single();
-
+    const [order] = await db.select({ lending_order_id: lending_order.lending_order_id }).from(lending_order).where(and(eq(lending_order.lending_order_id, id), eq(lending_order.issued_by_user_id, user.user_id)))
     if (!order) return NextResponse.json({ error: "Lending record not found" }, { status: 404 });
 
-    const { data: lendingItems } = await supabase
-      .from("lending_item")
-      .select("product_id, quantity")
-      .eq("lend_order_id", id);
+    await db.transaction(async (tx) => {
+      const items = await tx.select({ product_id: lending_item.product_id, quantity: lending_item.quantity }).from(lending_item).where(eq(lending_item.lend_order_id, id))
 
-    await supabase.from("lending_item").delete().eq("lend_order_id", id);
-    await supabase.from("lending_order").delete().eq("lending_order_id", id);
+      await tx.delete(lending_item).where(eq(lending_item.lend_order_id, id))
+      await tx.delete(lending_order).where(eq(lending_order.lending_order_id, id))
 
-    const itemsToRestore = (lendingItems || []).filter(
-      (item: any) => item.product_id && (item.quantity || 0) > 0
-    );
-
-    for (const item of itemsToRestore) {
-      const { data: currentStock } = await supabase
-        .from("stocks")
-        .select("quantity")
-        .eq("product_id", item.product_id)
-        .single();
-
-      if (currentStock) {
-        await supabase
-          .from("stocks")
-          .update({ quantity: (currentStock?.quantity || 0) + (item.quantity || 0) })
-          .eq("product_id", item.product_id);
+      const itemsToRestore = items.filter((item) => item.product_id && (item.quantity || 0) > 0)
+      for (const item of itemsToRestore) {
+        await tx.update(stocks).set({ quantity: sql`${stocks.quantity} + ${item.quantity}` }).where(eq(stocks.product_id, item.product_id))
       }
-    }
+    })
 
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Failed to delete lending record" }, { status: 500 });
   }
 }
@@ -64,62 +43,37 @@ export async function PUT(
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabase = getSupabaseAdmin();
     const { id } = await params;
     const body = await request.json();
 
-    // Verify ownership
-    const { data: order } = await supabase
-      .from("lending_order")
-      .select("lending_order_id")
-      .eq("lending_order_id", id)
-      .eq("issued_by_user_id", user.user_id)
-      .single();
-
+    const [order] = await db.select({ lending_order_id: lending_order.lending_order_id }).from(lending_order).where(and(eq(lending_order.lending_order_id, id), eq(lending_order.issued_by_user_id, user.user_id)))
     if (!order) return NextResponse.json({ error: "Lending record not found" }, { status: 404 });
 
     const { due_date, return_date, status, mentor, quantity, original_quantity, product_id } = body;
 
     if (product_id !== undefined && quantity !== undefined) {
-      const { data: currentItem } = await supabase
-        .from("lending_item")
-        .select("quantity")
-        .eq("lend_order_id", id)
-        .eq("product_id", product_id)
-        .single();
+      const [currentItem] = await db.select({ quantity: lending_item.quantity }).from(lending_item).where(and(eq(lending_item.lend_order_id, id), eq(lending_item.product_id, product_id)))
 
       const previousOutstanding = currentItem?.quantity ?? 0;
       const nowReturning = previousOutstanding - quantity;
 
-      const { error: itemError } = await supabase
-        .from("lending_item")
-        .update({ quantity })
-        .eq("lend_order_id", id)
-        .eq("product_id", product_id);
-
-      if (itemError) return NextResponse.json({ error: itemError.message }, { status: 500 });
+      await db.update(lending_item).set({ quantity }).where(and(eq(lending_item.lend_order_id, id), eq(lending_item.product_id, product_id)))
 
       if (nowReturning > 0) {
-        const { data: currentStock } = await supabase.from("stocks").select("quantity").eq("product_id", product_id).single();
-        if (currentStock) {
-          await supabase.from("stocks").update({ quantity: (currentStock.quantity || 0) + nowReturning }).eq("product_id", product_id);
-        }
+        await db.update(stocks).set({ quantity: sql`${stocks.quantity} + ${nowReturning}` }).where(eq(stocks.product_id, product_id))
       }
 
-      const { data: allItems } = await supabase
-        .from("lending_item")
-        .select("quantity, damaged_quantity, lost_quantity")
-        .eq("lend_order_id", id);
+      const allItems = await db.select({ quantity: lending_item.quantity, damaged_quantity: lending_item.damaged_quantity, lost_quantity: lending_item.lost_quantity }).from(lending_item).where(eq(lending_item.lend_order_id, id))
 
-      const totalOutstanding = (allItems || []).reduce((sum: number, item: any) => sum + (item.quantity || 0), 0);
-      const anyDamaged = (allItems || []).some((item: any) => (item.damaged_quantity || 0) > 0);
-      const anyLost = (allItems || []).some((item: any) => (item.lost_quantity || 0) > 0);
+      const totalOutstanding = allItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
+      const anyDamaged = allItems.some((item) => (item.damaged_quantity || 0) > 0);
+      const anyLost = allItems.some((item) => (item.lost_quantity || 0) > 0);
 
       let orderStatus: string;
-      const orderUpdate: any = {};
+      const orderUpdate: Partial<typeof lending_order.$inferInsert> = {};
 
       if (totalOutstanding > 0) {
-        const { data: currentOrder } = await supabase.from("lending_order").select("status").eq("lending_order_id", id).single();
+        const [currentOrder] = await db.select({ status: lending_order.status }).from(lending_order).where(eq(lending_order.lending_order_id, id))
         const curStatus = currentOrder?.status || "PENDING";
         if (curStatus === "PARTIALLY_DAMAGED" || curStatus === "DAMAGED") orderStatus = "PARTIALLY_DAMAGED";
         else if (curStatus === "PARTIALLY_LOST") orderStatus = "PARTIALLY_LOST";
@@ -131,30 +85,33 @@ export async function PUT(
         if (return_date) orderUpdate.return_date = return_date;
       }
 
-      orderUpdate.status = orderStatus;
-      await supabase.from("lending_order").update(orderUpdate).eq("lending_order_id", id);
+      orderUpdate.status = orderStatus as typeof lending_order.$inferInsert.status;
+      await db.update(lending_order).set(orderUpdate).where(eq(lending_order.lending_order_id, id));
 
       return NextResponse.json({ success: true });
     }
 
-    const orderUpdate: any = {};
+    const orderUpdate: Partial<typeof lending_order.$inferInsert> = {};
     if (due_date !== undefined) orderUpdate.due_date = due_date;
     if (return_date !== undefined) orderUpdate.return_date = return_date;
     if (status !== undefined) orderUpdate.status = status;
-    if (mentor !== undefined) orderUpdate.mentor = mentor;
+    // Bug fix: this used to write `orderUpdate.mentor`, a column that
+    // doesn't exist — mentor reassignment silently never persisted. The
+    // real column is mentor_staff_id.
+    if (mentor !== undefined) orderUpdate.mentor_staff_id = mentor;
 
     if (Object.keys(orderUpdate).length > 0) {
-      await supabase.from("lending_order").update(orderUpdate).eq("lending_order_id", id);
+      await db.update(lending_order).set(orderUpdate).where(eq(lending_order.lending_order_id, id));
     }
 
     if (quantity !== undefined) {
-      const itemUpdate: any = { quantity };
+      const itemUpdate: Partial<typeof lending_item.$inferInsert> = { quantity };
       if (original_quantity !== undefined) itemUpdate.original_quantity = original_quantity;
-      await supabase.from("lending_item").update(itemUpdate).eq("lend_order_id", id);
+      await db.update(lending_item).set(itemUpdate).where(eq(lending_item.lend_order_id, id));
     }
 
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Failed to update lending record" }, { status: 500 });
   }
 }
