@@ -1,52 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSupabaseAdmin } from '@/lib/supabaseServer'
+import { and, eq, gte, inArray } from 'drizzle-orm'
+import { db } from '@/db/client'
+import { lending_order, lending_item, products } from '@/db/schema'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 
 export const dynamic = 'force-dynamic'
+
+function getStartDate(period: string): Date {
+  const now = new Date()
+  const startDate = new Date()
+  switch (period.toLowerCase()) {
+    case 'daily': startDate.setDate(now.getDate() - 1); break
+    case 'weekly': startDate.setDate(now.getDate() - 7); break
+    case 'monthly': startDate.setMonth(now.getMonth() - 1); break
+    case 'yearly': startDate.setFullYear(now.getFullYear() - 1); break
+  }
+  return startDate
+}
 
 export async function GET(req: NextRequest) {
   const user = await getAuthUser(req)
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabaseAdmin = getSupabaseAdmin()
     const { searchParams } = new URL(req.url)
     const period = searchParams.get('period') || 'monthly'
+    const startDate = getStartDate(period)
 
-    const now = new Date()
-    const startDate = new Date()
-    switch (period.toLowerCase()) {
-      case 'daily':   startDate.setDate(now.getDate() - 1); break
-      case 'weekly':  startDate.setDate(now.getDate() - 7); break
-      case 'monthly': startDate.setMonth(now.getMonth() - 1); break
-      case 'yearly':  startDate.setFullYear(now.getFullYear() - 1); break
-    }
+    const orders = await db
+      .select({ lending_order_id: lending_order.lending_order_id })
+      .from(lending_order)
+      .where(and(eq(lending_order.issued_by_user_id, user.user_id), gte(lending_order.created_at, startDate)))
 
-    const { data: orders, error: ordersError } = await supabaseAdmin
-      .from('lending_order')
-      .select('lending_order_id')
-      .eq('issued_by_user_id', user.user_id)
-      .gte('created_at', startDate.toISOString())
-
-    if (ordersError) {
-      return NextResponse.json({ error: ordersError.message }, { status: 500 })
-    }
-
-    const orderIds = (orders || []).map((o: any) => o.lending_order_id)
+    const orderIds = orders.map((o) => o.lending_order_id)
     if (orderIds.length === 0) return NextResponse.json([])
 
-    const { data: lendingItems, error } = await supabaseAdmin
-      .from('lending_item')
-      .select('quantity, original_quantity, product_id, products (product_name)')
-      .in('lend_order_id', orderIds)
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    const lendingItems = await db
+      .select({
+        quantity: lending_item.quantity,
+        original_quantity: lending_item.original_quantity,
+        product_id: lending_item.product_id,
+        products: { product_name: products.product_name },
+      })
+      .from(lending_item)
+      .leftJoin(products, eq(products.product_id, lending_item.product_id))
+      .where(inArray(lending_item.lend_order_id, orderIds))
 
     const productTotals = new Map<string, { product_name: string; total_lent: number }>()
 
-    lendingItems?.forEach((item: any) => {
+    for (const item of lendingItems) {
       const productId = item.product_id
       const productName = item.products?.product_name || 'Unknown Product'
       const qty = item.original_quantity ?? item.quantity ?? 0
@@ -56,14 +58,14 @@ export async function GET(req: NextRequest) {
       } else {
         productTotals.set(productId, { product_name: productName, total_lent: qty })
       }
-    })
+    }
 
     const sorted = Array.from(productTotals.entries())
       .map(([product_id, data]) => ({ product_id, product_name: data.product_name, total_lent: data.total_lent }))
       .sort((a, b) => b.total_lent - a.total_lent)
 
     return NextResponse.json(sorted)
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 })
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal Server Error' }, { status: 500 })
   }
 }
