@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import { desc, eq } from "drizzle-orm";
+import { db } from "@/db/client";
+import { purchase_invoice } from "@/db/schema";
 import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 
 export async function GET(request: NextRequest) {
@@ -7,21 +9,21 @@ export async function GET(request: NextRequest) {
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabase = getSupabaseAdmin();
-
-    // Invoice numbers are per-user sequences
-    const { data } = await supabase
-      .from("purchase_invoice")
-      .select("invoice_number")
-      .eq("user_id", user.user_id)
-      .order("created_at", { ascending: false })
+    // Invoice numbers are per-user sequences — this is a pure preview (no
+    // mutation): it reads the user's most recent invoice number and
+    // computes what the next one would be. The actual number is only
+    // persisted when the client submits POST /api/invoices.
+    const [last] = await db
+      .select({ invoice_number: purchase_invoice.invoice_number })
+      .from(purchase_invoice)
+      .where(eq(purchase_invoice.user_id, user.user_id))
+      .orderBy(desc(purchase_invoice.created_at))
       .limit(1)
-      .maybeSingle();
 
     let nextInvoiceNo = "INV001";
 
-    if (data?.invoice_number) {
-      const match = data.invoice_number.match(/INV(\d+)/);
+    if (last?.invoice_number) {
+      const match = last.invoice_number.match(/INV(\d+)/);
       if (match) {
         const lastNumber = parseInt(match[1], 10);
         nextInvoiceNo = `INV${String(lastNumber + 1).padStart(3, '0')}`;

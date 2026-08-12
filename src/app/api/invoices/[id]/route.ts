@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import { and, eq, sql } from "drizzle-orm";
+import { db } from "@/db/client";
+import { purchase_invoice, purchase_invoice_item, products, stocks } from "@/db/schema";
 import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 
 export async function GET(
@@ -10,28 +12,24 @@ export async function GET(
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabase = getSupabaseAdmin();
     const { id: invoiceId } = await params;
 
-    const { data: invoice, error: invoiceError } = await supabase
-      .from("purchase_invoice")
-      .select("*")
-      .eq("invoice_id", invoiceId)
-      .eq("user_id", user.user_id)
-      .single();
-
-    if (invoiceError || !invoice) {
+    const [invoice] = await db.select().from(purchase_invoice).where(and(eq(purchase_invoice.invoice_id, invoiceId), eq(purchase_invoice.user_id, user.user_id)))
+    if (!invoice) {
       return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     }
 
-    const { data: items, error: itemsError } = await supabase
-      .from("purchase_invoice_item")
-      .select(`*, products (product_name)`)
-      .eq("invoice_id", invoiceId);
-
-    if (itemsError) {
-      return NextResponse.json({ error: itemsError.message }, { status: 500 });
-    }
+    const items = await db
+      .select({
+        product_name: purchase_invoice_item.product_name,
+        quantity: purchase_invoice_item.quantity,
+        unit_cost: purchase_invoice_item.unit_cost,
+        total_cost: purchase_invoice_item.total_cost,
+        products: { product_name: products.product_name },
+      })
+      .from(purchase_invoice_item)
+      .leftJoin(products, eq(products.product_id, purchase_invoice_item.product_id))
+      .where(eq(purchase_invoice_item.invoice_id, invoiceId))
 
     return NextResponse.json({
       invoice_id: invoice.invoice_id,
@@ -40,15 +38,15 @@ export async function GET(
       received_date: invoice.received_date,
       created_at: invoice.created_at,
       total_amount: invoice.total_amount,
-      items: (items || []).map((item: any) => ({
+      items: items.map((item) => ({
         product_name: item.products?.product_name || item.product_name || "Unknown Product",
         quantity: item.quantity,
         unit_cost: item.unit_cost,
         total_cost: item.total_cost,
       })),
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Internal Server Error' }, { status: 500 });
   }
 }
 
@@ -60,56 +58,27 @@ export async function DELETE(
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabase = getSupabaseAdmin();
     const { id: invoiceId } = await params;
 
-    // Verify ownership before deleting
-    const { data: invoice } = await supabase
-      .from("purchase_invoice")
-      .select("invoice_id")
-      .eq("invoice_id", invoiceId)
-      .eq("user_id", user.user_id)
-      .single();
-
+    const [invoice] = await db.select({ invoice_id: purchase_invoice.invoice_id }).from(purchase_invoice).where(and(eq(purchase_invoice.invoice_id, invoiceId), eq(purchase_invoice.user_id, user.user_id)))
     if (!invoice) {
       return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     }
 
-    const { data: items } = await supabase
-      .from("purchase_invoice_item")
-      .select("product_id, quantity")
-      .eq("invoice_id", invoiceId);
+    await db.transaction(async (tx) => {
+      const items = await tx.select({ product_id: purchase_invoice_item.product_id, quantity: purchase_invoice_item.quantity }).from(purchase_invoice_item).where(eq(purchase_invoice_item.invoice_id, invoiceId))
 
-    if (items && items.length > 0) {
       for (const item of items) {
-        if (!item.product_id) continue;
-        const { data: stockData } = await supabase
-          .from("stocks")
-          .select("quantity")
-          .eq("product_id", item.product_id)
-          .single();
-        if (stockData) {
-          await supabase
-            .from("stocks")
-            .update({ quantity: Math.max(0, stockData.quantity - item.quantity) })
-            .eq("product_id", item.product_id);
-        }
+        if (!item.product_id) continue
+        await tx.update(stocks).set({ quantity: sql`GREATEST(0, ${stocks.quantity} - ${item.quantity})` }).where(eq(stocks.product_id, item.product_id))
       }
-    }
 
-    await supabase.from("purchase_invoice_item").delete().eq("invoice_id", invoiceId);
-
-    const { error } = await supabase
-      .from("purchase_invoice")
-      .delete()
-      .eq("invoice_id", invoiceId);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+      await tx.delete(purchase_invoice_item).where(eq(purchase_invoice_item.invoice_id, invoiceId))
+      await tx.delete(purchase_invoice).where(eq(purchase_invoice.invoice_id, invoiceId))
+    })
 
     return NextResponse.json({ message: "Invoice deleted successfully" });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Internal Server Error' }, { status: 500 });
   }
 }
