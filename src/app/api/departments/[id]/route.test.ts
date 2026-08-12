@@ -27,7 +27,7 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
 }
 
 afterAll(async () => {
-  await db.delete(departments).where(like(departments.department_name, "Test Dept%"));
+  await db.delete(departments).where(like(departments.department_name, "QaDeptItem%"));
 });
 
 beforeEach(() => {
@@ -45,19 +45,19 @@ describe("PUT /api/departments/[id]", () => {
   });
 
   it("renames an existing department", async () => {
-    const [dept] = await db.insert(departments).values({ department_name: "Test Dept Before" }).returning();
+    const [dept] = await db.insert(departments).values({ department_name: "QaDeptItem Before" }).returning();
     mockGetAuthUser.mockResolvedValue(authedUser());
 
     const res = await PUT(
       new NextRequest(`http://localhost/api/departments/${dept.department_id}`, {
         method: "PUT",
-        body: JSON.stringify({ department_name: "Test Dept After" }),
+        body: JSON.stringify({ department_name: "QaDeptItem After" }),
       }),
       { params: Promise.resolve({ id: dept.department_id }) },
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { department_name: string };
-    expect(body.department_name).toBe("Test Dept After");
+    expect(body.department_name).toBe("QaDeptItem After");
   });
 
   it("returns 404 for a nonexistent department", async () => {
@@ -72,7 +72,7 @@ describe("PUT /api/departments/[id]", () => {
 
 describe("DELETE /api/departments/[id]", () => {
   it("deletes an existing department", async () => {
-    const [dept] = await db.insert(departments).values({ department_name: "Test Dept ToDelete" }).returning();
+    const [dept] = await db.insert(departments).values({ department_name: "QaDeptItem ToDelete" }).returning();
     mockGetAuthUser.mockResolvedValue(authedUser());
 
     const res = await DELETE(new NextRequest(`http://localhost/api/departments/${dept.department_id}`, { method: "DELETE" }), {

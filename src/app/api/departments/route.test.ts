@@ -27,7 +27,7 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
 }
 
 afterAll(async () => {
-  await db.delete(departments).where(like(departments.department_name, "Test Dept%"));
+  await db.delete(departments).where(like(departments.department_name, "QaDeptList%"));
 });
 
 beforeEach(() => {
@@ -43,11 +43,11 @@ describe("GET /api/departments", () => {
 
   it("returns departments ordered by name for any authenticated role", async () => {
     mockGetAuthUser.mockResolvedValue(authedUser({ role: "user" }));
-    await db.insert(departments).values({ department_name: "Test Dept Z" });
+    await db.insert(departments).values({ department_name: "QaDeptList Z" });
     const res = await GET(new NextRequest("http://localhost/api/departments"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Array<{ department_name: string }>;
-    expect(body.some((d) => d.department_name === "Test Dept Z")).toBe(true);
+    expect(body.some((d) => d.department_name === "QaDeptList Z")).toBe(true);
   });
 });
 
@@ -55,7 +55,7 @@ describe("POST /api/departments", () => {
   it("returns 403 for a non-super_admin user", async () => {
     mockGetAuthUser.mockResolvedValue(authedUser({ role: "user" }));
     const res = await POST(
-      new NextRequest("http://localhost/api/departments", { method: "POST", body: JSON.stringify({ department_name: "Test Dept A" }) }),
+      new NextRequest("http://localhost/api/departments", { method: "POST", body: JSON.stringify({ department_name: "QaDeptList A" }) }),
     );
     expect(res.status).toBe(403);
   });
@@ -65,11 +65,11 @@ describe("POST /api/departments", () => {
     const res = await POST(
       new NextRequest("http://localhost/api/departments", {
         method: "POST",
-        body: JSON.stringify({ department_name: "Test Dept New" }),
+        body: JSON.stringify({ department_name: "QaDeptList New" }),
       }),
     );
     expect(res.status).toBe(201);
     const body = (await res.json()) as { department_name: string };
-    expect(body.department_name).toBe("Test Dept New");
+    expect(body.department_name).toBe("QaDeptList New");
   });
 });
