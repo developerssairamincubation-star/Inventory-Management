@@ -1,9 +1,12 @@
 import { NextRequest } from 'next/server'
-import { getSupabaseAdmin } from '@/lib/supabaseServer'
-import { updateFirebaseUser } from '@/lib/firebaseAdmin'
+import { eq, sql } from 'drizzle-orm'
+import { db } from '@/db/client'
+import { users } from '@/db/schema'
 import { getAuthUser, unauthorizedResponse, forbiddenResponse } from '@/lib/authMiddleware'
 import { ok, fromError } from '@/lib/api/response'
 import { ApiError } from '@/lib/api/errors'
+
+const PROFILE_COLUMNS = { user_id: users.user_id, email: users.email, full_name: users.full_name, role: users.role, is_active: users.is_active, created_at: users.created_at }
 
 export async function GET(
   req: NextRequest,
@@ -15,15 +18,10 @@ export async function GET(
 
   try {
     const { id } = await params
-    const supabase = getSupabaseAdmin()
-    const { data, error } = await supabase
-      .from('users')
-      .select('user_id, email, full_name, role, is_active, created_at')
-      .eq('user_id', id)
-      .single()
+    const [row] = await db.select(PROFILE_COLUMNS).from(users).where(eq(users.user_id, id))
 
-    if (error || !data) throw new ApiError(404, 'NOT_FOUND', 'User not found')
-    return ok(data)
+    if (!row) throw new ApiError(404, 'NOT_FOUND', 'User not found')
+    return ok(row)
   } catch (error) {
     return fromError(error)
   }
@@ -42,55 +40,22 @@ export async function PUT(
     const body = await req.json()
     const { full_name, role, is_active } = body
 
-    const supabase = getSupabaseAdmin()
+    const [target] = await db.select({ role: users.role }).from(users).where(eq(users.user_id, id))
+    if (!target) throw new ApiError(404, 'NOT_FOUND', 'User not found')
 
-    // Fetch target user for firebase_uid
-    const { data: target, error: fetchError } = await supabase
-      .from('users')
-      .select('firebase_uid, role')
-      .eq('user_id', id)
-      .single()
-
-    if (fetchError || !target) throw new ApiError(404, 'NOT_FOUND', 'User not found')
-
-    // Prevent demoting the only super admin
     if (role === 'user' && target.role === 'super_admin') {
-      const { count } = await supabase
-        .from('users')
-        .select('user_id', { count: 'exact', head: true })
-        .eq('role', 'super_admin')
-      if ((count || 0) <= 1) {
+      const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(users).where(eq(users.role, 'super_admin'))
+      if (count <= 1) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Cannot demote the only super admin')
       }
     }
 
-    const updateData: Record<string, unknown> = {}
+    const updateData: Partial<typeof users.$inferInsert> = {}
     if (full_name !== undefined) updateData.full_name = full_name
     if (role !== undefined) updateData.role = role
     if (is_active !== undefined) updateData.is_active = is_active
 
-    const { data: updated, error: updateError } = await supabase
-      .from('users')
-      .update(updateData)
-      .eq('user_id', id)
-      .select('user_id, email, full_name, role, is_active, created_at')
-      .single()
-
-    if (updateError) throw new ApiError(500, 'DATABASE_ERROR', updateError.message)
-
-    // Sync display name to Firebase if changed
-    if (full_name !== undefined && target.firebase_uid) {
-      try {
-        await updateFirebaseUser(target.firebase_uid, { displayName: full_name })
-      } catch { /* non-critical */ }
-    }
-
-    // Disable/enable Firebase account if is_active changed
-    if (is_active !== undefined && target.firebase_uid) {
-      try {
-        await updateFirebaseUser(target.firebase_uid, { disabled: !is_active })
-      } catch { /* non-critical */ }
-    }
+    const [updated] = await db.update(users).set(updateData).where(eq(users.user_id, id)).returning(PROFILE_COLUMNS)
 
     return ok(updated)
   } catch (error) {
