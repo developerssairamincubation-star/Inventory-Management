@@ -1,24 +1,25 @@
 // Mirrors db/migrations/V10__reporting_views.sql. `.existing()` tells
 // Drizzle these views are created externally (by Flyway) and should never
-// be created/dropped by anything in this codebase.
+// be created/dropped by anything in this codebase. Field names are
+// snake_case to match DB columns 1:1 — see departments.ts for why.
 import { pgView, uuid, varchar, integer, bigint } from "drizzle-orm/pg-core";
 import { lendingItemStatusEnum } from "./enums";
 
-export const vwLowStock = pgView("vw_low_stock", {
-  productId: uuid("product_id"),
-  productName: varchar("product_name", { length: 250 }),
+export const vw_low_stock = pgView("vw_low_stock", {
+  product_id: uuid("product_id"),
+  product_name: varchar("product_name", { length: 250 }),
   quantity: integer("quantity"),
-  lowStockThreshold: integer("low_stock_threshold"),
+  low_stock_threshold: integer("low_stock_threshold"),
   deficit: integer("deficit"),
 }).existing();
 
-export const vwTopLendingProducts = pgView("vw_top_lending_products", {
-  productId: uuid("product_id"),
-  productName: varchar("product_name", { length: 250 }),
-  totalIssued: bigint("total_issued", { mode: "number" }),
+export const vw_top_lending_products = pgView("vw_top_lending_products", {
+  product_id: uuid("product_id"),
+  product_name: varchar("product_name", { length: 250 }),
+  total_issued: bigint("total_issued", { mode: "number" }),
 }).existing();
 
-export const vwLendingStatusDistribution = pgView("vw_lending_status_distribution", {
+export const vw_lending_status_distribution = pgView("vw_lending_status_distribution", {
   status: lendingItemStatusEnum("status"),
   count: bigint("count", { mode: "number" }),
 }).existing();

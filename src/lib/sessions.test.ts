@@ -1,5 +1,5 @@
 // Integration test against the real inventory_test Postgres database (not
-// mocks) — schema correctness (FK to users, rotation chain via replacedBy)
+// mocks) — schema correctness (FK to users, rotation chain via replaced_by)
 // is exactly what this migration needs to get right.
 import { describe, it, expect, afterAll } from "vitest";
 import { eq, like } from "drizzle-orm";
@@ -12,8 +12,8 @@ async function makeTestUser(label: string) {
     .insert(users)
     .values({
       email: `sessions-test-${label}-${Date.now()}@example.com`,
-      passwordHash: "irrelevant-for-this-test",
-      fullName: "Session Test User",
+      password_hash: "irrelevant-for-this-test",
+      full_name: "Session Test User",
     })
     .returning();
   return user;
@@ -27,44 +27,44 @@ afterAll(async () => {
 describe("sessions (refresh-token issuance, rotation, reuse detection)", () => {
   it("creates a session row whose hash matches the issued raw token", async () => {
     const user = await makeTestUser("create");
-    const issued = await createSession(testDb, user.userId);
+    const issued = await createSession(testDb, user.user_id);
 
-    const [row] = await testDb.select().from(sessions).where(eq(sessions.sessionId, issued.sessionId));
-    expect(row.userId).toBe(user.userId);
-    expect(row.revokedAt).toBeNull();
-    expect(row.tokenHash).not.toEqual(issued.rawToken);
+    const [row] = await testDb.select().from(sessions).where(eq(sessions.session_id, issued.sessionId));
+    expect(row.user_id).toBe(user.user_id);
+    expect(row.revoked_at).toBeNull();
+    expect(row.token_hash).not.toEqual(issued.rawToken);
   });
 
-  it("rotates a valid session: old row revoked + replacedBy set, new token issued", async () => {
+  it("rotates a valid session: old row revoked + replaced_by set, new token issued", async () => {
     const user = await makeTestUser("rotate");
-    const first = await createSession(testDb, user.userId);
+    const first = await createSession(testDb, user.user_id);
 
     const result = await rotateSession(testDb, first.rawToken);
     expect(result.status).toBe("rotated");
     if (result.status !== "rotated") throw new Error("unreachable");
     expect(result.rawToken).not.toEqual(first.rawToken);
 
-    const [oldRow] = await testDb.select().from(sessions).where(eq(sessions.sessionId, first.sessionId));
-    expect(oldRow.revokedAt).not.toBeNull();
-    expect(oldRow.replacedBy).toBe(result.sessionId);
+    const [oldRow] = await testDb.select().from(sessions).where(eq(sessions.session_id, first.sessionId));
+    expect(oldRow.revoked_at).not.toBeNull();
+    expect(oldRow.replaced_by).toBe(result.sessionId);
   });
 
   it("treats reuse of an already-rotated token as theft and revokes every session for that user", async () => {
     const user = await makeTestUser("reuse");
-    const first = await createSession(testDb, user.userId);
-    const second = await createSession(testDb, user.userId);
+    const first = await createSession(testDb, user.user_id);
+    const second = await createSession(testDb, user.user_id);
     await rotateSession(testDb, first.rawToken); // rotates `first` away
 
     const reuseResult = await rotateSession(testDb, first.rawToken); // present the now-stale token again
     expect(reuseResult.status).toBe("reused");
 
-    const [secondRow] = await testDb.select().from(sessions).where(eq(sessions.sessionId, second.sessionId));
-    expect(secondRow.revokedAt).not.toBeNull(); // collateral session for the same user also revoked
+    const [secondRow] = await testDb.select().from(sessions).where(eq(sessions.session_id, second.sessionId));
+    expect(secondRow.revoked_at).not.toBeNull(); // collateral session for the same user also revoked
   });
 
   it("returns invalid (not reused) for a token that was explicitly logged out, never rotated", async () => {
     const user = await makeTestUser("logout");
-    const issued = await createSession(testDb, user.userId);
+    const issued = await createSession(testDb, user.user_id);
     await revokeSession(testDb, issued.rawToken);
 
     const result = await rotateSession(testDb, issued.rawToken);
@@ -73,8 +73,8 @@ describe("sessions (refresh-token issuance, rotation, reuse detection)", () => {
 
   it("returns invalid for an expired session", async () => {
     const user = await makeTestUser("expired");
-    const issued = await createSession(testDb, user.userId);
-    await testDb.update(sessions).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(sessions.sessionId, issued.sessionId));
+    const issued = await createSession(testDb, user.user_id);
+    await testDb.update(sessions).set({ expires_at: new Date(Date.now() - 1000) }).where(eq(sessions.session_id, issued.sessionId));
 
     const result = await rotateSession(testDb, issued.rawToken);
     expect(result.status).toBe("invalid");

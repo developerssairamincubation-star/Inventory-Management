@@ -1,14 +1,15 @@
 // Mirrors db/migrations/V7__billing_tables.sql (invoice_documents). Not yet
-// queried by any route (kept for parity with the original schema).
+// queried by any route (kept for parity with the original schema). Field
+// names are snake_case to match DB columns 1:1 — see departments.ts for why.
 import { pgTable, uuid, text, timestamp } from "drizzle-orm/pg-core";
-import { purchaseInvoice } from "./purchaseInvoice";
+import { purchase_invoice } from "./purchaseInvoice";
 import { users } from "./users";
 
-export const invoiceDocuments = pgTable("invoice_documents", {
-  docId: uuid("doc_id").primaryKey().defaultRandom(),
-  invoiceId: uuid("invoice_id").notNull().references(() => purchaseInvoice.invoiceId, { onDelete: "cascade" }),
-  fileUrl: text("file_url").notNull(),
-  uploadedByUserId: uuid("uploaded_by_user_id").references(() => users.userId, { onDelete: "set null" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+export const invoice_documents = pgTable("invoice_documents", {
+  doc_id: uuid("doc_id").primaryKey().defaultRandom(),
+  invoice_id: uuid("invoice_id").notNull().references(() => purchase_invoice.invoice_id, { onDelete: "cascade" }),
+  file_url: text("file_url").notNull(),
+  uploaded_by_user_id: uuid("uploaded_by_user_id").references(() => users.user_id, { onDelete: "set null" }),
+  created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

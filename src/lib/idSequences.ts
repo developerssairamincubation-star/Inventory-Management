@@ -3,20 +3,19 @@
 // (STICxxx) and invoice_number (INVxxx). A single UPDATE...RETURNING locks
 // the row for the statement's duration, serializing concurrent callers —
 // no separate SELECT ... FOR UPDATE needed.
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import type { db as DbType } from "@/db/client";
-import { idSequences } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { id_sequences } from "@/db/schema";
 
 export type SequenceKey = "product_code" | "invoice_number";
 
 export async function allocateNextCode(db: typeof DbType, key: SequenceKey): Promise<string> {
   const [row] = await db
-    .update(idSequences)
-    .set({ currentValue: sql`${idSequences.currentValue} + 1` })
-    .where(eq(idSequences.sequenceKey, key))
+    .update(id_sequences)
+    .set({ current_value: sql`${id_sequences.current_value} + 1` })
+    .where(eq(id_sequences.sequence_key, key))
     .returning({
-      code: sql<string>`${idSequences.prefix} || lpad(${idSequences.currentValue}::text, ${idSequences.padWidth}, '0')`,
+      code: sql<string>`${id_sequences.prefix} || lpad(${id_sequences.current_value}::text, ${id_sequences.pad_width}, '0')`,
     });
 
   if (!row) {

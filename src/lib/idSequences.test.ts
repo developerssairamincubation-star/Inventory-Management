@@ -4,14 +4,14 @@
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
 import { testDb } from "@/db/testClient";
-import { idSequences } from "@/db/schema";
+import { id_sequences } from "@/db/schema";
 import { allocateNextCode } from "./idSequences";
 
 describe("idSequences", () => {
   it("allocates a formatted, incrementing code", async () => {
-    const [before] = await testDb.select().from(idSequences).where(eq(idSequences.sequenceKey, "product_code"));
+    const [before] = await testDb.select().from(id_sequences).where(eq(id_sequences.sequence_key, "product_code"));
     const code = await allocateNextCode(testDb, "product_code");
-    expect(code).toBe(`STIC${String(before.currentValue + 1).padStart(3, "0")}`);
+    expect(code).toBe(`STIC${String(before.current_value + 1).padStart(3, "0")}`);
   });
 
   it("never allocates the same code twice under concurrent callers", async () => {
