@@ -1,107 +1,90 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import { NextRequest } from "next/server";
+import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { db } from "@/db/client";
+import { lending_order, lending_item, staffs, departments, products } from "@/db/schema";
+import { getPeriod, getStartDateByPeriod } from '@/lib/api/request'
+import { fromError, ok } from '@/lib/api/response'
 import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 
-export async function GET(req: NextRequest) {
-  const user = await getAuthUser(req)
+export async function GET(request: NextRequest) {
+  const user = await getAuthUser(request)
   if (!user) return unauthorizedResponse()
 
   try {
-    const supabase = getSupabaseAdmin();
-    const { searchParams } = new URL(req.url);
-    const period = searchParams.get("period") || "monthly";
+    const period = getPeriod(request.nextUrl.searchParams)
+    const startDate = getStartDateByPeriod(period)
 
-    const now = new Date();
-    let startDate = new Date();
-    switch (period.toLowerCase()) {
-      case "daily":   startDate.setDate(now.getDate() - 1); break;
-      case "weekly":  startDate.setDate(now.getDate() - 7); break;
-      case "monthly": startDate.setMonth(now.getMonth() - 1); break;
-      case "yearly":  startDate.setFullYear(now.getFullYear() - 1); break;
+    const orders = await db
+      .select()
+      .from(lending_order)
+      .where(
+        and(
+          eq(lending_order.borrower_type, 'STAFF'),
+          eq(lending_order.issued_by_user_id, user.user_id),
+          gte(lending_order.created_at, startDate),
+        ),
+      )
+      .orderBy(desc(lending_order.created_at))
+
+    if (orders.length === 0) {
+      return ok({ records: [], stats: { totalBorrowed: 0, returned: 0, pending: 0 } })
     }
 
-    const { data: orders, error: ordersError } = await supabase
-      .from("lending_order")
-      .select("*")
-      .eq("borrower_type", "STAFF")
-      .eq("issued_by_user_id", user.user_id)
-      .gte("created_at", startDate.toISOString())
-      .order("created_at", { ascending: false });
+    const orderIds = orders.map((o) => o.lending_order_id)
+    const items = await db.select().from(lending_item).where(inArray(lending_item.lend_order_id, orderIds))
 
-    if (ordersError) {
-      return NextResponse.json({ error: ordersError.message }, { status: 500 });
+    const itemsMap = new Map<string, typeof items>()
+    for (const item of items) {
+      if (!itemsMap.has(item.lend_order_id)) itemsMap.set(item.lend_order_id, [])
+      itemsMap.get(item.lend_order_id)!.push(item)
     }
 
-    if (!orders || orders.length === 0) {
-      return NextResponse.json({ records: [], stats: { totalBorrowed: 0, returned: 0, pending: 0 } });
+    const staffIds = new Set<string>()
+    const mentorIds = new Set<string>()
+    const productIds = new Set<string>()
+
+    for (const order of orders) {
+      if (order.borrower_staff_id) staffIds.add(order.borrower_staff_id)
+      if (order.mentor_staff_id) mentorIds.add(order.mentor_staff_id)
+      for (const item of itemsMap.get(order.lending_order_id) || []) {
+        if (item.product_id) productIds.add(item.product_id)
+      }
     }
 
-    const orderIds = orders.map((o) => o.lending_order_id);
+    const staffsData = staffIds.size
+      ? await db
+          .select({
+            staff_id: staffs.staff_id,
+            name: staffs.name,
+            departments: { department_name: departments.department_name },
+          })
+          .from(staffs)
+          .leftJoin(departments, eq(departments.department_id, staffs.department_id))
+          .where(inArray(staffs.staff_id, Array.from(staffIds)))
+      : []
 
-    const { data: items, error: itemsError } = await supabase
-      .from("lending_item")
-      .select("*")
-      .in("lend_order_id", orderIds);
+    const mentorsData = mentorIds.size
+      ? await db.select({ staff_id: staffs.staff_id, name: staffs.name }).from(staffs).where(inArray(staffs.staff_id, Array.from(mentorIds)))
+      : []
 
-    if (itemsError) {
-      return NextResponse.json({ error: itemsError.message }, { status: 500 });
-    }
+    const productsData = productIds.size
+      ? await db
+          .select({ product_id: products.product_id, product_name: products.product_name })
+          .from(products)
+          .where(inArray(products.product_id, Array.from(productIds)))
+      : []
 
-    const itemsMap = new Map<string, any[]>();
-    (items || []).forEach((item) => {
-      const orderId = item.lend_order_id;
-      if (!itemsMap.has(orderId)) itemsMap.set(orderId, []);
-      itemsMap.get(orderId)!.push(item);
-    });
+    const staffsMap = new Map(staffsData.map((s) => [s.staff_id, { name: s.name, department_name: s.departments?.department_name || "—" }]))
+    const mentorsMap = new Map(mentorsData.map((m) => [m.staff_id, m.name]))
+    const productsMap = new Map(productsData.map((p) => [p.product_id, p.product_name]))
 
-    const staffIds = new Set<string>();
-    const mentorIds = new Set<string>();
-    const productIds = new Set<string>();
+    const records: Array<Record<string, unknown>> = []
+    for (const order of orders) {
+      const orderItems = itemsMap.get(order.lending_order_id) || []
+      const staffInfo = (order.borrower_staff_id && staffsMap.get(order.borrower_staff_id)) || { name: "—", department_name: "—" }
+      const mentorName = (order.mentor_staff_id && mentorsMap.get(order.mentor_staff_id)) || "—"
 
-    orders.forEach((order) => {
-      if (order.borrower_staff_id) staffIds.add(order.borrower_staff_id);
-      if (order.mentor_staff_id) mentorIds.add(order.mentor_staff_id);
-      (itemsMap.get(order.lending_order_id) || []).forEach((item) => {
-        if (item.product_id) productIds.add(item.product_id);
-      });
-    });
-
-    const { data: staffsData } = await supabase
-      .from("staffs")
-      .select("staff_id, name, department_id, departments(department_name)")
-      .in("staff_id", Array.from(staffIds));
-
-    const { data: mentorsData } = await supabase
-      .from("staffs")
-      .select("staff_id, name")
-      .in("staff_id", Array.from(mentorIds));
-
-    const { data: productsData } = await supabase
-      .from("products")
-      .select("product_id, product_name")
-      .in("product_id", Array.from(productIds));
-
-    const staffsMap = new Map(
-      (staffsData || []).map((s: any) => {
-        let deptName = "—";
-        if (s.departments) {
-          deptName = Array.isArray(s.departments)
-            ? s.departments[0]?.department_name || "—"
-            : s.departments.department_name || "—";
-        }
-        return [s.staff_id, { name: s.name, department_name: deptName }];
-      })
-    );
-    const mentorsMap = new Map((mentorsData || []).map((m: any) => [m.staff_id, m.name]));
-    const productsMap = new Map((productsData || []).map((p: any) => [p.product_id, p.product_name]));
-
-    const records: any[] = [];
-    orders.forEach((order) => {
-      const orderItems = itemsMap.get(order.lending_order_id) || [];
-      const staffInfo = staffsMap.get(order.borrower_staff_id) || { name: "—", department_name: "—" };
-      const mentorName = order.mentor_staff_id ? mentorsMap.get(order.mentor_staff_id) || "—" : "—";
-
-      orderItems.forEach((item) => {
+      for (const item of orderItems) {
         records.push({
           staff_id: order.borrower_staff_id,
           staff_name: staffInfo.name,
@@ -113,29 +96,31 @@ export async function GET(req: NextRequest) {
           damaged_quantity: item.damaged_quantity ?? 0,
           lost_quantity: item.lost_quantity ?? 0,
           borrow_date: order.created_at,
-          return_date: item.return_date || null,
+          // lending_item has no return_date column; this mirrors the
+          // original Supabase route, which always evaluated to null here too.
+          return_date: null,
           status: order.status,
           mobile: "—",
-        });
-      });
-    });
-
-    const borrowedStaffIds = new Set<string>();
-    const returnedStaffIds = new Set<string>();
-    const pendingStaffIds = new Set<string>();
-    orders.forEach((order) => {
-      if (order.borrower_staff_id) {
-        borrowedStaffIds.add(order.borrower_staff_id);
-        if (order.status === "RETURNED") returnedStaffIds.add(order.borrower_staff_id);
-        else if (order.status === "PENDING") pendingStaffIds.add(order.borrower_staff_id);
+        })
       }
-    });
+    }
 
-    return NextResponse.json({
+    const borrowedStaffIds = new Set<string>()
+    const returnedStaffIds = new Set<string>()
+    const pendingStaffIds = new Set<string>()
+    for (const order of orders) {
+      if (order.borrower_staff_id) {
+        borrowedStaffIds.add(order.borrower_staff_id)
+        if (order.status === "RETURNED") returnedStaffIds.add(order.borrower_staff_id)
+        else if (order.status === "PENDING") pendingStaffIds.add(order.borrower_staff_id)
+      }
+    }
+
+    return ok({
       records,
       stats: { totalBorrowed: borrowedStaffIds.size, returned: returnedStaffIds.size, pending: pendingStaffIds.size },
-    });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    })
+  } catch (error) {
+    return fromError(error)
   }
 }

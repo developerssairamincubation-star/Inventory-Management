@@ -1,5 +1,7 @@
 import { NextRequest } from 'next/server'
-import { getSupabaseAdmin } from '@/lib/supabaseServer'
+import { eq } from 'drizzle-orm'
+import { db } from '@/db/client'
+import { staffs, departments } from '@/db/schema'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 import { ok, fromError } from '@/lib/api/response'
 import { ApiError } from '@/lib/api/errors'
@@ -14,7 +16,6 @@ export async function PUT(
   try {
     const { id } = await params
     const body = await req.json()
-    const supabase = getSupabaseAdmin()
 
     const updateData: Record<string, unknown> = {}
     if (body.name !== undefined) updateData.name = body.name
@@ -23,15 +24,27 @@ export async function PUT(
     if (body.email !== undefined) updateData.email = body.email
     if (body.phone_number !== undefined) updateData.phone_number = body.phone_number
 
-    const { data, error } = await supabase
-      .from('staffs')
-      .update(updateData)
-      .eq('staff_id', id)
-      .select('staff_id, name, employee_id, department_id, email, phone_number, departments(department_name)')
-      .single()
+    const [updated] = await db.update(staffs).set(updateData).where(eq(staffs.staff_id, id)).returning()
 
-    if (error) throw new ApiError(500, 'DATABASE_ERROR', error.message)
-    return ok(data)
+    if (!updated) {
+      throw new ApiError(404, 'NOT_FOUND', 'Staff not found')
+    }
+
+    const [row] = await db
+      .select({
+        staff_id: staffs.staff_id,
+        name: staffs.name,
+        department_id: staffs.department_id,
+        employee_id: staffs.employee_id,
+        email: staffs.email,
+        phone_number: staffs.phone_number,
+        departments: { department_name: departments.department_name },
+      })
+      .from(staffs)
+      .leftJoin(departments, eq(departments.department_id, staffs.department_id))
+      .where(eq(staffs.staff_id, id))
+
+    return ok(row)
   } catch (error) {
     return fromError(error)
   }
