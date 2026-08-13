@@ -1,8 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
-import { onAuthStateChanged, User } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 
 export type AppUser = {
   user_id: string;
@@ -12,94 +10,65 @@ export type AppUser = {
 };
 
 type UserContextValue = {
-  firebaseUser: User | null;
   appUser: AppUser | null;
   loading: boolean;
-  appUserLoading: boolean;
-  token: string | null;
   refetch: () => Promise<void>;
 };
 
 const UserContext = createContext<UserContextValue>({
-  firebaseUser: null,
   appUser: null,
   loading: true,
-  appUserLoading: false,
-  token: null,
   refetch: async () => {},
 });
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
-  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
-  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [appUserLoading, setAppUserLoading] = useState(false);
 
-  async function fetchAppUser(fbUser: User) {
-    setAppUserLoading(true);
+  const fetchAppUser = useCallback(async () => {
     try {
-      const idToken = await fbUser.getIdToken();
-      setToken(idToken);
-      const res = await fetch("/api/auth/me", {
-        headers: { Authorization: `Bearer ${idToken}` },
-      });
+      const res = await fetch("/api/auth/me", { credentials: "include" });
       if (res.ok) {
-        const data = await res.json();
-        setAppUser(data);
+        setAppUser(await res.json());
       } else {
         setAppUser(null);
       }
     } catch {
       setAppUser(null);
-    } finally {
-      setAppUserLoading(false);
     }
-  }
-
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (fbUser) => {
-      setLoading(true);
-      setFirebaseUser(fbUser);
-      if (fbUser) {
-        await fetchAppUser(fbUser);
-      } else {
-        setAppUser(null);
-        setToken(null);
-        setAppUserLoading(false);
-      }
-      setLoading(false);
-    });
-    return () => unsub();
   }, []);
 
-  async function refetch() {
-    if (firebaseUser) {
-      await fetchAppUser(firebaseUser);
-    }
-  }
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      await fetchAppUser();
+      setLoading(false);
+    })();
+  }, [fetchAppUser]);
 
-  return (
-    <UserContext.Provider value={{ firebaseUser, appUser, loading, appUserLoading, token, refetch }}>
-      {children}
-    </UserContext.Provider>
-  );
+  return <UserContext.Provider value={{ appUser, loading, refetch: fetchAppUser }}>{children}</UserContext.Provider>;
 }
 
 export function useUser() {
   return useContext(UserContext);
 }
 
-export function useToken(): string | null {
-  return useContext(UserContext).token;
+function readCsrfCookie(): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(/(?:^|; )csrf_token=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
-// Helper: returns a refreshed token and attaches it to fetch options
+/**
+ * fetch wrapper for authenticated API calls: sends cookies, attaches the
+ * CSRF header on mutating requests, and — since the access token cookie is
+ * only 15 minutes and we don't run a client-side refresh timer — silently
+ * calls /api/auth/refresh and retries once on a 401 before giving up. This
+ * replaces the old Firebase-SDK behavior where getIdToken() transparently
+ * refreshed a long-lived session; without equivalent retry logic here,
+ * users would see spurious auth failures every 15 minutes.
+ */
 export async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const fbUser = auth.currentUser;
-  if (!fbUser) throw new Error("Not authenticated");
-  const token = await fbUser.getIdToken();
-
   const headers = new Headers(init.headers);
   const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
 
@@ -107,10 +76,22 @@ export async function authFetch(url: string, init: RequestInit = {}): Promise<Re
     headers.set("Content-Type", "application/json");
   }
 
-  headers.set("Authorization", `Bearer ${token}`);
+  const method = (init.method || "GET").toUpperCase();
+  if (method !== "GET" && method !== "HEAD") {
+    const csrf = readCsrfCookie();
+    if (csrf) headers.set("X-CSRF-Token", csrf);
+  }
 
-  return fetch(url, {
-    ...init,
-    headers,
-  });
+  const doFetch = () => fetch(url, { ...init, headers, credentials: "include" });
+
+  let res = await doFetch();
+
+  if (res.status === 401 && url !== "/api/auth/refresh") {
+    const refreshRes = await fetch("/api/auth/refresh", { method: "POST", credentials: "include" });
+    if (refreshRes.ok) {
+      res = await doFetch();
+    }
+  }
+
+  return res;
 }

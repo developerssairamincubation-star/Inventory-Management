@@ -1,15 +1,15 @@
 "use client";
 
-import { sendPasswordResetEmail, signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Mail, LockKeyhole, Eye, EyeOff } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
+import { useUser } from "@/contexts/UserContext";
 import { useEffect, useRef } from "react";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { refetch } = useUser();
   const { showToast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -31,13 +31,27 @@ export default function LoginPage() {
   const login = async () => {
     setPressed(true);
     setTimeout(() => {
-    setPressed(false);       
+    setPressed(false);
     }, 200);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email, password }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error?.message || "Login failed. Please try again.");
+      }
+      // The UserContext only fetches /api/auth/me once on initial mount —
+      // with Firebase, onAuthStateChanged triggered this automatically on
+      // sign-in, but a plain cookie-setting fetch() has no equivalent
+      // listener, so it must be triggered explicitly before navigating.
+      await refetch();
       router.push("/dashboard");
-    } catch (err: any) {
-      showToast(err.message || "Login failed. Please try again.", "error");
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : "Login failed. Please try again.", "error");
     }
   };
 
@@ -51,10 +65,18 @@ export default function LoginPage() {
 
     setSendingReset(true);
     try {
-      await sendPasswordResetEmail(auth, trimmedEmail);
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmedEmail }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error?.message || "Failed to send reset email.");
+      }
       showToast("Password reset email sent. Please check your inbox.", "success");
-    } catch (err: any) {
-      showToast(err.message || "Failed to send reset email.", "error");
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : "Failed to send reset email.", "error");
     } finally {
       setSendingReset(false);
     }
@@ -80,7 +102,7 @@ export default function LoginPage() {
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3759C1] pointer-events-none">
               <Mail size={16} />
             </span>
-            <input 
+            <input
               className="bg-[#F1F7FF]
                 border
                 border-[#3759C1]
@@ -145,7 +167,7 @@ export default function LoginPage() {
             </button>
           </div>
 
-          <div className="relative"> 
+          <div className="relative">
             <button
               onClick={login}
               className={`bg-[#1D2937] text-[#F1F7FF] font-normal text-[18px] block mx-auto w-[100px] h-[40px] rounded-[10px] relative z-10
@@ -159,7 +181,7 @@ export default function LoginPage() {
               Login
             </button>
             <div className="block mx-auto w-[100px] h-[40px] rounded-[10px] shadow-[inset_0_0_0_7px_#1D2937] absolute top-0 left-0 right-0 bottom-0"></div>
-          </div> 
+          </div>
         </div>
       </div>
       <div className="w-[50%] bg-[#fff] pb-[50px] flex items-center justify-center">

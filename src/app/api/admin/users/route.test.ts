@@ -18,7 +18,6 @@ const mockGetAuthUser = vi.mocked(getAuthUser);
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
     user_id: "11111111-1111-1111-1111-111111111111",
-    firebase_uid: "fb-1",
     email: "admin@example.com",
     full_name: "Admin",
     role: "super_admin",

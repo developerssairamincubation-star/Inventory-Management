@@ -20,7 +20,6 @@ let BORROWER_ID: string;
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
     user_id: OWNER_ID,
-    firebase_uid: "fb-1",
     email: "user@example.com",
     full_name: "Test User",
     role: "user",

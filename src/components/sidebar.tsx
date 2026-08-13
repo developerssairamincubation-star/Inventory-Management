@@ -4,8 +4,6 @@ import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { signOut } from "firebase/auth";
-import { auth } from "@/lib/firebase";
 import { useUser } from "@/contexts/UserContext";
 import {
   LayoutDashboard,
@@ -47,7 +45,7 @@ export default function Sidebar() {
   const [hovered, setHovered] = useState<string | null>(null);
 
   const handleLogout = async () => {
-    await signOut(auth);
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     router.push("/login");
   };
 
