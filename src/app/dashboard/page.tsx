@@ -1,6 +1,7 @@
-﻿'use client'
+'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
 import { authFetch } from '@/contexts/UserContext'
 
@@ -71,74 +72,48 @@ const S = {
   }),
 }
 
+async function fetchJson<T>(url: string, errorMessage: string): Promise<T> {
+  const response = await authFetch(url)
+  if (!response.ok) throw new Error(errorMessage)
+  return response.json()
+}
+
 export default function Dashboard() {
-  const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [lowStockProducts, setLowStockProducts] = useState<LowStockProduct[]>([])
-  const [overdueAlerts, setOverdueAlerts] = useState<OverdueAlert[]>([])
   const [dismissedOverdue, setDismissedOverdue] = useState<Set<string>>(new Set())
-  const [topLentProducts, setTopLentProducts] = useState<TopLentProduct[]>([])
   const [topLentFilter, setTopLentFilter] = useState<string>('Monthly')
-  const [loading, setLoading] = useState(true)
   const [alertTab, setAlertTab] = useState<'low-stock' | 'overdue'>('low-stock')
+
+  // TanStack Query replaces 4 independent useEffect+useState fetches with
+  // cached, deduped queries — navigating back to the dashboard within the
+  // staleTime window (see QueryProvider) reuses cached data instead of
+  // re-fetching from scratch, and concurrent mounts dedupe automatically.
+  const statsQuery = useQuery({
+    queryKey: ['dashboard', 'stats'],
+    queryFn: () => fetchJson<DashboardStats>('/api/dashboard/stats', 'Failed to fetch stats'),
+  })
+  const lowStockQuery = useQuery({
+    queryKey: ['dashboard', 'low-stock'],
+    queryFn: () => fetchJson<LowStockProduct[]>('/api/dashboard/low-stock', 'Failed to fetch low stock products'),
+  })
+  const overdueQuery = useQuery({
+    queryKey: ['dashboard', 'overdue'],
+    queryFn: () => fetchJson<OverdueAlert[]>('/api/dashboard/overdue', 'Failed to fetch overdue alerts'),
+  })
+  const topLentQuery = useQuery({
+    queryKey: ['dashboard', 'top-lent', topLentFilter],
+    queryFn: () => fetchJson<TopLentProduct[]>(`/api/dashboard/top-lent?period=${topLentFilter.toLowerCase()}`, 'Failed to fetch top lent products'),
+  })
+
+  const stats = statsQuery.data ?? null
+  const lowStockProducts = lowStockQuery.data ?? []
+  const overdueAlerts = overdueQuery.data ?? []
+  const topLentProducts = topLentQuery.data ?? []
+  // Only the stats query gates the full-page loading state, matching the
+  // original: the other three resolve independently in the background.
+  const loading = statsQuery.isLoading
 
   const dismissOverdue = (id: string) => {
     setDismissedOverdue(prev => new Set(prev).add(id))
-  }
-
-  useEffect(() => {
-    fetchDashboardStats()
-    fetchLowStockProducts()
-    fetchOverdueAlerts()
-  }, [])
-
-  useEffect(() => {
-    fetchTopLentProducts(topLentFilter)
-  }, [topLentFilter])
-
-  const fetchDashboardStats = async () => {
-    try {
-      const response = await authFetch('/api/dashboard/stats')
-      if (!response.ok) throw new Error('Failed to fetch stats')
-      const data = await response.json()
-      setStats(data)
-    } catch (error) {
-      console.error('Error fetching dashboard stats:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchLowStockProducts = async () => {
-    try {
-      const response = await authFetch('/api/dashboard/low-stock')
-      if (!response.ok) throw new Error('Failed to fetch low stock products')
-      const data = await response.json()
-      setLowStockProducts(data)
-    } catch (error) {
-      console.error('Error fetching low stock products:', error)
-    }
-  }
-
-  const fetchOverdueAlerts = async () => {
-    try {
-      const response = await authFetch('/api/dashboard/overdue')
-      if (!response.ok) throw new Error('Failed to fetch overdue alerts')
-      const data = await response.json()
-      setOverdueAlerts(data)
-    } catch (error) {
-      console.error('Error fetching overdue alerts:', error)
-    }
-  }
-
-  const fetchTopLentProducts = async (period: string = 'Monthly') => {
-    try {
-      const response = await authFetch(`/api/dashboard/top-lent?period=${period.toLowerCase()}`)
-      if (!response.ok) throw new Error('Failed to fetch top lent products')
-      const data = await response.json()
-      setTopLentProducts(data)
-    } catch (error) {
-      console.error('Error fetching top lent products:', error)
-    }
   }
 
   if (loading) {
@@ -459,4 +434,3 @@ export default function Dashboard() {
     </div>
   )
 }
-

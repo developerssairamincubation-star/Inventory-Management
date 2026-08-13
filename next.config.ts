@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Traces and bundles only the actually-used dependency subset into
+  // .next/standalone, instead of shipping the full node_modules — smaller
+  // production image, faster container cold start. See the Dockerfile's
+  // runner stage, which copies .next/standalone instead of node_modules.
+  output: "standalone",
   // Prevent Next.js from bundling pdf-parse (and its native deps like @napi-rs/canvas).
   // When bundled, the CJS module structure breaks and require() returns a non-callable object.
   // Marking it external forces Node.js to require() it directly at runtime.

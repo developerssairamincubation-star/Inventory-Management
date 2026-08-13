@@ -7,18 +7,22 @@ import * as relations from "./relations";
 
 const globalForDb = globalThis as unknown as { pgPool?: Pool };
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error("DATABASE_URL is not set");
-}
-
+// Deliberately does NOT throw if DATABASE_URL is unset at import time —
+// `next build` imports every route module (even purely-dynamic ones with no
+// static generation) during its "collecting page data" step, and an eager
+// throw here crashes the build itself, not just requests. `pg.Pool` doesn't
+// eagerly connect, so construction with an undefined connectionString is
+// safe; a real error only surfaces later, when a query actually runs
+// without a valid target. Mirrors the old Supabase client's same deliberate
+// laziness (see git history of src/lib/supabaseServer.ts).
+//
 // Reuse the pool across Next.js dev-mode HMR re-evaluations of this module,
 // otherwise every edit would open a new pool and eventually exhaust
 // postgres's max_connections.
 const pool =
   globalForDb.pgPool ??
   new Pool({
-    connectionString,
+    connectionString: process.env.DATABASE_URL,
     max: 10,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
