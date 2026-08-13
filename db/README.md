@@ -19,6 +19,10 @@ against this schema.
 - `init/01_create_test_db.sh` — Postgres `docker-entrypoint-initdb.d` script
   that creates the separate `inventory_test` database on first container init
   (used by the Vitest integration suite; never shares data with the dev DB).
+- `historical/001_initial_schema.sql` — the pre-Flyway Supabase-era schema
+  snapshot the migrations above were built from. Superseded, never applied
+  to any database; kept only as a historical reference (moved here from a
+  confusingly-named root-level `testing/` folder — it was never test code).
 
 ## Running migrations
 

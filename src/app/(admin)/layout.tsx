@@ -1,6 +1,6 @@
-import ProtectedRoute from "@/components/protected-route";
-import Sidebar from "@/components/sidebar";
-import Navbar from "@/components/navbar";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import Sidebar from "@/components/Sidebar";
+import Navbar from "@/components/Navbar";
 
 export default function AdminLayout({
   children,

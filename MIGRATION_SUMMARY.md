@@ -44,7 +44,7 @@ Run tests: `npm test` (Vitest, 120 tests) and `npm run test:e2e` (Playwright, ne
 
 ## Phase-by-phase breakdown
 
-**Phase 0 — Local infra.** Added `postgres`, `flyway`, `minio`, `mailpit`, `pg_backup` services to `docker-compose.yml`. Wrote the target schema as 11 versioned Flyway migrations (`db/migrations/`) derived from the project's existing `testing/001_initial_schema.sql`, with fixes baked in: `TIMESTAMP` → `TIMESTAMPTZ` everywhere, the `sessions` table extended for refresh-token storage, a new `id_sequences` table for atomic product/invoice numbering, and the missing `issued_by_user_id`/`user_id`/`borrower_*` indexes. Set up Vitest + Playwright + a GitHub Actions test workflow.
+**Phase 0 — Local infra.** Added `postgres`, `flyway`, `minio`, `mailpit`, `pg_backup` services to `docker-compose.yml`. Wrote the target schema as 11 versioned Flyway migrations (`db/migrations/`) derived from the project's existing schema snapshot (now `db/historical/001_initial_schema.sql`), with fixes baked in: `TIMESTAMP` → `TIMESTAMPTZ` everywhere, the `sessions` table extended for refresh-token storage, a new `id_sequences` table for atomic product/invoice numbering, and the missing `issued_by_user_id`/`user_id`/`borrower_*` indexes. Set up Vitest + Playwright + a GitHub Actions test workflow.
 
 **Phase 1 — Drizzle + auth primitives.** Hand-written Drizzle schema mirroring the Flyway migrations (`src/db/schema/*.ts`), a pooled `pg.Pool` client (`src/db/client.ts`), and the JWT/bcrypt/session-rotation building blocks (`src/lib/jwt.ts`, `passwords.ts`, `sessions.ts`) — deliberately not wired into any route yet, so the app kept working on Firebase/Supabase until the full cutover in Phase 4.
 
