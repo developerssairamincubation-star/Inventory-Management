@@ -1,4 +1,12 @@
 -- =========================================================
+-- SUPERSEDED — kept only as historical reference.
+--
+-- This was the Supabase-era schema snapshot and the base the
+-- Postgres/MinIO/JWT migration's Flyway migrations (db/migrations/) were
+-- built from. The database schema is now exclusively owned by Flyway; this
+-- file is never applied to any database. See db/README.md.
+-- =========================================================
+--
 -- 001_initial_schema.sql
 -- MONOLITH INVENTORY DB  (PostgreSQL / Supabase)
 -- Clean migration — final schema state
