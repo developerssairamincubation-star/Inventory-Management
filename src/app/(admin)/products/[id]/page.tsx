@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import ImageCropModal from '@/components/ImageCropModal'
 import { authFetch } from '@/contexts/UserContext'
+import { uploadFile } from '@/lib/uploadClient'
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from 'lucide-react'
 
 interface ProductDetail {
@@ -266,18 +267,13 @@ function EditModal({
     e.preventDefault()
     setSaving(true)
     try {
-      // Upload new image to S3 first (if a new file was selected)
+      // Upload new image directly to storage first (if a new file was selected)
       let image_url: string | undefined = undefined
       if (imageFile) {
-        const formData = new FormData()
-        formData.append('file', imageFile)
-        formData.append('folder', 'products')
-        const uploadRes = await authFetch('/api/upload', { method: 'POST', body: formData })
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json()
-          image_url = uploadData.url
-        } else {
-          console.error('Image upload failed:', await uploadRes.text())
+        try {
+          image_url = await uploadFile(imageFile, 'products', authFetch)
+        } catch (uploadErr) {
+          console.error('Image upload failed:', uploadErr)
         }
       }
 

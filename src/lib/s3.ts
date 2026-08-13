@@ -41,12 +41,7 @@ export async function uploadToS3(
     })
   )
 
-  // Return the standard public URL.
-  // If using a custom endpoint, swap the base URL accordingly.
-  if (endpoint) {
-    return `${endpoint}/${bucket}/${key}`
-  }
-  return `https://${bucket}.s3.${region}.amazonaws.com/${key}`
+  return getPublicUrl(key)
 }
 
 /**
@@ -61,6 +56,18 @@ export async function deleteFromS3(key: string): Promise<void> {
       Key: key,
     })
   )
+}
+
+/**
+ * Builds the public URL for a key without uploading anything — used by the
+ * presigned-upload flow, where the client uploads directly to storage and
+ * the server only needs to hand back the URL the object will end up at.
+ */
+export function getPublicUrl(key: string): string {
+  if (endpoint) {
+    return `${endpoint}/${bucket}/${key}`
+  }
+  return `https://${bucket}.s3.${region}.amazonaws.com/${key}`
 }
 
 /**

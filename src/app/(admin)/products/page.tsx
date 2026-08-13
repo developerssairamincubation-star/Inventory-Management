@@ -1,5 +1,6 @@
 ﻿"use client";
 import { authFetch } from "@/contexts/UserContext";
+import { uploadFile } from "@/lib/uploadClient";
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
@@ -545,25 +546,14 @@ export default function ProductsPage() {
                     // Upload image if exists
                     if (item.imageFile) {
                       try {
-                        const formData = new FormData();
-                        formData.append('file', item.imageFile);
-                        formData.append('folder', 'products');
-                        const uploadRes = await authFetch('/api/upload', { method: 'POST', body: formData });
-                        if (uploadRes.ok) {
-                          const uploadData = await uploadRes.json();
-                          image_url = uploadData.url;
-                          if (!image_url) console.error('[upload] missing url in response', uploadData);
-                        } else {
-                          const text = await uploadRes.text();
-                          console.error('[upload] non-OK response:', uploadRes.status, text);
-                        }
-                        // Fallback: if upload didn't provide a URL, use the local data URL preview so UI shows the image.
-                        if (!image_url && item.imagePreview) {
-                          console.warn('[upload] falling back to data URL for product image (not persisted to S3)');
-                          image_url = item.imagePreview;
-                        }
+                        image_url = await uploadFile(item.imageFile, 'products', authFetch);
                       } catch (uploadErr) {
                         console.error('Image upload error:', uploadErr);
+                        // Fallback: if upload failed, use the local data URL preview so UI shows the image.
+                        if (item.imagePreview) {
+                          console.warn('[upload] falling back to data URL for product image (not persisted to storage)');
+                          image_url = item.imagePreview;
+                        }
                       }
                     }
 
@@ -1259,25 +1249,14 @@ export default function ProductsPage() {
                               
                               if (item.imageFile) {
                                 try {
-                                  const formData = new FormData();
-                                  formData.append('file', item.imageFile);
-                                  formData.append('folder', 'products');
-                                  const uploadRes = await authFetch('/api/upload', { method: 'POST', body: formData });
-                                  if (uploadRes.ok) {
-                                    const uploadData = await uploadRes.json();
-                                    image_url = uploadData.url;
-                                    if (!image_url) console.error('[upload] missing url in response', uploadData);
-                                  } else {
-                                    const text = await uploadRes.text();
-                                    console.error('[upload] non-OK response:', uploadRes.status, text);
-                                  }
-                                  // Fallback to local data URL preview if upload to S3 failed
-                                  if (!image_url && item.imagePreview) {
-                                    console.warn('[upload] falling back to data URL for inline product image (not persisted to S3)');
-                                    image_url = item.imagePreview;
-                                  }
+                                  image_url = await uploadFile(item.imageFile, 'products', authFetch);
                                 } catch (uploadErr) {
                                   console.error('Image upload error:', uploadErr);
+                                  // Fallback to local data URL preview if upload to storage failed
+                                  if (item.imagePreview) {
+                                    console.warn('[upload] falling back to data URL for inline product image (not persisted to storage)');
+                                    image_url = item.imagePreview;
+                                  }
                                 }
                               }
 

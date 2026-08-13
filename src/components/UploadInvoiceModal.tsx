@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import ImageCropModal from "@/components/ImageCropModal";
 import { useToast } from "@/components/ui/Toast";
 import { authFetch } from "@/contexts/UserContext";
+import { uploadFile } from "@/lib/uploadClient";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -345,13 +346,10 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
           // Upload image first if provided
           let image_url: string | undefined;
           if (dec.newProductImageFile) {
-            const fd = new FormData();
-            fd.append("file", dec.newProductImageFile);
-            fd.append("folder", "products");
-              const uploadRes = await authFetch("/api/upload", { method: "POST", body: fd });
-            if (uploadRes.ok) {
-              const uploadData = await uploadRes.json();
-              image_url = uploadData.url;
+            try {
+              image_url = await uploadFile(dec.newProductImageFile, "products", authFetch);
+            } catch (uploadErr) {
+              console.error("Image upload error:", uploadErr);
             }
           }
           const body: Record<string, unknown> = {

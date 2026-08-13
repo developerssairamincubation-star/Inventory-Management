@@ -79,6 +79,11 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # Server-wide CORS, needed for presigned direct-to-MinIO browser
+      # uploads. Per-bucket CORS (`mc cors set`, the S3 PutBucketCors API)
+      # returns 501 Not Implemented on this MinIO release — this env var is
+      # the supported alternative. Local dev only; scope down for prod.
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
     volumes:
       - miniodata:/data
     ports:
@@ -168,14 +173,31 @@ services:
       NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-      AWS_REGION: ${AWS_REGION}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-      AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME}
-      AWS_S3_ENDPOINT: ${AWS_S3_ENDPOINT}
+      # Every route now queries Postgres via Drizzle (src/db/client.ts),
+      # which throws at import time if DATABASE_URL is unset — this is
+      # required for the app to boot at all, not just for auth (Phase 4).
+      # Container-network address (postgres:5432), not the host-side
+      # localhost:5433 mapping used by `npm run dev` in .env.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-inventory}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_PEPPER: ${JWT_REFRESH_PEPPER}
+      # Object storage now targets the local minio service. The endpoint is
+      # hardcoded to the container-network name (not interpolated from
+      # .env's AWS_S3_ENDPOINT, which is set to localhost:9000 for host-side
+      # `npm run dev` and would be unreachable from inside this container).
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_S3_BUCKET_NAME: ${MINIO_BUCKET_NAME:-inventory-assets}
+      AWS_S3_ENDPOINT: http://minio:9000
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
       FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL}
       FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY}
+    depends_on:
+      flyway:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
     ports:
       - "4000:4000"
     restart: unless-stopped
