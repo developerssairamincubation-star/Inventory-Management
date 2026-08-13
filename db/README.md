@@ -41,29 +41,47 @@ npm run db:info      # shows applied/pending migrations
 
 ## Backup & restore (local/dev)
 
-The `pg_backup` compose service runs `pg_dump -Fc` daily, keeping 7 daily +
-4 weekly dumps in the `pgbackups` named volume — deliberately separate from
-the live `pgdata` volume, so a corrupted live volume can't also take out the
-backups.
+The `pg_backup` compose service ([prodrigestivill/postgres-backup-local](https://github.com/prodrigestivill/docker-postgres-backup-local))
+runs a daily `pg_dump` (plain SQL, gzipped — not the custom `-Fc` format),
+keeping daily/weekly/monthly rotations in the `pgbackups` named volume —
+deliberately separate from the live `pgdata` volume, so a corrupted live
+volume can't also take out the backups. Trigger one immediately (rather
+than waiting for the daily schedule) with:
 
-**Restore a dump:**
+```bash
+docker compose exec pg_backup sh /backup.sh
+```
+
+**Restore a dump** — verified end-to-end (insert a marker row, back up,
+delete the row, restore into a scratch database, confirm the row comes
+back) as part of the Postgres/MinIO/JWT migration's Phase 7 regression pass.
+The dump is a **plain, non-`--clean` `pg_dump`** — it contains `CREATE
+TABLE`/`CREATE TYPE` etc. with no `DROP` statements first, so restoring
+into a database that already has this schema fails with "already exists"
+errors. Always restore into an empty/fresh database:
 
 ```bash
 # 1. List available dumps
-docker compose exec pg_backup ls /backups/inventory
+docker compose exec pg_backup ls /backups/daily
 
 # 2. Stop the app so nothing writes during restore
 docker compose stop app
 
-# 3. Restore (drops/recreates conflicting objects, safe on a fresh or
-#    existing target database)
-docker compose exec -T postgres pg_restore \
-  -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists \
-  < /path/to/inventory-<timestamp>.dump
+# 3a. To recover in place: drop and recreate the live database first
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d postgres \
+  -c "DROP DATABASE \"$POSTGRES_DB\"; CREATE DATABASE \"$POSTGRES_DB\";"
+
+# 3b. Restore (gunzip the dump straight into psql)
+docker compose exec pg_backup sh -c "zcat /backups/daily/inventory-latest.sql.gz" \
+  | docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 
 # 4. Restart the app
 docker compose start app
 ```
+
+To verify a backup without touching the live database, restore into a
+throwaway database instead of step 3a (`CREATE DATABASE inventory_check;`,
+restore into that, inspect, then `DROP DATABASE inventory_check;`).
 
 **Off-host copy** (a same-host Docker volume is not disaster-proof by
 itself):
