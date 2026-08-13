@@ -17,8 +17,10 @@ export async function GET(req: NextRequest) {
         ...getTableColumns(products),
         image_url: product_image.image_url,
         category_name: category.category_name,
+        stocks: { quantity: stocks.quantity },
       })
       .from(products)
+      .leftJoin(stocks, eq(stocks.product_id, products.product_id))
       .leftJoin(product_image, eq(product_image.product_id, products.product_id))
       .leftJoin(category, eq(category.category_id, products.category_id))
       .where(eq(products.user_id, user.user_id))

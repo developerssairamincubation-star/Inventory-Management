@@ -69,9 +69,13 @@ describe("GET /api/products", () => {
 
     const res = await GET(new NextRequest("http://localhost/api/products"));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Array<{ product_name: string; image_url: string; category_name: string }>;
+    const body = (await res.json()) as Array<{ product_name: string; image_url: string; category_name: string; stocks: { quantity: number } | null }>;
     const widget = body.find((p) => p.product_name === "Products Route Widget");
-    expect(widget).toMatchObject({ image_url: "http://example.com/widget.png", category_name: "Products Route Category" });
+    // Regression test: an earlier version of this route dropped the stocks
+    // join entirely, so every product silently showed no quantity in the
+    // list view — caught via manual browser testing, not by this suite,
+    // since the original assertion here never checked `stocks` at all.
+    expect(widget).toMatchObject({ image_url: "http://example.com/widget.png", category_name: "Products Route Category", stocks: { quantity: 5 } });
   });
 });
 
