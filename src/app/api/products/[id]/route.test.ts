@@ -8,7 +8,7 @@ vi.mock("@/lib/authMiddleware", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
   return { ...actual, getAuthUser: vi.fn() };
 });
-vi.mock("@/lib/s3", () => ({ deleteFromS3: vi.fn(), getS3KeyFromUrl: vi.fn(() => null) }));
+vi.mock("@/lib/cloudinary", () => ({ deleteImage: vi.fn(), getPublicIdFromUrl: vi.fn(() => null) }));
 
 import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
 import { GET, PUT, DELETE } from "./route";

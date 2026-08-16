@@ -4,6 +4,10 @@ import { GeminiNotConfiguredError, GeminiParseError, parseInvoicePdf, type Parse
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Vercel-specific function timeout hint (no-op on self-hosted Docker).
+// Default is 10s on Hobby / lower Pro tiers, too short for a Gemini PDF
+// parse round-trip on a larger invoice.
+export const maxDuration = 60;
 
 export type { ParsedInvoice };
 

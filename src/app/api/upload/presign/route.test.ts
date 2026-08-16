@@ -1,11 +1,10 @@
-// Integration test against the real local MinIO container — round-trips an
-// actual file through the presigned-PUT flow (not mocked), since the whole
-// point of this route is that the returned URL genuinely works against
-// S3-compatible storage.
+// The route only signs upload params now (the actual upload happens
+// browser-to-Cloudinary directly) — signing is pure HMAC math, so this is a
+// plain unit test with no network dependency, unlike the old MinIO-backed
+// integration test this replaces.
 import { describe, it, expect } from "vitest";
 import { NextRequest } from "next/server";
-import { DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { s3Client } from "@/lib/s3";
+import { v2 as cloudinary } from "cloudinary";
 import { POST } from "./route";
 
 describe("POST /api/upload/presign", () => {
@@ -14,23 +13,21 @@ describe("POST /api/upload/presign", () => {
     expect(res.status).toBe(400);
   });
 
-  it("issues a presigned URL that a real PUT can upload through, ending up at the returned public url", async () => {
+  it("returns a signature matching independently-recomputed Cloudinary signing math", async () => {
     const res = await POST(
       new NextRequest("http://localhost/api/upload/presign", { method: "POST", body: JSON.stringify({ mimeType: "image/png", folder: "products" }) }),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { uploadUrl: string; url: string; key: string };
-    expect(body.key).toMatch(/^products\/.+\.png$/);
+    const body = (await res.json()) as { uploadUrl: string; apiKey: string; timestamp: number; signature: string; folder: string };
 
-    const fakeImageBytes = Buffer.from("fake-png-bytes-for-test");
-    const putRes = await fetch(body.uploadUrl, { method: "PUT", body: fakeImageBytes, headers: { "Content-Type": "image/png" } });
-    expect(putRes.ok).toBe(true);
+    expect(body.folder).toMatch(/\/products$/);
+    expect(body.uploadUrl).toBe(`https://api.cloudinary.com/v1_1/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload`);
+    expect(body.apiKey).toBe(process.env.CLOUDINARY_API_KEY);
 
-    const getRes = await fetch(body.url);
-    expect(getRes.ok).toBe(true);
-    const downloaded = Buffer.from(await getRes.arrayBuffer());
-    expect(downloaded.equals(fakeImageBytes)).toBe(true);
-
-    await s3Client.send(new DeleteObjectCommand({ Bucket: process.env.AWS_S3_BUCKET_NAME, Key: body.key }));
+    const expectedSignature = cloudinary.utils.api_sign_request(
+      { timestamp: body.timestamp, folder: body.folder },
+      process.env.CLOUDINARY_API_SECRET!
+    );
+    expect(body.signature).toBe(expectedSignature);
   });
 });

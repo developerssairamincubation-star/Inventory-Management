@@ -14,7 +14,7 @@ FROM base AS builder
 
 # No NEXT_PUBLIC_* build args needed anymore — auth is server-side JWT/cookie
 # based (no client-side Firebase config to bake into the bundle), and object
-# storage (MinIO) is only ever accessed from the server.
+# storage (Cloudinary) is only ever accessed from the server.
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .

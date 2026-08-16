@@ -1,8 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // E2E smoke suite runs against the full docker-composed stack (app + postgres
-// + minio + mailpit). Start the stack first (`docker compose up -d`), then
-// `npm run test:e2e` — this config does not manage the stack's lifecycle.
+// + mailpit, plus real Cloudinary credentials in .env). Start the stack first
+// (`docker compose up -d`), then `npm run test:e2e` — this config does not
+// manage the stack's lifecycle.
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,

@@ -12,7 +12,7 @@ import {
   students,
   departments,
 } from '@/db/schema'
-import { deleteFromS3, getS3KeyFromUrl } from '@/lib/s3'
+import { deleteImage, getPublicIdFromUrl } from '@/lib/cloudinary'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 
 export const dynamic = 'force-dynamic'
@@ -297,10 +297,10 @@ export async function DELETE(
     })
 
     for (const img of images) {
-      const key = getS3KeyFromUrl(img.image_url)
-      if (key) {
+      const publicId = getPublicIdFromUrl(img.image_url)
+      if (publicId) {
         try {
-          await deleteFromS3(key)
+          await deleteImage(publicId)
         } catch (err) {
           console.error('Failed to delete product image from storage:', err)
         }

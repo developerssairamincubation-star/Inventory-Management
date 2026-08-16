@@ -1,21 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { randomUUID } from 'crypto'
-import { PutObjectCommand } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import { s3Client, getPublicUrl } from '@/lib/s3'
+import { createSignedUpload } from '@/lib/cloudinary'
 
 export const dynamic = 'force-dynamic'
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']
-const PRESIGN_EXPIRY_SECONDS = 60
 
 /**
  * POST /api/upload/presign
  *
- * Returns a short-lived presigned PUT URL so the browser can upload
- * directly to storage — the Next.js server never buffers the file bytes.
- * Body: { filename?: string, mimeType: string, folder?: string }
- * Response: { uploadUrl, url, key }
+ * Returns a short-lived signed upload so the browser can POST directly to
+ * Cloudinary — this server never buffers the file bytes. Body:
+ * { mimeType: string, folder?: string }
+ * Response: { uploadUrl, apiKey, timestamp, signature, folder }
  */
 export async function POST(req: NextRequest) {
   try {
@@ -30,18 +26,9 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const ext = mimeType.split('/')[1].replace('jpeg', 'jpg')
-    const key = `${folder}/${randomUUID()}.${ext}`
-
-    const uploadUrl = await getSignedUrl(
-      s3Client,
-      new PutObjectCommand({ Bucket: process.env.AWS_S3_BUCKET_NAME, Key: key, ContentType: mimeType }),
-      { expiresIn: PRESIGN_EXPIRY_SECONDS }
-    )
-
-    return NextResponse.json({ uploadUrl, url: getPublicUrl(key), key })
+    return NextResponse.json(createSignedUpload(folder))
   } catch (err) {
-    console.error('[/api/upload/presign] Error generating presigned URL:', err)
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed to presign upload' }, { status: 500 })
+    console.error('[/api/upload/presign] Error generating signed upload:', err)
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed to sign upload' }, { status: 500 })
   }
 }

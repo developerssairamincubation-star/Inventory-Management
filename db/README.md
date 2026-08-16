@@ -95,11 +95,12 @@ docker run --rm -v inventory-management_pgbackups:/b \
   -v "$(pwd)/local-backups:/dst" alpine cp -r /b/. /dst/
 ```
 
-MinIO's data volume (`miniodata`) should be backed up the same way — either
-`mc mirror` to a second target or a periodic tarball of the volume — on the
-same schedule as the Postgres dump, since `product_image.image_url` rows in
-Postgres reference MinIO object keys; restoring one without the other at the
-same point in time leaves dangling references.
+Object storage (Cloudinary, see `src/lib/cloudinary.ts`) is a hosted
+third-party service, not a local volume — Cloudinary retains uploaded assets
+on its own, no separate backup step needed here. Restoring an old Postgres
+dump can still leave `product_image.image_url` rows pointing at assets that
+were since deleted from Cloudinary (or vice versa) — same dangling-reference
+risk as before, just without a volume to restore in tandem.
 
 Not adopted at this stage: WAL archiving / point-in-time recovery
 (pgBackRest/WAL-G). That's real operational complexity that only pays off

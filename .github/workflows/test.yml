@@ -17,9 +17,12 @@ env:
   POSTGRES_USER: inventory_app
   POSTGRES_PASSWORD: ci_local_only_password
   POSTGRES_HOST_PORT: 5433
-  MINIO_ROOT_USER: minioadmin
-  MINIO_ROOT_PASSWORD: ci_local_only_password
-  MINIO_BUCKET_NAME: inventory-assets
+  # Throwaway values — the upload-signing test only recomputes Cloudinary's
+  # HMAC signing math locally and never calls the real API, so these never
+  # need to be real credentials.
+  CLOUDINARY_CLOUD_NAME: ci-test-cloud
+  CLOUDINARY_API_KEY: ci-test-key
+  CLOUDINARY_API_SECRET: ci-test-secret
   DATABASE_URL: postgresql://inventory_app:ci_local_only_password@localhost:5433/inventory
   DATABASE_TEST_URL: postgresql://inventory_app:ci_local_only_password@localhost:5433/inventory_test
 
@@ -36,8 +39,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Start Postgres, MinIO, Mailpit
-        run: docker compose up -d postgres minio mailpit
+      - name: Start Postgres, Mailpit
+        run: docker compose up -d postgres mailpit
 
       - name: Wait for Postgres to be healthy
         run: |
@@ -50,12 +53,11 @@ jobs:
           docker compose logs postgres
           exit 1
 
-      - name: Migrate dev + test databases, bootstrap MinIO bucket
+      - name: Migrate dev + test databases
         run: |
           docker compose up flyway
           docker compose up flyway-seed
           docker compose up flyway-test
-          docker compose up minio-init
 
       - name: Run Vitest
         run: npm test
