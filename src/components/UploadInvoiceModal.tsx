@@ -303,9 +303,6 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
             quantity: 0,
             ...(image_url ? { image_url } : {}),
           };
-          // returnable/consumable are left unset — the DB defaults to
-          // Returnable, same as the manual product-entry forms; editable
-          // afterward on the product detail page.
           if (row.category_id) body.category_id = row.category_id;
           const res = await authFetch("/api/products", { method: "POST", body: JSON.stringify(body) });
           if (!res.ok) {

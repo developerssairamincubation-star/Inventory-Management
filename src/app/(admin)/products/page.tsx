@@ -16,7 +16,6 @@ interface ProductItem {
   description: string;
   quantity: number | '';
   cost: number | '';
-  returnable: boolean | null;
   imageFile: File | null;
   imagePreview: string | null;
   category_id: string;
@@ -32,7 +31,6 @@ const createEmptyProductItem = (id: string): ProductItem => ({
   description: '',
   quantity: '',
   cost: '',
-  returnable: null,
   imageFile: null,
   imagePreview: null,
   category_id: '',
@@ -61,7 +59,6 @@ const isProductItemTouched = (item: ProductItem): boolean =>
   item.description.trim() !== '' ||
   item.quantity !== '' ||
   item.cost !== '' ||
-  item.returnable !== null ||
   item.imageFile !== null ||
   item.category_id !== '';
 
@@ -540,13 +537,20 @@ export default function ProductsPage() {
                 if (hasIncompleteProductRow) return;
                 setSaving(true);
 
-                try {
-                  // Only rows the user actually started filling get validated/
-                  // saved — a row left completely untouched is silently
-                  // skipped rather than blocking submit or being sent to the API.
-                  const rowsToSave = productItems.filter(isProductItemTouched);
+                // Only rows the user actually started filling get validated/
+                // saved — a row left completely untouched is silently
+                // skipped rather than blocking submit or being sent to the API.
+                const rowsToSave = productItems.filter(isProductItemTouched);
+                const succeededIds: string[] = [];
+                const failed: { name: string; message: string }[] = [];
 
-                  for (const item of rowsToSave) {
+                for (const item of rowsToSave) {
+                  // Each row is independent — one row's failure (e.g. a
+                  // duplicate name/SKU conflict from the API) must not abort
+                  // the rest of the batch or leave the user with no idea
+                  // what happened, which is what an uncaught throw here used
+                  // to do (the whole loop would stop silently).
+                  try {
                     const matched = findExistingMatch(item.productName || "");
                     const matchedId = matched?.product_id ?? matched?.id ?? null;
 
@@ -555,7 +559,6 @@ export default function ProductsPage() {
                       const updateBody: any = {};
                       if (item.productName) updateBody.product_name = item.productName;
                       if (item.description) updateBody.description = item.description;
-                      if (item.returnable !== null) updateBody.returnable = !!item.returnable;
                       if (item.category_id) updateBody.category_id = item.category_id;
 
                       if (Object.keys(updateBody).length > 0) {
@@ -570,6 +573,9 @@ export default function ProductsPage() {
                             const pid = prod.product_id || prod.id;
                             return pid === matchedId ? { ...prod, ...updated } : prod;
                           }));
+                        } else {
+                          const errData = await updRes.json().catch(() => null);
+                          throw new Error(errData?.error || `Failed to update "${item.productName}"`);
                         }
                       }
 
@@ -587,13 +593,17 @@ export default function ProductsPage() {
                             const pid = prod.product_id || prod.id;
                             return pid === matchedId ? { ...prod, ...result.product } : prod;
                           }));
+                        } else {
+                          const errData = await stockRes.json().catch(() => null);
+                          throw new Error(errData?.error || `Failed to update stock for "${item.productName}"`);
                         }
                       }
+                      succeededIds.push(item.id);
                       continue;
                     }
 
                     let image_url: string | undefined = undefined;
-                    
+
                     // Upload image if exists
                     if (item.imageFile) {
                       try {
@@ -613,7 +623,6 @@ export default function ProductsPage() {
                       description: item.description || undefined,
                       quantity: item.quantity === '' ? undefined : Number(item.quantity),
                       cost: item.cost === '' ? undefined : Number(item.cost),
-                      returnable: item.returnable === null ? undefined : !!item.returnable,
                       image_url: image_url ?? undefined,
                       category_id: item.category_id || undefined,
                     };
@@ -634,16 +643,39 @@ export default function ProductsPage() {
                           quantity: newStock?.quantity ?? (item.quantity === '' ? 0 : Number(item.quantity))
                         }
                       }, ...p]);
+                      succeededIds.push(item.id);
+                    } else {
+                      const errData = await res.json().catch(() => null);
+                      throw new Error(errData?.error || `Failed to create "${item.productName || 'product'}"`);
                     }
+                  } catch (itemErr) {
+                    console.error('Error saving product row:', itemErr);
+                    failed.push({
+                      name: item.productName || 'Unnamed row',
+                      message: itemErr instanceof Error ? itemErr.message : 'Unexpected error',
+                    });
                   }
+                }
 
+                if (failed.length === 0) {
                   resetProductItems();
                   setIsModalOpen(false);
-                } catch (_err) { 
-                  console.error('Error adding products:', _err);
-                } finally { 
-                  setSaving(false); 
+                  if (succeededIds.length > 0) showToast(`${succeededIds.length} product(s) saved`, 'success');
+                } else {
+                  // Leave the modal open with only the failed rows still
+                  // filled in, so the user can fix and resubmit instead of
+                  // retyping everything from scratch.
+                  setProductItems((prev) => {
+                    const remaining = prev.filter((p) => !succeededIds.includes(p.id));
+                    return remaining.length > 0 ? remaining : [createEmptyProductItem(Date.now().toString())];
+                  });
+                  const summary = failed.map((f) => `${f.name}: ${f.message}`).join(' · ');
+                  showToast(
+                    `${succeededIds.length > 0 ? `${succeededIds.length} saved, ` : ''}${failed.length} failed — ${summary}`,
+                    'error'
+                  );
                 }
+                setSaving(false);
               }}
             >
               {/* Header Row */}
@@ -1208,7 +1240,6 @@ export default function ProductsPage() {
                                 const updateBody: any = {};
                                 if (item.productName) updateBody.product_name = item.productName;
                                 if (item.description) updateBody.description = item.description;
-                                if (item.returnable !== null) updateBody.returnable = !!item.returnable;
                                 if (item.category_id) updateBody.category_id = item.category_id;
 
                                 if (Object.keys(updateBody).length > 0) {
@@ -1223,6 +1254,9 @@ export default function ProductsPage() {
                                       const pid = prod.product_id || prod.id;
                                       return pid === matchedId ? { ...prod, ...updated } : prod;
                                     }));
+                                  } else {
+                                    const errData = await updRes.json().catch(() => null);
+                                    throw new Error(errData?.error || `Failed to update "${item.productName}"`);
                                   }
                                 }
 
@@ -1240,9 +1274,13 @@ export default function ProductsPage() {
                                       const pid = prod.product_id || prod.id;
                                       return pid === matchedId ? { ...prod, ...result.product } : prod;
                                     }));
+                                  } else {
+                                    const errData = await stockRes.json().catch(() => null);
+                                    throw new Error(errData?.error || `Failed to update stock for "${item.productName}"`);
                                   }
                                 }
 
+                                showToast(`"${item.productName}" saved`, 'success');
                                 removeInlineItem(item.id);
                                 return;
                               }
@@ -1267,7 +1305,6 @@ export default function ProductsPage() {
                                 description: item.description || undefined,
                                 quantity: item.quantity === '' ? undefined : Number(item.quantity),
                                 cost: item.cost === '' ? undefined : Number(item.cost),
-                                returnable: item.returnable === null ? undefined : !!item.returnable,
                                 image_url: image_url ?? undefined,
                                 category_id: item.category_id || undefined,
                               };
@@ -1282,19 +1319,24 @@ export default function ProductsPage() {
                                 const created = await res.json();
                                 const newProduct = created.product || created;
                                 const newStock = created.stock;
-                                setProducts((p) => [{ 
-                                  ...newProduct, 
-                                  stocks: { 
-                                    quantity: newStock?.quantity ?? (item.quantity === '' ? 0 : Number(item.quantity)) 
-                                  } 
+                                setProducts((p) => [{
+                                  ...newProduct,
+                                  stocks: {
+                                    quantity: newStock?.quantity ?? (item.quantity === '' ? 0 : Number(item.quantity))
+                                  }
                                 }, ...p]);
-                                
+                                showToast(`"${item.productName}" saved`, 'success');
+
                                 // Remove this item from inline items
                                 removeInlineItem(item.id);
+                              } else {
+                                const errData = await res.json().catch(() => null);
+                                throw new Error(errData?.error || `Failed to create "${item.productName || 'product'}"`);
                               }
-                            } catch (_err) { 
-                              console.error('Error adding product:', _err);
-                            } finally { 
+                            } catch (err) {
+                              console.error('Error adding product:', err);
+                              showToast(err instanceof Error ? err.message : 'Failed to save product', 'error');
+                            } finally {
                               setSaving(false); 
                             }
                           }} 

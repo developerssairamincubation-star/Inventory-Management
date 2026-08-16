@@ -15,7 +15,6 @@ interface ProductDetail {
   sku_code: string | null
   description: string | null
   unit_cost: number
-  returnable: boolean | null
   image_url: string | null
   created_at: string
   category_id: string | null
@@ -220,7 +219,6 @@ function EditModal({
   const [name, setName] = useState(product.product_name)
   const [description, setDescription] = useState(product.description ?? '')
   const [cost, setCost] = useState<number | ''>(product.unit_cost ?? '')
-  const [returnable, setReturnable] = useState<boolean | null>(product.returnable ?? null)
   const [categoryId, setCategoryId] = useState<string>(product.category_id ?? '')
   const [stockQuantity, setStockQuantity] = useState<number | ''>(product.stocks?.quantity ?? '')
   const [saving, setSaving] = useState(false)
@@ -285,7 +283,6 @@ function EditModal({
           product_name: name,
           description: description || null,
           unit_cost: cost === '' ? undefined : Number(cost),
-          returnable: returnable,
           category_id: categoryId || null,
           // Only send image_url if a new file was uploaded
           ...(image_url !== undefined ? { image_url } : {}),
@@ -362,19 +359,6 @@ function EditModal({
               {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
               <option value='__add_new__'>+ Add new category…</option>
             </select>
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Product Type</div>
-            <div style={{ display: 'flex', gap: 20 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', color: 'var(--fg)' }}>
-                <input type="radio" name="returnable" checked={returnable === true} onChange={() => setReturnable(true)} />
-                Returnable
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', color: 'var(--fg)' }}>
-                <input type="radio" name="returnable" checked={returnable === false} onChange={() => setReturnable(false)} />
-                Consumable
-              </label>
-            </div>
           </div>
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Product Photo</div>
@@ -781,19 +765,6 @@ export default function ProductDetailPage() {
               <div style={{ fontSize: 22, fontWeight: 600, color: lost > 0 ? '#dc2626' : 'var(--fg)', marginTop: 2 }}>{lost}</div>
             </div>
           </div>
-        </div>
-        {/* Type */}
-        <div style={{ flex: 1, padding: '14px 18px', borderRight: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Type</div>
-          {product.returnable === true && (
-            <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', background: '#dcfce7', color: '#166534' }}>Returnable</span>
-          )}
-          {product.returnable === false && (
-            <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', background: '#ede9fe', color: '#6d28d9' }}>Consumable</span>
-          )}
-          {product.returnable === null && (
-            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Not set</span>
-          )}
         </div>
         {/* Category */}
         <div style={{ flex: 1, padding: '14px 18px' }}>

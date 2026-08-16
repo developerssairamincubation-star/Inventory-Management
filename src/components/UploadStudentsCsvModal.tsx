@@ -233,9 +233,17 @@ export default function UploadStudentsCsvModal({ onClose, onDone, departments }:
           <div style={{ fontSize: 12, color: "var(--muted)" }}>{fileName || "No file selected"}</div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <input type="file" accept=".csv,text/csv,.xlsx,.xls" onChange={(e) => handleFile(e.target.files?.[0] ?? null)} />
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+          <label
+            className="seg-tab-btn"
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0,
+              padding: "8px 16px", background: "var(--fg)", color: "#fff",
+              border: "1px solid var(--fg)", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            Choose File
+            <input type="file" accept=".csv,text/csv,.xlsx,.xls" onChange={(e) => handleFile(e.target.files?.[0] ?? null)} style={{ display: "none" }} />
           </label>
           <div style={{ color: "var(--muted)", fontSize: 12 }}>
             Choose a .csv, .xlsx, or .xls file. First row is treated as headers. Department is resolved from the Student ID Code — not a column.

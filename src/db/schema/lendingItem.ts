@@ -11,9 +11,10 @@ export const lending_item = pgTable("lending_item", {
   product_id: uuid("product_id").notNull().references(() => products.product_id, { onDelete: "restrict" }),
   quantity: integer("quantity").notNull(),
   status: lendingItemStatusEnum("status").notNull().default("ISSUED"),
-  // Per-item returnable/consumable marking (db/migrations/V15), validated
-  // at creation against the product's own returnable/consumable flags.
-  // Consumable items can never be marked damaged/lost.
+  // Per-item returnable/consumable marking (db/migrations/V15), freely
+  // chosen at lending time — not tied to any per-product flag (V24 dropped
+  // products.returnable/consumable). Consumable items can never be marked
+  // damaged/lost.
   item_type: lendingItemTypeEnum("item_type").notNull().default("RETURNABLE"),
   original_quantity: integer("original_quantity").notNull().default(0),
   damaged_quantity: integer("damaged_quantity").notNull().default(0),

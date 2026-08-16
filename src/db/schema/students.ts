@@ -1,6 +1,8 @@
 // Mirrors db/migrations/V3__people_tables.sql (students). Field names are
 // snake_case to match DB columns 1:1 — see departments.ts for why.
-import { pgTable, uuid, varchar, text, timestamp } from "drizzle-orm/pg-core";
+// student_number (legacy free-text field) was removed in V24 — superseded
+// by student_id_code (V14) as the one canonical student identifier.
+import { pgTable, uuid, varchar, timestamp } from "drizzle-orm/pg-core";
 import { departments } from "./departments";
 
 export const students = pgTable("students", {
@@ -11,9 +13,8 @@ export const students = pgTable("students", {
   department_id: uuid("department_id").references(() => departments.department_id, { onDelete: "set null" }),
   email: varchar("email", { length: 255 }).unique(),
   phone_number: varchar("phone_number", { length: 30 }),
-  student_number: text("student_number"),
   // Scanned/typed [college][year][dept][serial] code, e.g. "sit21cs025" —
-  // see src/lib/studentIdCode.ts. Distinct from the legacy student_number.
+  // see src/lib/studentIdCode.ts.
   student_id_code: varchar("student_id_code", { length: 10 }),
   created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

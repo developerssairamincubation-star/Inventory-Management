@@ -20,7 +20,6 @@ export async function PUT(
 
     const updateData: Record<string, unknown> = {}
     if (body.name !== undefined) updateData.name = body.name
-    if (body.student_number !== undefined) updateData.student_number = body.student_number
     if (body.department_id !== undefined) updateData.department_id = body.department_id
     if (body.email !== undefined) updateData.email = body.email
     if (body.phone_number !== undefined) updateData.phone_number = body.phone_number
@@ -64,7 +63,6 @@ export async function PUT(
       .select({
         student_id: students.student_id,
         name: students.name,
-        student_number: students.student_number,
         student_id_code: students.student_id_code,
         department_id: students.department_id,
         email: students.email,

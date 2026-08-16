@@ -10,7 +10,6 @@ import { decodeStudentIdCode, normalizeStudentIdCode } from '@/lib/studentIdCode
 const studentSelection = {
   student_id: students.student_id,
   name: students.name,
-  student_number: students.student_number,
   student_id_code: students.student_id_code,
   department_id: students.department_id,
   email: students.email,
@@ -34,7 +33,6 @@ export async function GET(req: NextRequest) {
         search
           ? or(
               ilike(students.name, `%${search}%`),
-              ilike(students.student_number, `%${search}%`),
               ilike(students.email, `%${search}%`),
               ilike(students.student_id_code, `%${search}%`),
             )
@@ -54,7 +52,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { name, student_number, email, phone_number } = body
+    const { name, email, phone_number } = body
     let department_id: string | null = body.department_id || null
     let student_id_code: string | null = null
 
@@ -94,23 +92,10 @@ export async function POST(req: NextRequest) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'department_id is required, directly or via a decodable student_id_code')
     }
 
-    if (student_number) {
-      const [existing] = await db
-        .select({ student_id: students.student_id })
-        .from(students)
-        .where(eq(students.student_number, student_number))
-        .limit(1)
-
-      if (existing) {
-        throw new ApiError(409, 'CONFLICT', 'A student with this student number already exists')
-      }
-    }
-
     const [inserted] = await db
       .insert(students)
       .values({
         name: name || null,
-        student_number: student_number || null,
         student_id_code,
         department_id,
         email: email || null,

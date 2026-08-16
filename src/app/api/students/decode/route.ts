@@ -50,6 +50,7 @@ export async function POST(req: NextRequest) {
         department_name: null,
         year_of_study: decoded.yearOfStudy,
         serial: decoded.serial,
+        is_lateral_entry: decoded.isLateralEntry,
         existing: !!existingStudent,
         student_name: existingStudent?.name ?? null,
         error: 'unknown department code — check Admin Settings',
@@ -66,6 +67,7 @@ export async function POST(req: NextRequest) {
       department_name: department.department_name,
       year_of_study: decoded.yearOfStudy,
       serial: decoded.serial,
+      is_lateral_entry: decoded.isLateralEntry,
       existing: !!existingStudent,
       student_name: existingStudent?.name ?? null,
     })

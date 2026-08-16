@@ -11,6 +11,7 @@ import * as XLSX from "xlsx";
 import Pagination from "@/components/Pagination";
 import { usePagination } from "@/hooks/usePagination";
 import { groupByStudentAndDate, computeItemCounts } from "@/lib/groupLendingRecords";
+import { decodeStudentIdCode } from "@/lib/studentIdCode";
 
 // Utility function to format date as DD/MM/YYYY
 const formatDate = (dateString: string | null): string => {
@@ -37,9 +38,9 @@ function matchesStatusFilter(status: string, filter: string): boolean {
 }
 
 const selectStyle: React.CSSProperties = {
-  fontSize: 12,
+  fontSize: 13,
   border: '1px solid var(--border)',
-  padding: '5px 8px',
+  padding: '8px 12px',
   color: 'var(--fg)',
   background: 'var(--bg)',
   outline: 'none',
@@ -47,11 +48,17 @@ const selectStyle: React.CSSProperties = {
   minWidth: 130,
 };
 
+// End-of-row sticky Status/Actions columns — keep these fixed widths in
+// sync with the `right` offsets on the sticky th/td styles below.
+const ACTIONS_COL_WIDTH = 90;
+const STATUS_COL_WIDTH = 160;
+
 type LendingRecord = {
   id: number;
   borrower_name: string;
   student_id_code: string | null;
   department: string;
+  department_code: string | null;
   domain_name: string;
   room_name: string;
   product_name: string;
@@ -70,14 +77,13 @@ type LendingRecord = {
 type Department = {
   department_id: string;
   department_name: string;
+  code: string | null;
 };
 
 type Product = {
   product_id: string;
   product_name: string;
   sku_code: string | null;
-  returnable: boolean;
-  consumable: boolean;
 };
 
 type CoeDomain = {
@@ -123,6 +129,7 @@ type LendingFormRow = {
     department_name: string | null;
     college_name: string | null;
     year_of_study: number | string;
+    is_lateral_entry: boolean;
     existing: boolean;
     student_name: string | null;
   };
@@ -737,7 +744,10 @@ export default function LendingPage() {
       // Fill the SKU in too — previously this got blanked back out right
       // after a successful SKU scan, which was the bug being fixed here.
       skuQuery: product.sku_code ?? "",
-      itemType: product.returnable ? "RETURNABLE" : "CONSUMABLE",
+      // No per-product flag to infer this from anymore — RETURNABLE is the
+      // default line type (matches createEmptyLine); switched per line via
+      // the item-type dropdown below.
+      itemType: "RETURNABLE",
     });
     setLineDropdown(null);
     checkStockForLine(rowId, lineId, product.product_id, Number(line?.quantity) || 1);
@@ -763,11 +773,15 @@ export default function LendingPage() {
     }
   };
 
-  // Decode on Enter or once the scanner/typist has produced a full
-  // 10-character code — works identically whether typed or scanned.
+  // Decode on Enter or once the scanner/typist has produced a full code —
+  // works identically whether typed or scanned. Gated on the pure local
+  // parse (not just a fixed length) since lateral-entry codes are 11
+  // characters instead of the regular 10 — a plain length check would
+  // either miss them or flash an "unrecognized" error for the 10-char
+  // in-progress prefix.
   const handleStudentIdChange = (rowId: string, value: string) => {
     updateRow(rowId, "studentIdCode", value);
-    if (value.trim().length >= 10) decodeStudentIdForRow(rowId, value);
+    if (decodeStudentIdCode(value.trim())) decodeStudentIdForRow(rowId, value);
   };
 
   // Jumps focus to the next row's Student ID field — the fast path for
@@ -802,6 +816,7 @@ export default function LendingPage() {
           department_name: data.department_name,
           college_name: data.college_name,
           year_of_study: data.year_of_study,
+          is_lateral_entry: !!data.is_lateral_entry,
           existing: data.existing,
           student_name: data.student_name,
         },
@@ -1083,9 +1098,13 @@ export default function LendingPage() {
         <td style={{ padding: '7px 10px', color: 'var(--muted)' }}>{nested ? '' : groupIdx + 1}</td>
         <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>{nested ? '' : (record.borrower_name || '—')}</td>
         <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: 11 }}>{nested ? '' : (record.student_id_code || '—')}</td>
-        <td style={{ padding: '7px 10px', color: 'var(--fg)' }}>{nested ? '' : (record.department || '—')}</td>
+        <td style={{ padding: '7px 10px', color: 'var(--fg)' }}>{nested ? '' : (record.department_code || record.department || '—')}</td>
         <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>{nested ? '' : `${record.domain_name}${record.room_name !== '—' ? ` / ${record.room_name}` : ''}`}</td>
-        <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap', paddingLeft: nested ? 22 : undefined }}>{record.product_name || '—'}</td>
+        <td style={{ padding: '7px 10px', maxWidth: 220 }}>
+          <div style={{ overflowX: 'auto', whiteSpace: 'nowrap', color: 'var(--fg)', paddingLeft: nested ? 22 : undefined }} title={record.product_name || undefined}>
+            {record.product_name || '—'}
+          </div>
+        </td>
         <td style={{ padding: '7px 10px' }}>
           <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 6px', background: record.item_type === 'RETURNABLE' ? '#dbeafe' : '#ede9fe', color: record.item_type === 'RETURNABLE' ? '#1e40af' : '#6d28d9', letterSpacing: '0.04em' }}>
             {record.item_type || '—'}
@@ -1142,7 +1161,7 @@ export default function LendingPage() {
             </button>
           )}
         </td>
-        <td style={{ padding: '7px 10px' }}>
+        <td className="sticky-col" style={{ padding: '7px 10px', right: ACTIONS_COL_WIDTH, width: STATUS_COL_WIDTH, background: nested ? 'var(--surface)' : '#fff' }}>
           {(['PENDING', 'PARTIALLY_RETURNED', 'PARTIALLY_DAMAGED', 'PARTIALLY_LOST'].includes(record.status)) ? (
             <select
               value={record.status}
@@ -1151,7 +1170,8 @@ export default function LendingPage() {
                 else if (e.target.value === 'DO_LOST') { setLostRowIdx(flatIdx); setLostQtyStr('1'); }
                 else if (e.target.value === 'DO_RETURN') { setReturnPickerRowIdx(flatIdx); setReturnPickerDate(new Date().toISOString().split('T')[0]); setReturnPickerQty(record.quantity); }
               }}
-              style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}
+              className="dropdown-control"
+              style={{ fontSize: 12, fontWeight: 600, padding: '6px 10px', border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer', width: '100%', maxWidth: STATUS_COL_WIDTH - 20, boxSizing: 'border-box', overflow: 'hidden', textOverflow: 'ellipsis' }}
             >
               <option value={record.status}>
                 {record.status === 'PENDING' ? 'PENDING'
@@ -1201,7 +1221,7 @@ export default function LendingPage() {
             })()
           )}
         </td>
-        <td style={{ padding: '7px 10px' }}>
+        <td className="sticky-col" style={{ padding: '7px 10px', right: 0, width: ACTIONS_COL_WIDTH, background: nested ? 'var(--surface)' : '#fff' }}>
           {editingRow === flatIdx ? (
             <div style={{ display: 'flex', gap: 6 }}>
               <button onClick={handleSaveEdit} style={{ padding: '3px 10px', fontSize: 11, fontWeight: 600, background: '#16a34a', color: '#fff', border: 'none', cursor: 'pointer' }}>Save</button>
@@ -1298,11 +1318,11 @@ export default function LendingPage() {
 
       {/* Filters */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} style={selectStyle}>
+        <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} style={selectStyle} className="dropdown-control">
           <option value="">All Departments</option>
-          {departments.map(d => <option key={d.department_id} value={d.department_name}>{d.department_name}</option>)}
+          {departments.map(d => <option key={d.department_id} value={d.department_name}>{d.code || d.department_name}</option>)}
         </select>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={selectStyle}>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={selectStyle} className="dropdown-control">
           <option value="">All Status</option>
           <option value="PENDING">Pending</option>
           <option value="CONSUMABLE">Consumable</option>
@@ -1310,11 +1330,11 @@ export default function LendingPage() {
           <option value="DAMAGED">Damaged</option>
           <option value="LOST">Lost</option>
         </select>
-        <select value={productFilter} onChange={e => setProductFilter(e.target.value)} style={selectStyle}>
+        <select value={productFilter} onChange={e => setProductFilter(e.target.value)} style={selectStyle} className="dropdown-control">
           <option value="">All Products</option>
           {uniqueProducts.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
-        <select value={itemTypeFilter} onChange={e => setItemTypeFilter(e.target.value)} style={selectStyle}>
+        <select value={itemTypeFilter} onChange={e => setItemTypeFilter(e.target.value)} style={selectStyle} className="dropdown-control">
           <option value="">All Item Types</option>
           <option value="RETURNABLE">Returnable</option>
           <option value="CONSUMABLE">Consumable</option>
@@ -1340,7 +1360,7 @@ export default function LendingPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }} className="[&_td]:border [&_td]:border-[#E5E7EB]">
           <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
             <tr style={{ background: 'var(--surface)' }}>
-              <th style={{ padding: '6px 10px', border: '1px solid #E5E7EB', width: 20 }}></th>
+              <th style={{ padding: '6px 10px', border: '1px solid #E5E7EB', width: 40 }}></th>
               {['S.No', 'Student', 'Student ID', 'Dept', 'Domain/Room', 'Product', 'Item Type'].map((h) => (
                 <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #E5E7EB', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
               ))}
@@ -1351,9 +1371,8 @@ export default function LendingPage() {
               <th onClick={() => handleSort('lending_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #E5E7EB', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Lent Date <SortIcon col="lending_date" /></span></th>
               <th onClick={() => handleSort('due_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #E5E7EB', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Due Date <SortIcon col="due_date" /></span></th>
               <th onClick={() => handleSort('return_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #E5E7EB', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Return Date <SortIcon col="return_date" /></span></th>
-              {['Status', 'Actions'].map((h) => (
-                <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #E5E7EB', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
-              ))}
+              <th className="sticky-col" style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #E5E7EB', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none', right: ACTIONS_COL_WIDTH, width: STATUS_COL_WIDTH, background: 'var(--surface)' }}>Status</th>
+              <th className="sticky-col" style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid #E5E7EB', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none', right: 0, width: ACTIONS_COL_WIDTH, background: 'var(--surface)' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1397,7 +1416,7 @@ export default function LendingPage() {
                         <button
                           onClick={() => toggleExpanded(group.key)}
                           title={isExpanded ? 'Collapse' : `Show ${group.records.length} items`}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 11, padding: 0, lineHeight: 1 }}
+                          className="row-toggle-btn"
                         >
                           {isExpanded ? '▾' : '▸'}
                         </button>
@@ -1405,10 +1424,12 @@ export default function LendingPage() {
                       <td style={{ padding: '7px 10px', color: 'var(--muted)' }}>{groupIdx + 1}</td>
                       <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>{first.borrower_name || '—'}</td>
                       <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: 11 }}>{first.student_id_code || '—'}</td>
-                      <td style={{ padding: '7px 10px', color: 'var(--fg)' }}>{first.department || '—'}</td>
+                      <td style={{ padding: '7px 10px', color: 'var(--fg)' }}>{first.department_code || first.department || '—'}</td>
                       <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>{first.domain_name}{first.room_name !== '—' ? ` / ${first.room_name}` : ''}</td>
-                      <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }} title={group.records.map((r) => r.product_name).join(', ')}>
-                        {group.records.length} items ({group.records.map((r) => r.product_name).filter(Boolean).join(', ')})
+                      <td style={{ padding: '7px 10px', maxWidth: 220 }}>
+                        <div style={{ overflowX: 'auto', whiteSpace: 'nowrap', color: 'var(--fg)' }} title={group.records.map((r) => r.product_name).join(', ')}>
+                          {group.records.length} items ({group.records.map((r) => r.product_name).filter(Boolean).join(', ')})
+                        </div>
                       </td>
                       <td style={{ padding: '7px 10px' }}>
                         <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 6px', background: 'var(--surface)', color: 'var(--muted)', letterSpacing: '0.04em' }}>
@@ -1423,7 +1444,7 @@ export default function LendingPage() {
                       <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>{formatDate(group.date)}</td>
                       <td style={{ padding: '7px 10px', color: 'var(--fg)', whiteSpace: 'nowrap' }}>{allDueDatesMatch ? formatDate(first.due_date) : 'Multiple'}</td>
                       <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>{allReturnDatesMatch ? formatDate(first.return_date) : 'Multiple'}</td>
-                      <td style={{ padding: '7px 10px' }}>
+                      <td className="sticky-col" style={{ padding: '7px 10px', right: ACTIONS_COL_WIDTH, width: STATUS_COL_WIDTH, background: isExpanded ? 'var(--surface)' : '#fff' }}>
                         {agg.retd > 0 || agg.damaged > 0 || agg.lost > 0 ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                             {agg.retd > 0 && <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: '#dcfce7', color: '#166534', whiteSpace: 'nowrap' }}>{agg.retd} Returned</span>}
@@ -1435,7 +1456,7 @@ export default function LendingPage() {
                           <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', background: 'var(--surface)', color: 'var(--muted)' }}>PENDING</span>
                         )}
                       </td>
-                      <td style={{ padding: '7px 10px' }}></td>
+                      <td className="sticky-col" style={{ padding: '7px 10px', right: 0, width: ACTIONS_COL_WIDTH, background: isExpanded ? 'var(--surface)' : '#fff' }}></td>
                     </tr>
                     {isExpanded && group.records.map((record) => renderItemRow(record, filteredRecords.indexOf(record), groupIdx, true))}
                   </Fragment>
@@ -1620,7 +1641,9 @@ export default function LendingPage() {
                             title="Enter: decode and next row · F2: skip to next row"
                           />
                           {row.decoded?.department_name && (
-                            <div style={{ fontSize: 9, color: 'var(--accent)', marginTop: 2 }}>{row.decoded.department_name}{row.decoded.existing ? ' · on file' : ' · new'}</div>
+                            <div style={{ fontSize: 9, color: 'var(--accent)', marginTop: 2 }}>
+                              {row.decoded.department_name}{row.decoded.existing ? ' · on file' : ' · new'}{row.decoded.is_lateral_entry ? ' · Lateral Entry' : ''}
+                            </div>
                           )}
                           {row.decodeError && <div style={{ fontSize: 9, color: '#dc2626', marginTop: 2 }}>{row.decodeError}</div>}
                         </div>

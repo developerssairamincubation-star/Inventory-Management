@@ -7,6 +7,7 @@ import { usePagination } from "@/hooks/usePagination";
 import Pagination from "@/components/Pagination";
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
 import { groupByStudentAndDate, computeItemCounts } from "@/lib/groupLendingRecords";
+import { presetRange, inDateRange, type DatePreset } from "@/lib/dateRangePresets";
 
 // Where a returnable item actually gets marked returned/damaged/lost. This
 // used to be a read-only product catalog (returnable=true products), which
@@ -28,6 +29,12 @@ const formatDate = (dateString: string | null): string => {
 type SortCol = "lending_date" | "due_date" | "return_date" | "original_quantity" | null;
 type SortDir = "asc" | "desc";
 
+// A record is still "open" (something outstanding to mark) while its status
+// is one of these — anything else (RETURNED / RETURNED_DAMAGED /
+// RETURNED_LOST / DAMAGED / LOST) is a closed, terminal state. Drives both
+// the status-filter dropdown and the Pending Return / Returned tab split.
+const PENDING_STATUSES = ["PENDING", "PARTIALLY_RETURNED", "PARTIALLY_DAMAGED", "PARTIALLY_LOST"];
+
 // Coarser grouping than the raw status column — a status filter of "Damaged"
 // should also catch PARTIALLY_DAMAGED, not just the fully-damaged terminal
 // state (mirrors the same grouping used on the full Entry/lending table).
@@ -37,15 +44,15 @@ function matchesStatusFilter(status: string, filter: string): boolean {
   if (filter === "RETURNED") return ["RETURNED", "RETURNED_DAMAGED", "RETURNED_LOST"].includes(s);
   if (filter === "DAMAGED") return ["DAMAGED", "PARTIALLY_DAMAGED", "RETURNED_DAMAGED"].includes(s);
   if (filter === "LOST") return ["LOST", "PARTIALLY_LOST", "RETURNED_LOST"].includes(s);
-  if (filter === "PENDING") return ["PENDING", "PARTIALLY_RETURNED", "PARTIALLY_DAMAGED", "PARTIALLY_LOST"].includes(s);
+  if (filter === "PENDING") return PENDING_STATUSES.includes(s);
   return true;
 }
 
 
 const selectStyle: React.CSSProperties = {
-  fontSize: 12,
+  fontSize: 13,
   border: "1px solid var(--border)",
-  padding: "5px 8px",
+  padding: "8px 12px",
   color: "var(--fg)",
   background: "var(--bg)",
   outline: "none",
@@ -53,11 +60,17 @@ const selectStyle: React.CSSProperties = {
   minWidth: 130,
 };
 
+// The Status column is pinned to the end of the row so it stays reachable
+// while the table scrolls horizontally — keep this in sync with the
+// sticky th/td `width`/`right` below.
+const STATUS_COL_WIDTH = 160;
+
 type LendingRecord = {
   id: number;
   borrower_name: string;
   student_id_code: string | null;
   department: string;
+  department_code: string | null;
   domain_name: string;
   room_name: string;
   product_name: string;
@@ -90,10 +103,15 @@ const td: React.CSSProperties = { padding: "7px 10px", fontSize: 12, color: "var
 export default function ReturnablePage() {
   const [records, setRecords] = useState<LendingRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  // Pending Return vs Returned — splits the table into two toggleable
+  // sections instead of one long list mixing open and closed items.
+  const [activeTab, setActiveTab] = useState<"pending" | "returned">("pending");
   const [searchQuery, setSearchQuery] = useState("");
   const [deptFilter, setDeptFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [productFilter, setProductFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sortCol, setSortCol] = useState<SortCol>(null);
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const { showToast } = useToast();
@@ -273,7 +291,12 @@ export default function ReturnablePage() {
     }
   };
 
-  const uniqueDepartments = Array.from(new Set(records.map((r) => r.department).filter(Boolean)));
+  const uniqueDepartments = Array.from(
+    records.reduce((map, r) => {
+      if (r.department && r.department !== "—" && !map.has(r.department)) map.set(r.department, r.department_code ?? null);
+      return map;
+    }, new Map<string, string | null>())
+  ).map(([name, code]) => ({ name, code }));
   const uniqueProducts = Array.from(new Set(records.filter((r) => r.item_type === "RETURNABLE").map((r) => r.product_name).filter(Boolean)));
 
   const handleSort = (col: SortCol) => {
@@ -299,12 +322,23 @@ export default function ReturnablePage() {
     )
     .filter((r) => !deptFilter || r.department === deptFilter)
     .filter((r) => !statusFilter || matchesStatusFilter(r.status, statusFilter))
-    .filter((r) => !productFilter || r.product_name === productFilter);
+    .filter((r) => !productFilter || r.product_name === productFilter)
+    .filter((r) => inDateRange(r.lending_date, dateFrom, dateTo));
+
+  const pendingItemCount = displayRecords.filter((r) => PENDING_STATUSES.includes(r.status)).length;
+  const returnedItemCount = displayRecords.length - pendingItemCount;
+
+  // Item-level split, not group-level — a single (student, date) visit can
+  // mix already-returned and still-outstanding items, so the same group may
+  // legitimately show up on both tabs with a different subset of items.
+  const tabRecords = displayRecords.filter((r) =>
+    activeTab === "pending" ? PENDING_STATUSES.includes(r.status) : !PENDING_STATUSES.includes(r.status)
+  );
 
   // Two lending_order rows for the same student on the same day (a split
   // multi-item submission, or a re-scanned entry) read as one row here —
   // see groupByStudentAndDate for why grouping is date-local, not UTC.
-  const groups = groupByStudentAndDate(displayRecords);
+  const groups = groupByStudentAndDate(tabRecords);
 
   let sortedGroups = groups;
   if (sortCol) {
@@ -328,6 +362,13 @@ export default function ReturnablePage() {
   }
 
   const { page, setPage, totalPages, padRows, showAll, setShowAll, startIdx, endIdx, total } = usePagination(sortedGroups, { pageSize: 50 });
+
+  const applyDatePreset = (preset: DatePreset) => {
+    const { from, to } = presetRange(preset);
+    setDateFrom(from);
+    setDateTo(to);
+    setPage(1);
+  };
 
   const toggleExpanded = (key: string) => {
     setExpandedKeys((prev) => {
@@ -353,9 +394,13 @@ export default function ReturnablePage() {
         <td style={{ ...td, color: "var(--muted)" }}>{nested ? "" : groupIdx + 1}</td>
         <td style={{ ...td, whiteSpace: "nowrap" }}>{nested ? "" : (record.borrower_name || "—")}</td>
         <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{nested ? "" : (record.student_id_code || "—")}</td>
-        <td style={td}>{nested ? "" : (record.department || "—")}</td>
+        <td style={td}>{nested ? "" : (record.department_code || record.department || "—")}</td>
         <td style={{ ...td, whiteSpace: "nowrap" }}>{nested ? "" : `${record.domain_name}${record.room_name !== "—" ? ` / ${record.room_name}` : ""}`}</td>
-        <td style={{ ...td, whiteSpace: "nowrap", paddingLeft: nested ? 22 : undefined }}>{record.product_name || "—"}</td>
+        <td style={{ ...td, maxWidth: 220 }}>
+          <div style={{ overflowX: "auto", whiteSpace: "nowrap", paddingLeft: nested ? 22 : undefined }} title={record.product_name || undefined}>
+            {record.product_name || "—"}
+          </div>
+        </td>
         <td style={{ ...td, textAlign: "center" }}>{c.borrowed}</td>
         {qCell(c.retd, "#16a34a")}
         {qCell(c.damaged, "#dc2626")}
@@ -376,8 +421,8 @@ export default function ReturnablePage() {
             </button>
           )}
         </td>
-        <td style={td}>
-          {["PENDING", "PARTIALLY_RETURNED", "PARTIALLY_DAMAGED", "PARTIALLY_LOST"].includes(record.status) ? (
+        <td className="sticky-col" style={{ ...td, right: 0, width: STATUS_COL_WIDTH, background: nested ? "var(--surface)" : "#fff" }}>
+          {PENDING_STATUSES.includes(record.status) ? (
             <select
               value={record.status}
               onChange={(e) => {
@@ -385,7 +430,8 @@ export default function ReturnablePage() {
                 else if (e.target.value === "DO_LOST") { setLostRowIdx(flatIdx); setLostQtyStr("1"); }
                 else if (e.target.value === "DO_RETURN") { setReturnPickerRowIdx(flatIdx); setReturnPickerDate(new Date().toISOString().split("T")[0]); setReturnPickerQty(record.quantity); }
               }}
-              style={{ fontSize: 11, fontWeight: 600, padding: "2px 6px", border: "1px solid var(--border)", background: "#fff", color: "var(--fg)", cursor: "pointer" }}
+              className="dropdown-control"
+              style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", border: "1px solid var(--border)", background: "#fff", color: "var(--fg)", cursor: "pointer", width: "100%", maxWidth: STATUS_COL_WIDTH - 20, boxSizing: "border-box", overflow: "hidden", textOverflow: "ellipsis" }}
             >
               <option value={record.status}>
                 {record.status === "PENDING" ? "PENDING" : record.status === "PARTIALLY_RETURNED" ? "PARTIALLY RETURNED" : record.status === "PARTIALLY_DAMAGED" ? "PARTIALLY DAMAGED" : "PARTIALLY LOST"}
@@ -427,20 +473,38 @@ export default function ReturnablePage() {
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>Mark returnable items as returned, damaged, or lost</div>
       </div>
 
+      {/* Pending Return / Returned tabs */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 16, background: "var(--surface)", padding: 4, borderRadius: 6, width: "fit-content" }}>
+        <button
+          onClick={() => { setActiveTab("pending"); setPage(1); }}
+          className="seg-tab-btn"
+          style={{ background: activeTab === "pending" ? "var(--accent)" : "transparent", color: activeTab === "pending" ? "#fff" : "var(--fg)" }}
+        >
+          Pending Return{displayRecords.length > 0 ? ` (${pendingItemCount})` : ""}
+        </button>
+        <button
+          onClick={() => { setActiveTab("returned"); setPage(1); }}
+          className="seg-tab-btn"
+          style={{ background: activeTab === "returned" ? "var(--accent)" : "transparent", color: activeTab === "returned" ? "#fff" : "var(--fg)" }}
+        >
+          Returned{displayRecords.length > 0 ? ` (${returnedItemCount})` : ""}
+        </button>
+      </div>
+
       {/* Filters */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        <select value={deptFilter} onChange={(e) => { setDeptFilter(e.target.value); setPage(1); }} style={selectStyle}>
+        <select value={deptFilter} onChange={(e) => { setDeptFilter(e.target.value); setPage(1); }} style={selectStyle} className="dropdown-control">
           <option value="">All Departments</option>
-          {uniqueDepartments.map((d) => <option key={d} value={d}>{d}</option>)}
+          {uniqueDepartments.map((d) => <option key={d.name} value={d.name}>{d.code || d.name}</option>)}
         </select>
-        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} style={selectStyle}>
+        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} style={selectStyle} className="dropdown-control">
           <option value="">All Status</option>
           <option value="PENDING">Pending</option>
           <option value="RETURNED">Returned</option>
           <option value="DAMAGED">Damaged</option>
           <option value="LOST">Lost</option>
         </select>
-        <select value={productFilter} onChange={(e) => { setProductFilter(e.target.value); setPage(1); }} style={selectStyle}>
+        <select value={productFilter} onChange={(e) => { setProductFilter(e.target.value); setPage(1); }} style={selectStyle} className="dropdown-control">
           <option value="">All Products</option>
           {uniqueProducts.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
@@ -450,12 +514,38 @@ export default function ReturnablePage() {
           onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
           style={{ flex: 1, minWidth: 180, padding: "5px 10px", fontSize: 12, border: "1px solid var(--border)", color: "var(--fg)", background: "var(--bg)", outline: "none" }}
         />
-        {(deptFilter || statusFilter || productFilter || searchQuery) && (
+        {(deptFilter || statusFilter || productFilter || searchQuery || dateFrom || dateTo) && (
           <button
-            onClick={() => { setDeptFilter(""); setStatusFilter(""); setProductFilter(""); setSearchQuery(""); setPage(1); }}
+            onClick={() => { setDeptFilter(""); setStatusFilter(""); setProductFilter(""); setSearchQuery(""); setDateFrom(""); setDateTo(""); setPage(1); }}
             style={{ padding: "5px 10px", fontSize: 11, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: "pointer" }}
           >Clear</button>
         )}
+      </div>
+
+      {/* Date range filter */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        <label style={{ fontSize: 11, color: "var(--muted)" }}>From</label>
+        <input
+          type="date"
+          value={dateFrom}
+          max={dateTo || undefined}
+          onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+          className="dropdown-control"
+          style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--border)", color: "var(--fg)", background: "var(--bg)", outline: "none" }}
+        />
+        <label style={{ fontSize: 11, color: "var(--muted)" }}>To</label>
+        <input
+          type="date"
+          value={dateTo}
+          min={dateFrom || undefined}
+          onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+          className="dropdown-control"
+          style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--border)", color: "var(--fg)", background: "var(--bg)", outline: "none" }}
+        />
+        <div style={{ width: 1, height: 20, background: "var(--border)", margin: "0 2px" }} />
+        <button onClick={() => applyDatePreset("thisMonth")} className="seg-tab-btn" style={{ background: "var(--surface)", color: "var(--fg)" }}>This Month</button>
+        <button onClick={() => applyDatePreset("lastMonth")} className="seg-tab-btn" style={{ background: "var(--surface)", color: "var(--fg)" }}>Last Month</button>
+        <button onClick={() => applyDatePreset("thisYear")} className="seg-tab-btn" style={{ background: "var(--surface)", color: "var(--fg)" }}>This Year</button>
       </div>
 
       <div style={{ background: "#fff", border: "1px solid var(--border)", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -463,7 +553,7 @@ export default function ReturnablePage() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--surface)" }}>
               <tr>
-                <th style={{ ...th, width: 20 }}></th>
+                <th style={{ ...th, width: 40 }}></th>
                 {["S.No", "Student", "Student ID", "Dept", "Domain/Room", "Product"].map((h) => (
                   <th key={h} style={th}>{h}</th>
                 ))}
@@ -482,12 +572,12 @@ export default function ReturnablePage() {
                 <th onClick={() => handleSort("return_date")} style={{ ...th, cursor: "pointer" }}>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>Return Date <SortIcon col="return_date" /></span>
                 </th>
-                <th style={th}>Status</th>
+                <th className="sticky-col" style={{ ...th, right: 0, width: STATUS_COL_WIDTH, background: "var(--surface)" }}>Status</th>
               </tr>
             </thead>
             <tbody>
-              {displayRecords.length === 0 ? (
-                <tr><td colSpan={16} style={{ ...td, textAlign: "center", color: "var(--muted)", padding: "24px 10px" }}>No returnable records found</td></tr>
+              {tabRecords.length === 0 ? (
+                <tr><td colSpan={16} style={{ ...td, textAlign: "center", color: "var(--muted)", padding: "24px 10px" }}>{activeTab === "pending" ? "No pending returns" : "No returned records"} found</td></tr>
               ) : (
                 padRows.map((group, localIdx) => {
                   if (!group) {
@@ -523,7 +613,7 @@ export default function ReturnablePage() {
                           <button
                             onClick={() => toggleExpanded(group.key)}
                             title={isExpanded ? "Collapse" : `Show ${group.records.length} items`}
-                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 11, padding: 0, lineHeight: 1 }}
+                            className="row-toggle-btn"
                           >
                             {isExpanded ? "▾" : "▸"}
                           </button>
@@ -531,10 +621,12 @@ export default function ReturnablePage() {
                         <td style={{ ...td, color: "var(--muted)" }}>{groupIdx + 1}</td>
                         <td style={{ ...td, whiteSpace: "nowrap" }}>{first.borrower_name || "—"}</td>
                         <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{first.student_id_code || "—"}</td>
-                        <td style={td}>{first.department || "—"}</td>
+                        <td style={td}>{first.department_code || first.department || "—"}</td>
                         <td style={{ ...td, whiteSpace: "nowrap" }}>{first.domain_name}{first.room_name !== "—" ? ` / ${first.room_name}` : ""}</td>
-                        <td style={{ ...td, whiteSpace: "nowrap" }} title={group.records.map((r) => r.product_name).join(", ")}>
-                          {group.records.length} items ({group.records.map((r) => r.product_name).filter(Boolean).join(", ")})
+                        <td style={{ ...td, maxWidth: 220 }}>
+                          <div style={{ overflowX: "auto", whiteSpace: "nowrap" }} title={group.records.map((r) => r.product_name).join(", ")}>
+                            {group.records.length} items ({group.records.map((r) => r.product_name).filter(Boolean).join(", ")})
+                          </div>
                         </td>
                         <td style={{ ...td, textAlign: "center" }}>{agg.borrowed}</td>
                         {qCell(agg.retd, "#16a34a")}
@@ -544,7 +636,7 @@ export default function ReturnablePage() {
                         <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(group.date)}</td>
                         <td style={{ ...td, whiteSpace: "nowrap" }}>{allDueDatesMatch ? formatDate(first.due_date) : "Multiple"}</td>
                         <td style={{ ...td, whiteSpace: "nowrap" }}>{allReturnDatesMatch ? formatDate(first.return_date) : "Multiple"}</td>
-                        <td style={td}>
+                        <td className="sticky-col" style={{ ...td, right: 0, width: STATUS_COL_WIDTH, background: isExpanded ? "var(--surface)" : "#fff" }}>
                           {agg.retd > 0 || agg.damaged > 0 || agg.lost > 0 ? (
                             <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                               {agg.retd > 0 && <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", background: "#dcfce7", color: "#166534", whiteSpace: "nowrap" }}>{agg.retd} Returned</span>}
@@ -567,7 +659,7 @@ export default function ReturnablePage() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", background: "var(--surface)", padding: "8px 12px", borderTop: "1px solid var(--border)" }}>
-          <span>{total > 0 ? `Showing ${showAll ? total : Math.min(startIdx + 1, total)}–${showAll ? total : Math.min(endIdx, total)} of ${total}` : "No returnable records found"}</span>
+          <span>{total > 0 ? `Showing ${showAll ? total : Math.min(startIdx + 1, total)}–${showAll ? total : Math.min(endIdx, total)} of ${total}` : (activeTab === "pending" ? "No pending returns found" : "No returned records found")}</span>
           <Pagination page={page} totalPages={totalPages} onPageChange={setPage} showAll={showAll} onToggleShowAll={setShowAll} />
         </div>
       </div>

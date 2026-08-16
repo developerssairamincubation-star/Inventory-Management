@@ -6,6 +6,7 @@ import { usePagination } from "@/hooks/usePagination";
 import Pagination from "@/components/Pagination";
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
 import { groupByStudentAndDate } from "@/lib/groupLendingRecords";
+import { presetRange, inDateRange, type DatePreset } from "@/lib/dateRangePresets";
 
 // Lending-activity log of items handed out under consumable terms
 // (lending_item.item_type === 'CONSUMABLE') — contrast with Returnable,
@@ -15,6 +16,7 @@ interface ConsumableRecord {
   borrower_name: string;
   student_id_code: string | null;
   department: string;
+  department_code: string | null;
   domain_name: string;
   room_name: string;
   product_name: string;
@@ -37,9 +39,9 @@ type SortCol = "lending_date" | "quantity" | null;
 type SortDir = "asc" | "desc";
 
 const selectStyle: React.CSSProperties = {
-  fontSize: 12,
+  fontSize: 13,
   border: "1px solid var(--border)",
-  padding: "5px 8px",
+  padding: "8px 12px",
   color: "var(--fg)",
   background: "var(--bg)",
   outline: "none",
@@ -71,6 +73,8 @@ export default function ConsumablePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [deptFilter, setDeptFilter] = useState("");
   const [productFilter, setProductFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sortCol, setSortCol] = useState<SortCol>(null);
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -91,7 +95,12 @@ export default function ConsumablePage() {
     })();
   }, []);
 
-  const uniqueDepartments = Array.from(new Set(records.map((r) => r.department).filter(Boolean)));
+  const uniqueDepartments = Array.from(
+    records.reduce((map, r) => {
+      if (r.department && r.department !== "—" && !map.has(r.department)) map.set(r.department, r.department_code ?? null);
+      return map;
+    }, new Map<string, string | null>())
+  ).map(([name, code]) => ({ name, code }));
   const uniqueProducts = Array.from(new Set(records.map((r) => r.product_name).filter(Boolean)));
 
   const handleSort = (col: SortCol) => {
@@ -114,7 +123,8 @@ export default function ConsumablePage() {
       r.product_name?.toLowerCase().includes(searchQuery.toLowerCase())
     )
     .filter((r) => !deptFilter || r.department === deptFilter)
-    .filter((r) => !productFilter || r.product_name === productFilter);
+    .filter((r) => !productFilter || r.product_name === productFilter)
+    .filter((r) => inDateRange(r.lending_date, dateFrom, dateTo));
 
   // Two lending_order rows for the same student on the same day (a split
   // multi-item submission, or a re-scanned entry) read as one row here —
@@ -139,6 +149,13 @@ export default function ConsumablePage() {
 
   const { page, setPage, totalPages, padRows, showAll, setShowAll, startIdx, endIdx, total } = usePagination(sortedGroups, { pageSize: 50 });
 
+  const applyDatePreset = (preset: DatePreset) => {
+    const { from, to } = presetRange(preset);
+    setDateFrom(from);
+    setDateTo(to);
+    setPage(1);
+  };
+
   if (loading) return <div style={{ padding: 20, fontSize: 12, color: "var(--muted)" }}>Loading consumable records…</div>;
 
   return (
@@ -150,11 +167,11 @@ export default function ConsumablePage() {
 
       {/* Filters */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        <select value={deptFilter} onChange={(e) => { setDeptFilter(e.target.value); setPage(1); }} style={selectStyle}>
+        <select value={deptFilter} onChange={(e) => { setDeptFilter(e.target.value); setPage(1); }} style={selectStyle} className="dropdown-control">
           <option value="">All Departments</option>
-          {uniqueDepartments.map((d) => <option key={d} value={d}>{d}</option>)}
+          {uniqueDepartments.map((d) => <option key={d.name} value={d.name}>{d.code || d.name}</option>)}
         </select>
-        <select value={productFilter} onChange={(e) => { setProductFilter(e.target.value); setPage(1); }} style={selectStyle}>
+        <select value={productFilter} onChange={(e) => { setProductFilter(e.target.value); setPage(1); }} style={selectStyle} className="dropdown-control">
           <option value="">All Products</option>
           {uniqueProducts.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
@@ -164,12 +181,38 @@ export default function ConsumablePage() {
           onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
           style={{ flex: 1, minWidth: 180, padding: "5px 10px", fontSize: 12, border: "1px solid var(--border)", color: "var(--fg)", background: "var(--bg)", outline: "none" }}
         />
-        {(deptFilter || productFilter || searchQuery) && (
+        {(deptFilter || productFilter || searchQuery || dateFrom || dateTo) && (
           <button
-            onClick={() => { setDeptFilter(""); setProductFilter(""); setSearchQuery(""); setPage(1); }}
+            onClick={() => { setDeptFilter(""); setProductFilter(""); setSearchQuery(""); setDateFrom(""); setDateTo(""); setPage(1); }}
             style={{ padding: "5px 10px", fontSize: 11, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: "pointer" }}
           >Clear</button>
         )}
+      </div>
+
+      {/* Date range filter */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        <label style={{ fontSize: 11, color: "var(--muted)" }}>From</label>
+        <input
+          type="date"
+          value={dateFrom}
+          max={dateTo || undefined}
+          onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+          className="dropdown-control"
+          style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--border)", color: "var(--fg)", background: "var(--bg)", outline: "none" }}
+        />
+        <label style={{ fontSize: 11, color: "var(--muted)" }}>To</label>
+        <input
+          type="date"
+          value={dateTo}
+          min={dateFrom || undefined}
+          onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+          className="dropdown-control"
+          style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--border)", color: "var(--fg)", background: "var(--bg)", outline: "none" }}
+        />
+        <div style={{ width: 1, height: 20, background: "var(--border)", margin: "0 2px" }} />
+        <button onClick={() => applyDatePreset("thisMonth")} className="seg-tab-btn" style={{ background: "var(--surface)", color: "var(--fg)" }}>This Month</button>
+        <button onClick={() => applyDatePreset("lastMonth")} className="seg-tab-btn" style={{ background: "var(--surface)", color: "var(--fg)" }}>Last Month</button>
+        <button onClick={() => applyDatePreset("thisYear")} className="seg-tab-btn" style={{ background: "var(--surface)", color: "var(--fg)" }}>This Year</button>
       </div>
 
       <div style={{ background: "#fff", border: "1px solid var(--border)", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -199,10 +242,12 @@ export default function ConsumablePage() {
                       <td style={td}>{startIdx + idx + 1}</td>
                       <td style={{ ...td, fontWeight: 500 }}>{group.records[0].borrower_name || "—"}</td>
                       <td style={{ ...td, fontFamily: "monospace" }}>{group.records[0].student_id_code || "—"}</td>
-                      <td style={td}>{group.records[0].department || "—"}</td>
+                      <td style={td}>{group.records[0].department_code || group.records[0].department || "—"}</td>
                       <td style={td}>{group.records[0].domain_name}{group.records[0].room_name !== "—" ? ` / ${group.records[0].room_name}` : ""}</td>
-                      <td style={td} title={group.records.map((r) => `${r.product_name} (${r.quantity})`).join(", ")}>
-                        {group.records.map((r) => r.product_name).filter(Boolean).join(", ") || "—"}
+                      <td style={{ ...td, maxWidth: 220 }}>
+                        <div style={{ overflowX: "auto", whiteSpace: "nowrap" }} title={group.records.map((r) => `${r.product_name} (${r.quantity})`).join(", ")}>
+                          {group.records.map((r) => r.product_name).filter(Boolean).join(", ") || "—"}
+                        </div>
                       </td>
                       <td style={td}>{group.records.reduce((s, r) => s + r.quantity, 0)}</td>
                       <td style={td}>{formatDate(group.date)}</td>

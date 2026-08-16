@@ -14,7 +14,6 @@ type ProductItemDraft = {
   description: string;
   quantity: number | "";
   cost: number | "";
-  returnable: boolean | null;
   imageFile: File | null;
   imagePreview: string | null;
   category_id: string;
@@ -27,7 +26,6 @@ const KNOWN_FIELDS: { key: string; label: string }[] = [
   { key: "description", label: "Description" },
   { key: "quantity", label: "Quantity" },
   { key: "cost", label: "Cost" },
-  { key: "returnable", label: "Returnable" },
   { key: "category", label: "Category" },
   { key: "ignore", label: "Ignore" },
 ];
@@ -109,7 +107,6 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
           else if (/(desc)/.test(n)) suggested[idx] = "description";
           else if (/(qty|quantity|stock)/.test(n)) suggested[idx] = "quantity";
           else if (/(cost|price|unit)/.test(n)) suggested[idx] = "cost";
-          else if (/(return|returnable)/.test(n)) suggested[idx] = "returnable";
           else if (/(cat|category)/.test(n)) suggested[idx] = "category";
           else suggested[idx] = "ignore";
         });
@@ -142,11 +139,6 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
       if (found) return found.category_id;
       return isUuid(raw) ? raw : undefined;
     }
-    if (key === 'returnable') {
-      if (raw === '') return undefined;
-      const nl = raw.toLowerCase();
-      return (nl === '1' || nl === 'true' || nl === 'yes' || nl === 'y') ? true : false;
-    }
     return raw === '' ? undefined : raw;
   };
 
@@ -158,7 +150,6 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
         description: "",
         quantity: "",
         cost: "",
-        returnable: null,
         imageFile: null,
         imagePreview: null,
         category_id: "",
@@ -179,8 +170,6 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
           draft.productName = String(v);
         } else if (key === 'description') {
           draft.description = String(v);
-        } else if (key === 'returnable') {
-          draft.returnable = !!v;
         } else if (key === 'category') {
           draft.category_id = String(v);
         }
@@ -194,7 +183,6 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
       item.description ||
       item.quantity !== "" ||
       item.cost !== "" ||
-      item.returnable !== null ||
       item.category_id
     ));
   };

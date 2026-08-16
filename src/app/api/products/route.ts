@@ -63,15 +63,6 @@ export async function POST(req: NextRequest) {
     const unit_cost = body.cost ?? body.unit_cost
     const description: string | null = typeof body.description === 'string' ? body.description.slice(0, 2000) : null
     const image_url: string | null = body.image_url ?? null
-    // Determine `returnable` / `consumable` only when provided or derivable.
-    // If neither is provided, leave them undefined so DB defaults apply.
-    const hasReturnable = typeof body.returnable === 'boolean'
-    const hasConsumable = typeof body.consumable === 'boolean'
-    let returnable: boolean | undefined
-    let consumable: boolean | undefined
-    if (hasReturnable) returnable = body.returnable
-    if (hasConsumable) consumable = body.consumable
-    if (!hasReturnable && hasConsumable) returnable = !body.consumable
 
     const quantity = body.quantity ?? body.initial_quantity ?? null
     const category_id = body.category_id ?? null
@@ -112,8 +103,6 @@ export async function POST(req: NextRequest) {
         user_id: user.user_id,
         sku_code,
       }
-      if (consumable !== undefined) insertData.consumable = consumable
-      if (returnable !== undefined) insertData.returnable = returnable
       if (description) insertData.description = description
       if (category_id) insertData.category_id = category_id
 

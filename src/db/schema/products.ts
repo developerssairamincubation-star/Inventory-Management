@@ -3,7 +3,10 @@
 // Non-negative CHECK constraint on unit_cost lives in the Flyway migration,
 // not re-declared here. low_stock_threshold was removed in V19 — no
 // replacement low-stock mechanism for the coe-inventory use case.
-import { pgTable, uuid, varchar, numeric, boolean, text, timestamp } from "drizzle-orm/pg-core";
+// returnable/consumable were removed in V24 — whether a given lend is
+// returnable or consumable is chosen per line item at lending time
+// (lending_item.item_type, db/migrations/V15), not fixed per product.
+import { pgTable, uuid, varchar, numeric, text, timestamp } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { category } from "./category";
 import { users } from "./users";
@@ -13,8 +16,6 @@ export const products = pgTable("products", {
   product_name: varchar("product_name", { length: 250 }).notNull(),
   category_id: uuid("category_id").references(() => category.category_id, { onDelete: "set null" }),
   unit_cost: numeric("unit_cost", { precision: 12, scale: 2 }).notNull().default("0"),
-  returnable: boolean("returnable").notNull().default(true),
-  consumable: boolean("consumable").notNull().default(false),
   // Auto-generated, category-scoped SKU (db/migrations/V18 renamed this
   // from serial_number — it's been the UI's "SKU" field all along). Also
   // the barcode payload printed on product labels; lending's scan-to-fetch

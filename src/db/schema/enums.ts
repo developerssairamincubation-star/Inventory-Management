@@ -27,6 +27,6 @@ export const lendingOrderStatusEnum = pgEnum("lending_order_status", [
 ]);
 
 // Mirrors db/migrations/V15__lending_item_type.sql. Per-item
-// returnable/consumable marking, validated server-side against the
-// product's own returnable/consumable flags at lending creation time.
+// returnable/consumable marking, chosen freely at lending creation time
+// (no per-product flag to validate against as of V24).
 export const lendingItemTypeEnum = pgEnum("lending_item_type_enum", ["RETURNABLE", "CONSUMABLE"]);

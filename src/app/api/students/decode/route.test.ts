@@ -73,6 +73,15 @@ describe("POST /api/students/decode", () => {
     expect(body.department_id).toBeNull();
   });
 
+  it("decodes a lateral-entry code (L after the college code) and reports is_lateral_entry", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const res = await POST(new NextRequest("http://localhost/api/students/decode", { method: "POST", body: JSON.stringify({ student_id_code: "sitl24dr001" }) }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { department_id: string; is_lateral_entry: boolean };
+    expect(body.department_id).toBe(DEPT_ID);
+    expect(body.is_lateral_entry).toBe(true);
+  });
+
   it("reports existing:true and the stored name for a known student ID", async () => {
     mockGetAuthUser.mockResolvedValue(authedUser());
     await db.insert(students).values({ student_id_code: "sit24dr002", name: "Decode Route Student", department_id: DEPT_ID });

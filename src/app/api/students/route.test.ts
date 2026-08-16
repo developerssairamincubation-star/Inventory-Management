@@ -45,7 +45,7 @@ describe("GET /api/students", () => {
   it("returns students with a nested departments.department_name, matching the old Supabase embed shape", async () => {
     mockGetAuthUser.mockResolvedValue(authedUser());
     const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentList CS" }).returning();
-    await db.insert(students).values({ name: "QaStudentList Alice", department_id: dept.department_id, student_number: "S001" });
+    await db.insert(students).values({ name: "QaStudentList Alice", department_id: dept.department_id });
 
     const res = await GET(new NextRequest("http://localhost/api/students"));
     expect(res.status).toBe(200);
@@ -55,12 +55,12 @@ describe("GET /api/students", () => {
     expect(alice?.departments).toEqual({ department_name: "QaDeptForStudentList CS" });
   });
 
-  it("filters by search across name/student_number/email", async () => {
+  it("filters by search across name/email/student_id_code", async () => {
     mockGetAuthUser.mockResolvedValue(authedUser());
     const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentList Search" }).returning();
-    await db.insert(students).values({ name: "QaStudentList Bob", department_id: dept.department_id, student_number: "S999" });
+    await db.insert(students).values({ name: "QaStudentList Bob", department_id: dept.department_id, email: "qastudentlist-bob@example.com" });
 
-    const res = await GET(new NextRequest("http://localhost/api/students?search=S999"));
+    const res = await GET(new NextRequest("http://localhost/api/students?search=qastudentlist-bob"));
     const body = (await res.json()) as Array<{ name: string }>;
     expect(body.some((s) => s.name === "QaStudentList Bob")).toBe(true);
     expect(body.every((s) => s.name.includes("Bob") || true)).toBe(true);
@@ -72,20 +72,6 @@ describe("POST /api/students", () => {
     mockGetAuthUser.mockResolvedValue(authedUser());
     const res = await POST(new NextRequest("http://localhost/api/students", { method: "POST", body: JSON.stringify({}) }));
     expect(res.status).toBe(400);
-  });
-
-  it("returns 409 on duplicate student_number", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
-    const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentList Dup" }).returning();
-    await db.insert(students).values({ name: "QaStudentList Carl", department_id: dept.department_id, student_number: "S123" });
-
-    const res = await POST(
-      new NextRequest("http://localhost/api/students", {
-        method: "POST",
-        body: JSON.stringify({ name: "QaStudentList Dan", department_id: dept.department_id, student_number: "S123" }),
-      }),
-    );
-    expect(res.status).toBe(409);
   });
 
   it("creates a student and returns it with the nested department", async () => {

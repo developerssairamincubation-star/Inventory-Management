@@ -45,9 +45,9 @@ beforeAll(async () => {
   const [borrower] = await db.insert(students).values({ name: "Lending Id Borrower", department_id: DEPT_ID }).returning();
   BORROWER_ID = borrower.student_id;
   const [cat] = await db.insert(category).values({ category_name: "Lending Id Category" }).returning();
-  const [product] = await db.insert(products).values({ product_name: "Lending Id Product", unit_cost: "1", category_id: cat.category_id, returnable: true, consumable: false }).returning();
+  const [product] = await db.insert(products).values({ product_name: "Lending Id Product", unit_cost: "1", category_id: cat.category_id }).returning();
   PRODUCT_ID = product.product_id;
-  const [consumableProduct] = await db.insert(products).values({ product_name: "Lending Id Consumable", unit_cost: "1", category_id: cat.category_id, returnable: false, consumable: true }).returning();
+  const [consumableProduct] = await db.insert(products).values({ product_name: "Lending Id Consumable", unit_cost: "1", category_id: cat.category_id }).returning();
   CONSUMABLE_PRODUCT_ID = consumableProduct.product_id;
 });
 

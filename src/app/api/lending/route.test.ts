@@ -16,7 +16,7 @@ const mockGetAuthUser = vi.mocked(getAuthUser);
 let OWNER_ID: string;
 let DEPT_ID: string;
 let DOMAIN_ID: string;
-let PRODUCT_ID: string; // returnable
+let PRODUCT_ID: string;
 let CONSUMABLE_PRODUCT_ID: string;
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
@@ -39,10 +39,10 @@ beforeAll(async () => {
   const [domain] = await db.insert(coe_domains).values({ domain_name: "Lending Route Domain", room_name: "Lending Route Room" }).returning();
   DOMAIN_ID = domain.domain_id;
   const [cat] = await db.insert(category).values({ category_name: "Lending Route Category" }).returning();
-  const [product] = await db.insert(products).values({ product_name: "Lending Route Product", unit_cost: "1", category_id: cat.category_id, returnable: true, consumable: false }).returning();
+  const [product] = await db.insert(products).values({ product_name: "Lending Route Product", unit_cost: "1", category_id: cat.category_id }).returning();
   PRODUCT_ID = product.product_id;
   await db.insert(stocks).values({ product_id: PRODUCT_ID, quantity: 20 });
-  const [consumableProduct] = await db.insert(products).values({ product_name: "Lending Route Consumable", unit_cost: "1", category_id: cat.category_id, returnable: false, consumable: true }).returning();
+  const [consumableProduct] = await db.insert(products).values({ product_name: "Lending Route Consumable", unit_cost: "1", category_id: cat.category_id }).returning();
   CONSUMABLE_PRODUCT_ID = consumableProduct.product_id;
   await db.insert(stocks).values({ product_id: CONSUMABLE_PRODUCT_ID, quantity: 50 });
 });
@@ -162,20 +162,6 @@ describe("POST /api/lending", () => {
       }),
     );
     expect(res.status).toBe(422);
-  });
-
-  it("rejects item_type=RETURNABLE against a consumable-only product", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
-    const res = await POST(
-      new NextRequest("http://localhost/api/lending", {
-        method: "POST",
-        body: JSON.stringify({
-          student_id_code: "sit24lr004",
-          lending_items: [{ product_id: CONSUMABLE_PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
-        }),
-      }),
-    );
-    expect(res.status).toBe(400);
   });
 
   it("marks the order CONSUMABLE only when every item is consumable", async () => {

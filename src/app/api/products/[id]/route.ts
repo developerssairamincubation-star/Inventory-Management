@@ -215,7 +215,6 @@ export async function PUT(
     if (body.product_name !== undefined) updateData.product_name = body.product_name
     if (body.unit_cost !== undefined) updateData.unit_cost = String(body.unit_cost)
     if (body.description !== undefined) updateData.description = typeof body.description === 'string' ? body.description.slice(0, 2000) : null
-    if (body.returnable !== undefined) updateData.returnable = body.returnable
     if (body.category_id !== undefined) updateData.category_id = body.category_id
 
     const [updated] = await db

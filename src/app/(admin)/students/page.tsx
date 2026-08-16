@@ -4,13 +4,14 @@ import { useEffect, useState, useCallback } from "react";
 import { authFetch } from "@/contexts/UserContext";
 import { Plus, Pencil, Search, Users, Upload } from "lucide-react";
 import UploadStudentsCsvModal from "@/components/UploadStudentsCsvModal";
+import { usePagination } from "@/hooks/usePagination";
+import Pagination from "@/components/Pagination";
 
 type Department = { department_id: string; department_name: string; code: string | null };
 
 type Student = {
   student_id: string;
   name: string | null;
-  student_number: string | null;
   student_id_code: string | null;
   email: string | null;
   phone_number: string | null;
@@ -20,7 +21,6 @@ type Student = {
 
 type StudentForm = {
   name: string;
-  student_number: string;
   student_id_code: string;
   email: string;
   phone_number: string;
@@ -29,12 +29,27 @@ type StudentForm = {
 
 const EMPTY_FORM: StudentForm = {
   name: "",
-  student_number: "",
   student_id_code: "",
   email: "",
   phone_number: "",
   department_id: "",
 };
+
+// Row/column sizing matches the Entry and Returnable tables — same
+// compact bordered cells instead of the wider card-style padding.
+const th: React.CSSProperties = {
+  padding: "6px 10px",
+  fontSize: 10,
+  fontWeight: 600,
+  color: "var(--muted)",
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  border: "1px solid #E5E7EB",
+  textAlign: "left",
+  whiteSpace: "nowrap",
+  userSelect: "none",
+};
+const td: React.CSSProperties = { padding: "7px 10px", fontSize: 12, color: "var(--fg)", border: "1px solid #E5E7EB" };
 
 export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
@@ -73,6 +88,13 @@ export default function StudentsPage() {
     const t = setTimeout(() => loadStudents(search || undefined), 300);
     return () => clearTimeout(t);
   }, [search, loadStudents]);
+
+  const { page, setPage, totalPages, pageRows, showAll, setShowAll, startIdx, endIdx, total } = usePagination(students, { pageSize: 50 });
+
+  useEffect(() => {
+    setPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -120,7 +142,6 @@ export default function StudentsPage() {
     setEditStudent(s);
     setForm({
       name: s.name || "",
-      student_number: s.student_number || "",
       student_id_code: s.student_id_code || "",
       email: s.email || "",
       phone_number: s.phone_number || "",
@@ -274,52 +295,57 @@ export default function StudentsPage() {
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                {["Name", "Student ID Code", "Student No.", "Department", "Email", "Phone", "Actions"].map(h => (
-                  <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                    {h}
-                  </th>
+              <tr>
+                <th style={{ ...th, width: 50 }}>S.No</th>
+                {["Name", "Student ID Code", "Department", "Email", "Phone", "Actions"].map(h => (
+                  <th key={h} style={th}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {students.map((s, i) => (
-                <tr key={s.student_id} style={{ borderBottom: i < students.length - 1 ? "1px solid var(--border)" : "none" }}>
-                  <td style={{ padding: "12px 16px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {pageRows.map((s, i) => (
+                <tr key={s.student_id}>
+                  <td style={{ ...td, color: "var(--muted)" }}>{startIdx + i + 1}</td>
+                  <td style={td}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div style={{
-                        width: 30, height: 30, borderRadius: "50%", background: "#1E2938",
+                        width: 22, height: 22, borderRadius: "50%", background: "#1E2938",
                         display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 12, fontWeight: 700, color: "#fff", flexShrink: 0,
+                        fontSize: 10, fontWeight: 700, color: "#fff", flexShrink: 0,
                       }}>
                         {(s.name || "?").charAt(0).toUpperCase()}
                       </div>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{s.name || "—"}</span>
+                      <span style={{ fontWeight: 500, color: "var(--fg)" }}>{s.name || "—"}</span>
                     </div>
                   </td>
-                  <td style={{ padding: "12px 16px", fontSize: 13, color: "var(--muted)", fontFamily: "monospace" }}>{s.student_id_code || "—"}</td>
-                  <td style={{ padding: "12px 16px", fontSize: 13, color: "var(--muted)" }}>{s.student_number || "—"}</td>
-                  <td style={{ padding: "12px 16px", fontSize: 13, color: "var(--muted)" }}>
+                  <td style={{ ...td, fontFamily: "monospace" }}>{s.student_id_code || "—"}</td>
+                  <td style={td}>
                     {s.departments?.department_name || "—"}
                   </td>
-                  <td style={{ padding: "12px 16px", fontSize: 13, color: "var(--muted)" }}>{s.email || "—"}</td>
-                  <td style={{ padding: "12px 16px", fontSize: 13, color: "var(--muted)" }}>{s.phone_number || "—"}</td>
-                  <td style={{ padding: "12px 16px" }}>
+                  <td style={td}>{s.email || "—"}</td>
+                  <td style={td}>{s.phone_number || "—"}</td>
+                  <td style={td}>
                     <button
                       onClick={() => openEdit(s)}
                       style={{
                         display: "inline-flex", alignItems: "center", gap: 5,
-                        padding: "5px 12px", background: "transparent", border: "1px solid var(--border)",
-                        borderRadius: 6, fontSize: 12, fontWeight: 500, color: "var(--text)", cursor: "pointer",
+                        padding: "3px 10px", background: "transparent", border: "1px solid var(--border)",
+                        borderRadius: 6, fontSize: 11, fontWeight: 500, color: "var(--text)", cursor: "pointer",
                       }}
                     >
-                      <Pencil size={12} /> Edit
+                      <Pencil size={11} /> Edit
                     </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        )}
+        {!fetching && students.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--muted)" }}>
+            <span>{total > 0 ? `Showing ${showAll ? total : Math.min(startIdx + 1, total)}–${showAll ? total : Math.min(endIdx, total)} of ${total}` : ""}</span>
+            <Pagination page={page} totalPages={totalPages} onPageChange={setPage} showAll={showAll} onToggleShowAll={setShowAll} />
+          </div>
         )}
       </div>
 
@@ -348,9 +374,6 @@ export default function StudentsPage() {
             </Field>
             <Field label="Full Name" labelStyle={labelStyle}>
               <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required placeholder="Enter full name" />
-            </Field>
-            <Field label="Student Number" labelStyle={labelStyle}>
-              <input style={inputStyle} value={form.student_number} onChange={e => setForm(f => ({ ...f, student_number: e.target.value }))} placeholder="e.g. 2024CS001" />
             </Field>
             <Field label="Department" labelStyle={labelStyle}>
               <select style={inputStyle} value={form.department_id} onChange={e => setForm(f => ({ ...f, department_id: e.target.value }))}>
@@ -393,9 +416,6 @@ export default function StudentsPage() {
             </Field>
             <Field label="Full Name" labelStyle={labelStyle}>
               <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
-            </Field>
-            <Field label="Student Number" labelStyle={labelStyle}>
-              <input style={inputStyle} value={form.student_number} onChange={e => setForm(f => ({ ...f, student_number: e.target.value }))} />
             </Field>
             <Field label="Department" labelStyle={labelStyle}>
               <select style={inputStyle} value={form.department_id} onChange={e => setForm(f => ({ ...f, department_id: e.target.value }))}>

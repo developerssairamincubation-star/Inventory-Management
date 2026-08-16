@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
 
     const studentRows = studentIds.length
       ? await db
-          .select({ student_id: students.student_id, name: students.name, student_id_code: students.student_id_code, departments: { department_name: departments.department_name } })
+          .select({ student_id: students.student_id, name: students.name, student_id_code: students.student_id_code, departments: { department_name: departments.department_name, code: departments.code } })
           .from(students)
           .leftJoin(departments, eq(departments.department_id, students.department_id))
           .where(inArray(students.student_id, studentIds))
@@ -82,6 +82,7 @@ export async function GET(request: NextRequest) {
         borrower_name: borrower?.name || '—',
         student_id_code: borrower?.student_id_code || null,
         department: borrower?.departments?.department_name || '—',
+        department_code: borrower?.departments?.code || null,
         domain_name: domain?.domain_name || '—',
         room_name: domain?.room_name || '—',
         lending_date: order.created_at,
@@ -207,26 +208,20 @@ export async function POST(request: NextRequest) {
         borrowerId = createdStudent.student_id
       }
 
-      // Validate each item's claimed type against the product's own
-      // returnable/consumable flags — previously trusted from the client
-      // with no server-side check at all.
+      // item_type (RETURNABLE/CONSUMABLE) is chosen per line item here at
+      // lending time — there's no per-product flag to validate it against
+      // (products.returnable/consumable were dropped in V24). Still confirm
+      // every product_id is real.
       const productIds = lending_items.map((item) => item.product_id)
       const productRows = await tx
-        .select({ product_id: products.product_id, product_name: products.product_name, returnable: products.returnable, consumable: products.consumable })
+        .select({ product_id: products.product_id, product_name: products.product_name })
         .from(products)
         .where(inArray(products.product_id, productIds))
       const productMap = new Map(productRows.map((p) => [p.product_id, p]))
 
       for (const item of lending_items) {
-        const product = productMap.get(item.product_id)
-        if (!product) {
+        if (!productMap.has(item.product_id)) {
           throw new ApiError(400, 'VALIDATION_ERROR', `Unknown product_id: ${item.product_id}`)
-        }
-        if (item.item_type === 'RETURNABLE' && !product.returnable) {
-          throw new ApiError(400, 'VALIDATION_ERROR', `"${product.product_name}" is not marked returnable`)
-        }
-        if (item.item_type === 'CONSUMABLE' && !product.consumable) {
-          throw new ApiError(400, 'VALIDATION_ERROR', `"${product.product_name}" is not marked consumable`)
         }
       }
 
