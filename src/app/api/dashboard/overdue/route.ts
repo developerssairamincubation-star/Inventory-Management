@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { and, eq, inArray, lt } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { lending_order, lending_item, products, students, staffs } from '@/db/schema'
+import { lending_order, lending_item, products, students } from '@/db/schema'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 
 export const dynamic = 'force-dynamic'
@@ -18,9 +18,7 @@ export async function GET(req: NextRequest) {
         lending_order_id: lending_order.lending_order_id,
         due_date: lending_order.due_date,
         status: lending_order.status,
-        borrower_type: lending_order.borrower_type,
         borrower_student_id: lending_order.borrower_student_id,
-        borrower_staff_id: lending_order.borrower_staff_id,
       })
       .from(lending_order)
       .where(and(eq(lending_order.issued_by_user_id, user.user_id), lt(lending_order.due_date, today), eq(lending_order.status, 'PENDING')))
@@ -37,14 +35,11 @@ export async function GET(req: NextRequest) {
       .leftJoin(products, eq(products.product_id, lending_item.product_id))
       .where(inArray(lending_item.lend_order_id, orderIds))
 
-    const studentIds = overdueOrders.filter((o) => o.borrower_type === 'STUDENT' && o.borrower_student_id).map((o) => o.borrower_student_id as string)
-    const staffIds = overdueOrders.filter((o) => o.borrower_type === 'STAFF' && o.borrower_staff_id).map((o) => o.borrower_staff_id as string)
+    const studentIds = overdueOrders.filter((o) => o.borrower_student_id).map((o) => o.borrower_student_id as string)
 
     const studentRows = studentIds.length ? await db.select({ student_id: students.student_id, name: students.name }).from(students).where(inArray(students.student_id, studentIds)) : []
-    const staffRows = staffIds.length ? await db.select({ staff_id: staffs.staff_id, name: staffs.name }).from(staffs).where(inArray(staffs.staff_id, staffIds)) : []
 
     const studentMap = new Map(studentRows.map((s) => [s.student_id, s.name]))
-    const staffMap = new Map(staffRows.map((s) => [s.staff_id, s.name]))
 
     const itemsByOrder = new Map<string, typeof lendingItems>()
     for (const item of lendingItems) {
@@ -53,10 +48,7 @@ export async function GET(req: NextRequest) {
     }
 
     const overdueAlerts = overdueOrders.flatMap((order) => {
-      const borrowerName =
-        order.borrower_type === 'STUDENT'
-          ? (order.borrower_student_id && studentMap.get(order.borrower_student_id)) || 'Unknown Student'
-          : (order.borrower_staff_id && staffMap.get(order.borrower_staff_id)) || 'Unknown Staff'
+      const borrowerName = (order.borrower_student_id && studentMap.get(order.borrower_student_id)) || 'Unknown Student'
 
       const items = itemsByOrder.get(order.lending_order_id) || []
       return items.map((item) => ({

@@ -10,12 +10,13 @@ import {
   Box,
   NotepadText,
   Users,
-  UserPen,
   ReceiptIndianRupee,
   LogOut,
   ChevronsLeft,
   ChevronsRight,
   ShieldCheck,
+  RotateCcw,
+  PackageMinus,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -23,11 +24,12 @@ type NavItem = { label: string; href: string; icon: LucideIcon; adminOnly?: bool
 
 const nav: NavItem[] = [
   { label: "Dashboard",          href: "/dashboard", icon: LayoutDashboard    },
-  { label: "Product Management", href: "/products",  icon: Box                },
-  { label: "Lending Management", href: "/lending",   icon: NotepadText        },
+  { label: "Stock List",         href: "/products",  icon: Box                },
+  { label: "Entry",              href: "/lending",   icon: NotepadText        },
+  { label: "Returnable",         href: "/returnable", icon: RotateCcw         },
+  { label: "Consumable",         href: "/consumable", icon: PackageMinus      },
   { label: "Student Management", href: "/students",  icon: Users              },
-  { label: "Staff Management",   href: "/staffs",    icon: UserPen            },
-  { label: "Invoice Details",    href: "/billing",   icon: ReceiptIndianRupee },
+  { label: "Invoice",            href: "/billing",   icon: ReceiptIndianRupee },
   { label: "Admin Settings",     href: "/admin/settings", icon: ShieldCheck, adminOnly: true },
 ];
 

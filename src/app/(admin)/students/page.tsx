@@ -2,14 +2,16 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { authFetch } from "@/contexts/UserContext";
-import { Plus, Pencil, Search, Users } from "lucide-react";
+import { Plus, Pencil, Search, Users, Upload } from "lucide-react";
+import UploadStudentsCsvModal from "@/components/UploadStudentsCsvModal";
 
-type Department = { department_id: string; department_name: string };
+type Department = { department_id: string; department_name: string; code: string | null };
 
 type Student = {
   student_id: string;
-  name: string;
+  name: string | null;
   student_number: string | null;
+  student_id_code: string | null;
   email: string | null;
   phone_number: string | null;
   department_id: string | null;
@@ -19,6 +21,7 @@ type Student = {
 type StudentForm = {
   name: string;
   student_number: string;
+  student_id_code: string;
   email: string;
   phone_number: string;
   department_id: string;
@@ -27,6 +30,7 @@ type StudentForm = {
 const EMPTY_FORM: StudentForm = {
   name: "",
   student_number: "",
+  student_id_code: "",
   email: "",
   phone_number: "",
   department_id: "",
@@ -42,6 +46,9 @@ export default function StudentsPage() {
   const [form, setForm] = useState<StudentForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [decoding, setDecoding] = useState(false);
+  const [decodeInfo, setDecodeInfo] = useState<{ departmentName: string | null; error: string | null } | null>(null);
 
   const loadStudents = useCallback(async (q?: string) => {
     setFetching(true);
@@ -112,19 +119,61 @@ export default function StudentsPage() {
   function openEdit(s: Student) {
     setEditStudent(s);
     setForm({
-      name: s.name,
+      name: s.name || "",
       student_number: s.student_number || "",
+      student_id_code: s.student_id_code || "",
       email: s.email || "",
       phone_number: s.phone_number || "",
       department_id: s.department_id || "",
     });
+    setDecodeInfo(null);
     setError("");
   }
 
   function openAdd() {
     setForm(EMPTY_FORM);
+    setDecodeInfo(null);
     setError("");
     setShowAdd(true);
+  }
+
+  // Typed or scanned the same way — a barcode scanner just types characters
+  // + Enter into whatever input is focused. Fills department automatically;
+  // only prefills the name if it's currently blank, never overwrites one
+  // the admin already typed.
+  async function decodeIdCode() {
+    const code = form.student_id_code.trim();
+    if (!code) {
+      setDecodeInfo(null);
+      return;
+    }
+    setDecoding(true);
+    setDecodeInfo(null);
+    try {
+      const res = await authFetch("/api/students/decode", {
+        method: "POST",
+        body: JSON.stringify({ student_id_code: code }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setDecodeInfo({ departmentName: null, error: data.error || "Unrecognized student ID format" });
+        return;
+      }
+      if (data.error) {
+        setDecodeInfo({ departmentName: null, error: data.error });
+        return;
+      }
+      setForm(f => ({
+        ...f,
+        department_id: data.department_id || f.department_id,
+        name: !f.name && data.student_name ? data.student_name : f.name,
+      }));
+      setDecodeInfo({ departmentName: data.department_name, error: null });
+    } catch {
+      setDecodeInfo({ departmentName: null, error: "Failed to decode student ID" });
+    } finally {
+      setDecoding(false);
+    }
   }
 
   const inputStyle: React.CSSProperties = {
@@ -157,16 +206,35 @@ export default function StudentsPage() {
             Manage student records and department assignments
           </p>
         </div>
-        <button
-          onClick={openAdd}
-          style={{
-            display: "flex", alignItems: "center", gap: 6,
-            padding: "8px 16px", background: "#1E2938", color: "#fff",
-            border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer",
-          }}
-        >
-          <Plus size={15} /> Add Student
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <a
+            href="/templates/students-sample.csv"
+            download
+            style={{ fontSize: 12, color: "var(--accent)", textDecoration: "underline" }}
+          >
+            Download sample CSV
+          </a>
+          <button
+            onClick={() => setShowCsvModal(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "8px 16px", background: "var(--fg)", color: "#fff",
+              border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            <Upload size={15} /> Bulk Upload
+          </button>
+          <button
+            onClick={openAdd}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "8px 16px", background: "#1E2938", color: "#fff",
+              border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            <Plus size={15} /> Add Student
+          </button>
+        </div>
       </div>
 
       {/* Stats strip */}
@@ -207,7 +275,7 @@ export default function StudentsPage() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                {["Name", "Student No.", "Department", "Email", "Phone", "Actions"].map(h => (
+                {["Name", "Student ID Code", "Student No.", "Department", "Email", "Phone", "Actions"].map(h => (
                   <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                     {h}
                   </th>
@@ -229,6 +297,7 @@ export default function StudentsPage() {
                       <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{s.name || "—"}</span>
                     </div>
                   </td>
+                  <td style={{ padding: "12px 16px", fontSize: 13, color: "var(--muted)", fontFamily: "monospace" }}>{s.student_id_code || "—"}</td>
                   <td style={{ padding: "12px 16px", fontSize: 13, color: "var(--muted)" }}>{s.student_number || "—"}</td>
                   <td style={{ padding: "12px 16px", fontSize: 13, color: "var(--muted)" }}>
                     {s.departments?.department_name || "—"}
@@ -259,6 +328,24 @@ export default function StudentsPage() {
         <Modal title="Add New Student" onClose={() => setShowAdd(false)}>
           {error && <ErrorBox msg={error} />}
           <form onSubmit={handleAdd} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <Field label="Student ID Code (type or scan)" labelStyle={labelStyle}>
+              <input
+                style={{ ...inputStyle, fontFamily: "monospace" }}
+                value={form.student_id_code}
+                onChange={e => { setForm(f => ({ ...f, student_id_code: e.target.value })); setDecodeInfo(null); }}
+                onBlur={decodeIdCode}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); decodeIdCode(); } }}
+                placeholder="e.g. sit21cs025"
+                autoFocus
+              />
+              {decoding && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Decoding…</div>}
+              {decodeInfo?.departmentName && (
+                <div style={{ fontSize: 11, color: "#16a34a", marginTop: 4 }}>Resolved department: {decodeInfo.departmentName}</div>
+              )}
+              {decodeInfo?.error && (
+                <div style={{ fontSize: 11, color: "#dc2626", marginTop: 4 }}>{decodeInfo.error}</div>
+              )}
+            </Field>
             <Field label="Full Name" labelStyle={labelStyle}>
               <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required placeholder="Enter full name" />
             </Field>
@@ -287,6 +374,23 @@ export default function StudentsPage() {
         <Modal title="Edit Student" onClose={() => setEditStudent(null)}>
           {error && <ErrorBox msg={error} />}
           <form onSubmit={handleEdit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <Field label="Student ID Code (type or scan)" labelStyle={labelStyle}>
+              <input
+                style={{ ...inputStyle, fontFamily: "monospace" }}
+                value={form.student_id_code}
+                onChange={e => { setForm(f => ({ ...f, student_id_code: e.target.value })); setDecodeInfo(null); }}
+                onBlur={decodeIdCode}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); decodeIdCode(); } }}
+                placeholder="e.g. sit21cs025"
+              />
+              {decoding && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Decoding…</div>}
+              {decodeInfo?.departmentName && (
+                <div style={{ fontSize: 11, color: "#16a34a", marginTop: 4 }}>Resolved department: {decodeInfo.departmentName}</div>
+              )}
+              {decodeInfo?.error && (
+                <div style={{ fontSize: 11, color: "#dc2626", marginTop: 4 }}>{decodeInfo.error}</div>
+              )}
+            </Field>
             <Field label="Full Name" labelStyle={labelStyle}>
               <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
             </Field>
@@ -308,6 +412,14 @@ export default function StudentsPage() {
             <ModalActions onCancel={() => setEditStudent(null)} saving={saving} submitLabel="Save Changes" />
           </form>
         </Modal>
+      )}
+
+      {showCsvModal && (
+        <UploadStudentsCsvModal
+          onClose={() => setShowCsvModal(false)}
+          onDone={() => loadStudents(search || undefined)}
+          departments={departments}
+        />
       )}
     </div>
   );

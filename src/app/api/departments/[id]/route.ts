@@ -5,6 +5,7 @@ import { departments } from '@/db/schema'
 import { ApiError } from '@/lib/api/errors'
 import { fromError, ok } from '@/lib/api/response'
 import { forbiddenResponse, getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
+import { normalizeDepartmentCode } from '../route'
 
 export async function PUT(
   req: NextRequest,
@@ -23,11 +24,28 @@ export async function PUT(
       throw new ApiError(400, 'VALIDATION_ERROR', 'department_name is required')
     }
 
+    // Only touch `code` if the client actually sent the field — omitting it
+    // leaves the existing code alone; sending an empty string clears it.
+    const updateData: { department_name: string; code?: string | null } = { department_name }
+    if (body?.code !== undefined) {
+      const code = normalizeDepartmentCode(body.code)
+      if (code) {
+        const [existing] = await db
+          .select({ department_id: departments.department_id })
+          .from(departments)
+          .where(eq(departments.code, code))
+        if (existing && existing.department_id !== id) {
+          throw new ApiError(409, 'CONFLICT', 'A department with this code already exists')
+        }
+      }
+      updateData.code = code
+    }
+
     const [row] = await db
       .update(departments)
-      .set({ department_name })
+      .set(updateData)
       .where(eq(departments.department_id, id))
-      .returning({ department_id: departments.department_id, department_name: departments.department_name })
+      .returning({ department_id: departments.department_id, department_name: departments.department_name, code: departments.code })
 
     if (!row) {
       throw new ApiError(404, 'NOT_FOUND', 'Department not found')

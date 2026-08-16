@@ -49,10 +49,14 @@ export async function PUT(
     const [order] = await db.select({ lending_order_id: lending_order.lending_order_id }).from(lending_order).where(and(eq(lending_order.lending_order_id, id), eq(lending_order.issued_by_user_id, user.user_id)))
     if (!order) return NextResponse.json({ error: "Lending record not found" }, { status: 404 });
 
-    const { due_date, return_date, status, mentor, quantity, original_quantity, product_id } = body;
+    const { due_date, return_date, status, quantity, original_quantity, product_id } = body;
 
     if (product_id !== undefined && quantity !== undefined) {
-      const [currentItem] = await db.select({ quantity: lending_item.quantity }).from(lending_item).where(and(eq(lending_item.lend_order_id, id), eq(lending_item.product_id, product_id)))
+      const [currentItem] = await db.select({ quantity: lending_item.quantity, item_type: lending_item.item_type }).from(lending_item).where(and(eq(lending_item.lend_order_id, id), eq(lending_item.product_id, product_id)))
+
+      if (currentItem && currentItem.item_type !== 'RETURNABLE') {
+        return NextResponse.json({ error: 'Only returnable items can be marked returned' }, { status: 400 });
+      }
 
       const previousOutstanding = currentItem?.quantity ?? 0;
       const nowReturning = previousOutstanding - quantity;
@@ -95,10 +99,6 @@ export async function PUT(
     if (due_date !== undefined) orderUpdate.due_date = due_date;
     if (return_date !== undefined) orderUpdate.return_date = return_date;
     if (status !== undefined) orderUpdate.status = status;
-    // Bug fix: this used to write `orderUpdate.mentor`, a column that
-    // doesn't exist — mentor reassignment silently never persisted. The
-    // real column is mentor_staff_id.
-    if (mentor !== undefined) orderUpdate.mentor_staff_id = mentor;
 
     if (Object.keys(orderUpdate).length > 0) {
       await db.update(lending_order).set(orderUpdate).where(eq(lending_order.lending_order_id, id));

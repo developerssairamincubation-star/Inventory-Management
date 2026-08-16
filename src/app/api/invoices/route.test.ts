@@ -23,6 +23,7 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
     full_name: "Test User",
     role: "user",
     is_active: true,
+    domain_id: null,
     ...overrides,
   };
 }

@@ -19,6 +19,7 @@ beforeAll(async () => {
     full_name: "Login Test User",
     role: "user",
     is_active: true,
+    domain_id: null,
   });
 });
 

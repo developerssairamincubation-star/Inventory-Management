@@ -2,12 +2,12 @@
 
 ## 1) Purpose and Scope
 - Web-based inventory management app built with Next.js (App Router) for admins and dashboard users.
-- Provides product, lending, billing, staff, student, and inventory workflows via REST-like API routes hosted in the same Next.js app.
+- Provides product, lending, billing, student, and inventory workflows via REST-like API routes hosted in the same Next.js app.
 
 ## 2) Architecture Overview
 - **Framework**: Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4 (via @tailwindcss/postcss) with custom globals.css theme tokens.
 - **UI Composition**: Layouts under `src/app/(admin)` and `src/app/(auth)` with shared `Navbar`, `Sidebar`, and `ProtectedRoute` components.
-- **APIs**: Route handlers in `src/app/api/**` for CRUD on products, lending, invoices, staffs, students, stocks, upload, auth, and dashboard stats.
+- **APIs**: Route handlers in `src/app/api/**` for CRUD on products, lending, invoices, students, stocks, upload, auth, and dashboard stats.
 - **Data/Storage**:
   - Local PostgreSQL, schema versioned by Flyway (`db/migrations/`), accessed via Drizzle ORM (`src/db/schema/*.ts`, `src/db/client.ts`).
   - JWT (httpOnly cookies) for auth/session, bcrypt-hashed passwords (`src/lib/authMiddleware.ts`, `src/lib/jwt.ts`, `src/lib/passwords.ts`, `src/lib/sessions.ts`).
@@ -37,11 +37,11 @@
 
 ## 5) Functional Requirements (high level)
 - Product management: create, list, search, update stock, upload product images.
-- Lending workflows: track lending items, statuses (including damaged/lost/partially returned), overdue/low-stock reporting.
+- Lending workflows: track lending items (student borrowers only), statuses (including damaged/lost/partially returned), overdue reporting.
 - Billing/Invoices: generate next invoice numbers and CRUD invoices.
-- User management: staffs and students records; admin user management with role-based access.
+- User management: student records; admin user management with role-based access.
 - Auth: email/password login, forgot/reset password, session refresh, logout.
-- Dashboard: aggregate stats (top lent, low stock, overdue) via API routes.
+- Dashboard: aggregate stats (top lent, overdue) via API routes.
 
 ## 6) Non-Functional Requirements
 - **Performance**: Dashboard/API endpoints should respond <500ms for typical queries; paginate long lists; debounce search in UI.

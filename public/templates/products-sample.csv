@@ -1,0 +1,7 @@
+product_name,description,quantity,cost,returnable,category
+Arduino Uno R3,ATmega328P microcontroller board,20,450.00,returnable,Arduino Boards
+ESP32 DevKit,Wi-Fi + Bluetooth dev board,15,600.00,returnable,ESP Boards
+Jumper Wires (M-M),Pack of 40 male-to-male jumper wires,50,80.00,consumable,Jumper Cables
+10k Ohm Resistor,1/4W carbon film resistor,200,2.00,consumable,Resistors
+100uF Capacitor,Electrolytic capacitor 25V,150,3.50,consumable,Capacitors
+Soldering Iron 60W,Adjustable temperature soldering station,5,1200.00,returnable,Soldering Equipment

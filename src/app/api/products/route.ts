@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { desc, eq, getTableColumns } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { products, stocks, product_image, category } from '@/db/schema'
-import { allocateNextCode } from '@/lib/idSequences'
+import { allocateNextCode, allocateNextSkuCode } from '@/lib/idSequences'
+import { suggestCategoryCode } from '@/lib/categoryCode'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 
 export const dynamic = 'force-dynamic'
@@ -12,6 +13,12 @@ export async function GET(req: NextRequest) {
   if (!user) return unauthorizedResponse()
 
   try {
+    const { searchParams } = new URL(req.url)
+    // SKUs are always generated uppercase — uppercase the incoming param so
+    // the scan-to-fetch match is case-insensitive without needing a
+    // functional index.
+    const sku = searchParams.get('sku')?.trim().toUpperCase()
+
     const rows = await db
       .select({
         ...getTableColumns(products),
@@ -23,8 +30,20 @@ export async function GET(req: NextRequest) {
       .leftJoin(stocks, eq(stocks.product_id, products.product_id))
       .leftJoin(product_image, eq(product_image.product_id, products.product_id))
       .leftJoin(category, eq(category.category_id, products.category_id))
-      .where(eq(products.user_id, user.user_id))
+      .where(
+        sku
+          ? and(eq(products.user_id, user.user_id), eq(products.sku_code, sku))
+          : eq(products.user_id, user.user_id)
+      )
       .orderBy(desc(products.created_at))
+
+    // Scan-to-fetch (lending's "Scan SKU" mode): exact match by barcode
+    // payload, single-product response instead of a list.
+    if (sku) {
+      const [match] = rows
+      if (!match) return NextResponse.json({ error: 'No product with that SKU' }, { status: 404 })
+      return NextResponse.json(match)
+    }
 
     return NextResponse.json(rows)
   } catch (err) {
@@ -41,9 +60,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
 
     const product_name = body.name ?? body.product_name
-    const serial_number = body.sku ?? body.serial_number
     const unit_cost = body.cost ?? body.unit_cost
-    const low_stock_threshold = body.low_stock_threshold ?? body.lowStockThreshold ?? null
+    const description: string | null = typeof body.description === 'string' ? body.description.slice(0, 2000) : null
     const image_url: string | null = body.image_url ?? null
     // Determine `returnable` / `consumable` only when provided or derivable.
     // If neither is provided, leave them undefined so DB defaults apply.
@@ -65,16 +83,38 @@ export async function POST(req: NextRequest) {
     const result = await db.transaction(async (tx) => {
       const product_code = await allocateNextCode(tx, 'product_code')
 
+      // SKU is always auto-generated, category-scoped, and the barcode
+      // payload printed on product labels — never client-supplied.
+      let skuPrefix = 'GEN'
+      if (category_id) {
+        const [cat] = await tx.select({ category_name: category.category_name, code: category.code }).from(category).where(eq(category.category_id, category_id))
+        if (cat?.code) {
+          skuPrefix = cat.code
+        } else if (cat) {
+          // This category predates the code feature (or was created without
+          // one) — backfill a unique code now, the same collision-avoiding
+          // suggestion used at category-creation time, instead of falling
+          // back to the shared literal "GEN". Two categories without a code
+          // both defaulting to "GEN" would generate colliding SKUs (the
+          // uncategorized-product sequence uses "GEN" too) — persisting a
+          // real code here the first time it's needed closes that gap for
+          // every future product in this category, not just this one.
+          skuPrefix = await suggestCategoryCode(tx, cat.category_name)
+          await tx.update(category).set({ code: skuPrefix }).where(eq(category.category_id, category_id))
+        }
+      }
+      const sku_code = await allocateNextSkuCode(tx, category_id, skuPrefix)
+
       const insertData: typeof products.$inferInsert = {
         product_code,
         product_name,
         unit_cost: String(unit_cost),
         user_id: user.user_id,
+        sku_code,
       }
       if (consumable !== undefined) insertData.consumable = consumable
       if (returnable !== undefined) insertData.returnable = returnable
-      if (serial_number) insertData.serial_number = serial_number
-      if (low_stock_threshold !== null && low_stock_threshold !== undefined) insertData.low_stock_threshold = low_stock_threshold
+      if (description) insertData.description = description
       if (category_id) insertData.category_id = category_id
 
       const [product] = await tx.insert(products).values(insertData).returning()

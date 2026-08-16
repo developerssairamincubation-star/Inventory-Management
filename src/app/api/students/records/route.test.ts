@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from "vites
 import { NextRequest } from "next/server";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
-import { students, departments, staffs, products, category, lending_order, lending_item, users } from "@/db/schema";
+import { students, departments, products, category, lending_order, lending_item, users } from "@/db/schema";
 
 vi.mock("@/lib/authMiddleware", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
@@ -22,6 +22,7 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
     full_name: "Test User",
     role: "user",
     is_active: true,
+    domain_id: null,
     ...overrides,
   };
 }
@@ -41,7 +42,6 @@ afterAll(async () => {
   await db.delete(lending_order).where(eq(lending_order.issued_by_user_id, OWNER_ID));
   await db.delete(products).where(eq(products.product_name, "Records Product"));
   await db.delete(category).where(eq(category.category_name, "Records Category"));
-  await db.delete(staffs).where(eq(staffs.name, "Records Mentor"));
   await db.delete(students).where(eq(students.name, "Records Student"));
   await db.delete(departments).where(eq(departments.department_name, "Records Dept"));
   await db.delete(users).where(eq(users.user_id, OWNER_ID));
@@ -58,12 +58,11 @@ describe("GET /api/students/records", () => {
     expect(res.status).toBe(401);
   });
 
-  it("builds one record per lending item, joined with student/department/mentor/product names", async () => {
+  it("builds one record per lending item, joined with student/department/product names", async () => {
     mockGetAuthUser.mockResolvedValue(authedUser());
 
     const [dept] = await db.insert(departments).values({ department_name: "Records Dept" }).returning();
-    const [student] = await db.insert(students).values({ name: "Records Student", department_id: dept.department_id }).returning();
-    const [mentor] = await db.insert(staffs).values({ name: "Records Mentor", department_id: dept.department_id }).returning();
+    const [student] = await db.insert(students).values({ name: "Records Student", department_id: dept.department_id, student_id_code: "sit24rc001" }).returning();
     const [cat] = await db.insert(category).values({ category_name: "Records Category" }).returning();
     const [product] = await db.insert(products).values({ product_name: "Records Product", category_id: cat.category_id }).returning();
 
@@ -73,7 +72,6 @@ describe("GET /api/students/records", () => {
         borrower_type: "STUDENT",
         borrower_student_id: student.student_id,
         issued_by_user_id: OWNER_ID,
-        mentor_staff_id: mentor.staff_id,
         status: "PENDING",
       })
       .returning();
@@ -92,8 +90,8 @@ describe("GET /api/students/records", () => {
     const record = body.records.find((r) => r.student_id === student.student_id);
     expect(record).toMatchObject({
       student_name: "Records Student",
+      student_id_code: "sit24rc001",
       department: "Records Dept",
-      mentor: "Records Mentor",
       product_name: "Records Product",
       quantity: 3,
       status: "PENDING",

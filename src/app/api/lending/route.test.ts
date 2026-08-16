@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from "vites
 import { NextRequest } from "next/server";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
-import { users, departments, products, category, stocks, students, staffs, lending_order, lending_item } from "@/db/schema";
+import { users, departments, products, category, stocks, students, lending_order, lending_item, coe_domains } from "@/db/schema";
 
 vi.mock("@/lib/authMiddleware", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
@@ -15,7 +15,9 @@ import { GET, POST } from "./route";
 const mockGetAuthUser = vi.mocked(getAuthUser);
 let OWNER_ID: string;
 let DEPT_ID: string;
-let PRODUCT_ID: string;
+let DOMAIN_ID: string;
+let PRODUCT_ID: string; // returnable
+let CONSUMABLE_PRODUCT_ID: string;
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
@@ -24,6 +26,7 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
     full_name: "Test User",
     role: "user",
     is_active: true,
+    domain_id: DOMAIN_ID,
     ...overrides,
   };
 }
@@ -31,12 +34,17 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
 beforeAll(async () => {
   const [owner] = await db.insert(users).values({ email: `lending-route-owner-${Date.now()}@example.com`, password_hash: "irrelevant", full_name: "Lending Owner" }).returning();
   OWNER_ID = owner.user_id;
-  const [dept] = await db.insert(departments).values({ department_name: "Lending Route Dept" }).returning();
+  const [dept] = await db.insert(departments).values({ department_name: "Lending Route Dept", code: "LR" }).returning();
   DEPT_ID = dept.department_id;
+  const [domain] = await db.insert(coe_domains).values({ domain_name: "Lending Route Domain", room_name: "Lending Route Room" }).returning();
+  DOMAIN_ID = domain.domain_id;
   const [cat] = await db.insert(category).values({ category_name: "Lending Route Category" }).returning();
-  const [product] = await db.insert(products).values({ product_name: "Lending Route Product", unit_cost: "1", category_id: cat.category_id }).returning();
+  const [product] = await db.insert(products).values({ product_name: "Lending Route Product", unit_cost: "1", category_id: cat.category_id, returnable: true, consumable: false }).returning();
   PRODUCT_ID = product.product_id;
   await db.insert(stocks).values({ product_id: PRODUCT_ID, quantity: 20 });
+  const [consumableProduct] = await db.insert(products).values({ product_name: "Lending Route Consumable", unit_cost: "1", category_id: cat.category_id, returnable: false, consumable: true }).returning();
+  CONSUMABLE_PRODUCT_ID = consumableProduct.product_id;
+  await db.insert(stocks).values({ product_id: CONSUMABLE_PRODUCT_ID, quantity: 50 });
 });
 
 afterAll(async () => {
@@ -44,12 +52,12 @@ afterAll(async () => {
   const orderIds = orders.map((o) => o.id);
   if (orderIds.length) await db.delete(lending_item).where(inArray(lending_item.lend_order_id, orderIds));
   await db.delete(lending_order).where(eq(lending_order.issued_by_user_id, OWNER_ID));
-  await db.delete(stocks).where(eq(stocks.product_id, PRODUCT_ID));
-  await db.delete(products).where(eq(products.product_id, PRODUCT_ID));
+  await db.delete(stocks).where(inArray(stocks.product_id, [PRODUCT_ID, CONSUMABLE_PRODUCT_ID]));
+  await db.delete(products).where(inArray(products.product_id, [PRODUCT_ID, CONSUMABLE_PRODUCT_ID]));
   await db.delete(category).where(eq(category.category_name, "Lending Route Category"));
   await db.delete(students).where(eq(students.department_id, DEPT_ID));
-  await db.delete(staffs).where(eq(staffs.department_id, DEPT_ID));
   await db.delete(departments).where(eq(departments.department_id, DEPT_ID));
+  await db.delete(coe_domains).where(eq(coe_domains.domain_id, DOMAIN_ID));
   await db.delete(users).where(eq(users.user_id, OWNER_ID));
 });
 
@@ -66,51 +74,147 @@ describe("GET /api/lending", () => {
 });
 
 describe("POST /api/lending", () => {
-  it("creates a new student borrower, order, items, and decrements stock atomically", async () => {
+  it("decodes the student ID, creates a new student, order, items, and decrements stock atomically", async () => {
     mockGetAuthUser.mockResolvedValue(authedUser());
 
     const res = await POST(
       new NextRequest("http://localhost/api/lending", {
         method: "POST",
         body: JSON.stringify({
-          borrower_type: "STUDENT",
-          borrower_name: "Lending Route New Student",
-          department_id: DEPT_ID,
-          lending_items: [{ product_id: PRODUCT_ID, quantity: 3 }],
-          status: "PENDING",
+          student_id_code: "sit24lr001",
+          student_name: "Lending Route New Student",
+          lending_items: [{ product_id: PRODUCT_ID, quantity: 3, item_type: "RETURNABLE" }],
         }),
       }),
     );
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { order: { lending_order_id: string; status: string }; items: Array<{ quantity: number }> };
+    const body = (await res.json()) as { order: { lending_order_id: string; status: string; domain_id: string }; items: Array<{ quantity: number }> };
     expect(body.items[0].quantity).toBe(3);
+    expect(body.order.status).toBe("PENDING");
+    expect(body.order.domain_id).toBe(DOMAIN_ID);
 
     const [stock] = await db.select({ quantity: stocks.quantity }).from(stocks).where(eq(stocks.product_id, PRODUCT_ID));
     expect(stock.quantity).toBe(17);
 
-    const [student] = await db.select().from(students).where(eq(students.name, "Lending Route New Student"));
+    const [student] = await db.select().from(students).where(eq(students.student_id_code, "sit24lr001"));
     expect(student).toBeDefined();
+    expect(student.name).toBe("Lending Route New Student");
+    expect(student.department_id).toBe(DEPT_ID);
   });
 
-  it("reuses an existing borrower with the same name+department instead of creating a duplicate", async () => {
+  it("reuses an existing borrower by student_id_code, only filling the name if it was blank", async () => {
     mockGetAuthUser.mockResolvedValue(authedUser());
-    const [existing] = await db.insert(students).values({ name: "Lending Route Existing Student", department_id: DEPT_ID }).returning();
+    const [existing] = await db.insert(students).values({ student_id_code: "sit24lr002", name: "Original Name", department_id: DEPT_ID }).returning();
 
     await POST(
       new NextRequest("http://localhost/api/lending", {
         method: "POST",
         body: JSON.stringify({
-          borrower_type: "STUDENT",
-          borrower_name: "Lending Route Existing Student",
-          department_id: DEPT_ID,
-          lending_items: [{ product_id: PRODUCT_ID, quantity: 1 }],
-          status: "PENDING",
+          student_id_code: "sit24lr002",
+          student_name: "Attempted Overwrite Name",
+          lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
         }),
       }),
     );
 
-    const matches = await db.select().from(students).where(eq(students.name, "Lending Route Existing Student"));
+    const matches = await db.select().from(students).where(eq(students.student_id_code, "sit24lr002"));
     expect(matches).toHaveLength(1);
     expect(matches[0].student_id).toBe(existing.student_id);
+    expect(matches[0].name).toBe("Original Name");
+  });
+
+  it("fills a blank name on re-scan", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    await db.insert(students).values({ student_id_code: "sit24lr003", name: null, department_id: DEPT_ID });
+
+    await POST(
+      new NextRequest("http://localhost/api/lending", {
+        method: "POST",
+        body: JSON.stringify({
+          student_id_code: "sit24lr003",
+          student_name: "Filled In Name",
+          lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
+        }),
+      }),
+    );
+
+    const [row] = await db.select().from(students).where(eq(students.student_id_code, "sit24lr003"));
+    expect(row.name).toBe("Filled In Name");
+  });
+
+  it("returns 400 for a malformed student ID", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const res = await POST(
+      new NextRequest("http://localhost/api/lending", {
+        method: "POST",
+        body: JSON.stringify({ student_id_code: "not-an-id", lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }] }),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 422 for a well-formed ID with an unknown department code", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const res = await POST(
+      new NextRequest("http://localhost/api/lending", {
+        method: "POST",
+        body: JSON.stringify({ student_id_code: "sit24zz001", lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }] }),
+      }),
+    );
+    expect(res.status).toBe(422);
+  });
+
+  it("rejects item_type=RETURNABLE against a consumable-only product", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const res = await POST(
+      new NextRequest("http://localhost/api/lending", {
+        method: "POST",
+        body: JSON.stringify({
+          student_id_code: "sit24lr004",
+          lending_items: [{ product_id: CONSUMABLE_PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
+        }),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("marks the order CONSUMABLE only when every item is consumable", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const res = await POST(
+      new NextRequest("http://localhost/api/lending", {
+        method: "POST",
+        body: JSON.stringify({
+          student_id_code: "sit24lr005",
+          lending_items: [{ product_id: CONSUMABLE_PRODUCT_ID, quantity: 2, item_type: "CONSUMABLE" }],
+        }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { order: { status: string } };
+    expect(body.order.status).toBe("CONSUMABLE");
+  });
+
+  it("requires an explicit domain_id when the issuing user has none, and accepts it", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser({ domain_id: null }));
+
+    const missing = await POST(
+      new NextRequest("http://localhost/api/lending", {
+        method: "POST",
+        body: JSON.stringify({ student_id_code: "sit24lr006", lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }] }),
+      }),
+    );
+    expect(missing.status).toBe(400);
+
+    const withDomain = await POST(
+      new NextRequest("http://localhost/api/lending", {
+        method: "POST",
+        body: JSON.stringify({
+          student_id_code: "sit24lr006",
+          lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
+          domain_id: DOMAIN_ID,
+        }),
+      }),
+    );
+    expect(withDomain.status).toBe(201);
   });
 });

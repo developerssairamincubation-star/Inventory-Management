@@ -21,6 +21,7 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
     full_name: "Test User",
     role: "user",
     is_active: true,
+    domain_id: null,
     ...overrides,
   };
 }
@@ -71,5 +72,64 @@ describe("PUT /api/students/[id]", () => {
     const body = (await res.json()) as { name: string; phone_number: string };
     expect(body.name).toBe("QaStudentItem Before");
     expect(body.phone_number).toBe("555-0100");
+  });
+
+  it("returns 400 for a malformed student_id_code", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentItem Malformed" }).returning();
+    const [student] = await db
+      .insert(students)
+      .values({ name: "QaStudentItem Malformed", department_id: dept.department_id })
+      .returning();
+
+    const res = await PUT(
+      new NextRequest(`http://localhost/api/students/${student.student_id}`, {
+        method: "PUT",
+        body: JSON.stringify({ student_id_code: "nope" }),
+      }),
+      { params: Promise.resolve({ id: student.student_id }) },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("resolves department_id from a decodable student_id_code", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentItem Decode", code: "ME" }).returning();
+    const [otherDept] = await db.insert(departments).values({ department_name: "QaDeptForStudentItem DecodeOther" }).returning();
+    const [student] = await db
+      .insert(students)
+      .values({ name: "QaStudentItem Decode", department_id: otherDept.department_id })
+      .returning();
+
+    const res = await PUT(
+      new NextRequest(`http://localhost/api/students/${student.student_id}`, {
+        method: "PUT",
+        body: JSON.stringify({ student_id_code: "SIT21ME050" }),
+      }),
+      { params: Promise.resolve({ id: student.student_id }) },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { student_id_code: string; department_id: string };
+    expect(body.student_id_code).toBe("sit21me050");
+    expect(body.department_id).toBe(dept.department_id);
+  });
+
+  it("returns 409 when the student_id_code is already taken by another student", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentItem Conflict", code: "IT" }).returning();
+    await db.insert(students).values({ name: "QaStudentItem ConflictTaken", department_id: dept.department_id, student_id_code: "sit20it222" });
+    const [student] = await db
+      .insert(students)
+      .values({ name: "QaStudentItem ConflictSubject", department_id: dept.department_id })
+      .returning();
+
+    const res = await PUT(
+      new NextRequest(`http://localhost/api/students/${student.student_id}`, {
+        method: "PUT",
+        body: JSON.stringify({ student_id_code: "sit20it222" }),
+      }),
+      { params: Promise.resolve({ id: student.student_id }) },
+    );
+    expect(res.status).toBe(409);
   });
 });

@@ -21,6 +21,7 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
     full_name: "Test User",
     role: "super_admin",
     is_active: true,
+    domain_id: null,
     ...overrides,
   };
 }
@@ -66,6 +67,31 @@ describe("PUT /api/departments/[id]", () => {
       { params: Promise.resolve({ id: "00000000-0000-0000-0000-000000000000" }) },
     );
     expect(res.status).toBe(404);
+  });
+
+  it("sets a code when provided, and leaves it alone when the field is omitted", async () => {
+    const [dept] = await db.insert(departments).values({ department_name: "QaDeptItem Coded" }).returning();
+    mockGetAuthUser.mockResolvedValue(authedUser());
+
+    const withCode = await PUT(
+      new NextRequest(`http://localhost/api/departments/${dept.department_id}`, {
+        method: "PUT",
+        body: JSON.stringify({ department_name: "QaDeptItem Coded", code: "zz" }),
+      }),
+      { params: Promise.resolve({ id: dept.department_id }) },
+    );
+    expect(withCode.status).toBe(200);
+    expect(((await withCode.json()) as { code: string }).code).toBe("ZZ");
+
+    const nameOnly = await PUT(
+      new NextRequest(`http://localhost/api/departments/${dept.department_id}`, {
+        method: "PUT",
+        body: JSON.stringify({ department_name: "QaDeptItem Coded Renamed" }),
+      }),
+      { params: Promise.resolve({ id: dept.department_id }) },
+    );
+    expect(nameOnly.status).toBe(200);
+    expect(((await nameOnly.json()) as { code: string }).code).toBe("ZZ");
   });
 });
 

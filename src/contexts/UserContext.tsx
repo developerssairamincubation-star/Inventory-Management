@@ -7,6 +7,7 @@ export type AppUser = {
   email: string;
   full_name: string;
   role: "super_admin" | "user";
+  domain: { domain_id: string; domain_name: string; room_name: string } | null;
 };
 
 type UserContextValue = {

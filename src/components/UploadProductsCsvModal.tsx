@@ -11,22 +11,22 @@ type Props = {
 type ProductItemDraft = {
   id: string;
   productName: string;
-  sku: string;
+  description: string;
   quantity: number | "";
   cost: number | "";
-  lowStockThreshold: number | "";
   returnable: boolean | null;
   imageFile: File | null;
   imagePreview: string | null;
   category_id: string;
 };
 
+// SKUs are auto-generated server-side (category-scoped, printable as a
+// barcode) — not a CSV column.
 const KNOWN_FIELDS: { key: string; label: string }[] = [
   { key: "product_name", label: "Product Name" },
-  { key: "sku", label: "SKU" },
+  { key: "description", label: "Description" },
   { key: "quantity", label: "Quantity" },
   { key: "cost", label: "Cost" },
-  { key: "low_stock_threshold", label: "Low Stock Threshold" },
   { key: "returnable", label: "Returnable" },
   { key: "category", label: "Category" },
   { key: "ignore", label: "Ignore" },
@@ -106,10 +106,9 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
         h.forEach((hd, idx) => {
           const n = normalise(hd);
           if (/(name|product)/.test(n)) suggested[idx] = "product_name";
-          else if (/(sku|serial|code)/.test(n)) suggested[idx] = "sku";
+          else if (/(desc)/.test(n)) suggested[idx] = "description";
           else if (/(qty|quantity|stock)/.test(n)) suggested[idx] = "quantity";
           else if (/(cost|price|unit)/.test(n)) suggested[idx] = "cost";
-          else if (/(low|threshold)/.test(n)) suggested[idx] = "low_stock_threshold";
           else if (/(return|returnable)/.test(n)) suggested[idx] = "returnable";
           else if (/(cat|category)/.test(n)) suggested[idx] = "category";
           else suggested[idx] = "ignore";
@@ -156,10 +155,9 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
       const draft: ProductItemDraft = {
         id: `csv-${Date.now()}-${rowIdx}`,
         productName: "",
-        sku: "",
+        description: "",
         quantity: "",
         cost: "",
-        lowStockThreshold: "",
         returnable: null,
         imageFile: null,
         imagePreview: null,
@@ -179,11 +177,8 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
           draft.quantity = Number.isFinite(parsed) ? parsed : "";
         } else if (key === 'product_name') {
           draft.productName = String(v);
-        } else if (key === 'sku') {
-          draft.sku = String(v);
-        } else if (key === 'low_stock_threshold') {
-          const parsed = Number(String(v).replace(/[^0-9\-]/g, ''));
-          draft.lowStockThreshold = Number.isFinite(parsed) ? parsed : "";
+        } else if (key === 'description') {
+          draft.description = String(v);
         } else if (key === 'returnable') {
           draft.returnable = !!v;
         } else if (key === 'category') {
@@ -196,10 +191,9 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
 
     return items.filter((item) => (
       item.productName ||
-      item.sku ||
+      item.description ||
       item.quantity !== "" ||
       item.cost !== "" ||
-      item.lowStockThreshold !== "" ||
       item.returnable !== null ||
       item.category_id
     ));

@@ -21,6 +21,7 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
     full_name: "Test User",
     role: "user",
     is_active: true,
+    domain_id: null,
     ...overrides,
   };
 }
@@ -79,5 +80,48 @@ describe("POST /api/categories", () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as { category_name: string };
     expect(body.category_name).toBe("Test Category New");
+  });
+
+  it("auto-suggests a code from the category name when none is given", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const res = await POST(
+      new NextRequest("http://localhost/api/categories", {
+        method: "POST",
+        body: JSON.stringify({ category_name: "Test Category Arduino Boards" }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { code: string | null };
+    expect(body.code).toMatch(/^[A-Z]{2,4}$/);
+  });
+
+  it("accepts and uppercases an explicit code", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const res = await POST(
+      new NextRequest("http://localhost/api/categories", {
+        method: "POST",
+        body: JSON.stringify({ category_name: "Test Category Resistors", code: "res" }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe("RES");
+  });
+
+  it("rejects a duplicate explicit code", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    await POST(
+      new NextRequest("http://localhost/api/categories", {
+        method: "POST",
+        body: JSON.stringify({ category_name: "Test Category Cap A", code: "cap" }),
+      }),
+    );
+    const res = await POST(
+      new NextRequest("http://localhost/api/categories", {
+        method: "POST",
+        body: JSON.stringify({ category_name: "Test Category Cap B", code: "cap" }),
+      }),
+    );
+    expect(res.status).toBe(409);
   });
 });

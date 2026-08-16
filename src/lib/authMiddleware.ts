@@ -10,6 +10,7 @@ export type AuthUser = {
   full_name: string
   role: 'super_admin' | 'user'
   is_active: boolean
+  domain_id: string | null
 }
 
 export type AuthedHandler<T = unknown> = (
@@ -24,7 +25,7 @@ async function getUserFromAccessToken(token: string): Promise<AuthUser | null> {
   if (!claims) return null
 
   const [row] = await db
-    .select({ user_id: users.user_id, email: users.email, full_name: users.full_name, role: users.role, is_active: users.is_active })
+    .select({ user_id: users.user_id, email: users.email, full_name: users.full_name, role: users.role, is_active: users.is_active, domain_id: users.domain_id })
     .from(users)
     .where(eq(users.user_id, claims.sub))
 

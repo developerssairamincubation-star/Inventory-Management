@@ -2,16 +2,11 @@
 // Drizzle these views are created externally (by Flyway) and should never
 // be created/dropped by anything in this codebase. Field names are
 // snake_case to match DB columns 1:1 — see departments.ts for why.
-import { pgView, uuid, varchar, integer, bigint } from "drizzle-orm/pg-core";
+import { pgView, uuid, varchar, bigint } from "drizzle-orm/pg-core";
 import { lendingItemStatusEnum } from "./enums";
 
-export const vw_low_stock = pgView("vw_low_stock", {
-  product_id: uuid("product_id"),
-  product_name: varchar("product_name", { length: 250 }),
-  quantity: integer("quantity"),
-  low_stock_threshold: integer("low_stock_threshold"),
-  deficit: integer("deficit"),
-}).existing();
+// vw_low_stock was dropped in db/migrations/V19 alongside
+// products.low_stock_threshold — no low-stock feature in this app anymore.
 
 export const vw_top_lending_products = pgView("vw_top_lending_products", {
   product_id: uuid("product_id"),

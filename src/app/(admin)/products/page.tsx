@@ -6,57 +6,83 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ImageCropModal from "@/components/ImageCropModal";
 import UploadProductsCsvModal from "@/components/UploadProductsCsvModal";
+import Pagination from "@/components/Pagination";
+import { usePagination } from "@/hooks/usePagination";
+import { useToast } from "@/components/ui/Toast";
 
 interface ProductItem {
   id: string;
   productName: string;
-  sku: string;
+  description: string;
   quantity: number | '';
   cost: number | '';
-  lowStockThreshold: number | '';
   returnable: boolean | null;
   imageFile: File | null;
   imagePreview: string | null;
   category_id: string;
+  // Live "what will this SKU be" preview, not sent to the server — the real
+  // value is only assigned inside POST /api/products at save time (see
+  // GET /api/products/next-sku). Null while unfetched/loading.
+  skuPreview: string | null;
 }
 
 const createEmptyProductItem = (id: string): ProductItem => ({
   id,
   productName: '',
-  sku: '',
+  description: '',
   quantity: '',
   cost: '',
-  lowStockThreshold: '',
   returnable: null,
   imageFile: null,
   imagePreview: null,
   category_id: '',
+  skuPreview: null,
 });
+
+// Pure preview fetch — no mutation, see GET /api/products/next-sku's
+// doc-comment for the concurrency-drift caveat.
+async function fetchSkuPreview(categoryId: string): Promise<string | null> {
+  try {
+    const url = categoryId ? `/api/products/next-sku?category_id=${encodeURIComponent(categoryId)}` : '/api/products/next-sku';
+    const res = await authFetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.sku ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// A row counts as "touched" once any field differs from a fresh blank row —
+// untouched rows are silently skipped on save instead of blocking submit or
+// being sent to the API (see the Add Products form's submit handler).
+const isProductItemTouched = (item: ProductItem): boolean =>
+  item.productName.trim() !== '' ||
+  item.description.trim() !== '' ||
+  item.quantity !== '' ||
+  item.cost !== '' ||
+  item.returnable !== null ||
+  item.imageFile !== null ||
+  item.category_id !== '';
 
 export default function ProductsPage() {
   const router = useRouter();
+  const { showToast, showConfirm } = useToast();
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isUpdateStockModalOpen, setIsUpdateStockModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
-  const [sortField, setSortField] = useState<'price' | 'stock' | 'threshold' | ''>('');
+  const [sortField, setSortField] = useState<'price' | 'stock' | ''>('');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [listCurrentPage, setListCurrentPage] = useState(1);
-  const [listShowAll, setListShowAll] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
 
-  // Categories
+  // Categories — read-only here; created/edited only from Admin Settings
   const [categories, setCategories] = useState<{category_id: string; category_name: string}[]>([]);
-  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [addCategoryLoading, setAddCategoryLoading] = useState(false);
-  const [addCategoryForContext, setAddCategoryForContext] = useState<{type: 'modal'|'inline'; itemId: string} | null>(null);
 
   // Multi-item product addition
   const [productItems, setProductItems] = useState<ProductItem[]>(
@@ -71,13 +97,16 @@ export default function ProductsPage() {
   // Inline add items in list view (array to support multiple inline additions)
   const [inlineItems, setInlineItems] = useState<ProductItem[]>([]);
 
-  // Update stock form fields
-  const [additionalStock, setAdditionalStock] = useState<number | ''>('');
-  const [newUnitCost, setNewUnitCost] = useState<number | ''>('');
-
-  const handleApplyCsvItems = (items: ProductItem[]) => {
-    setProductItems(items.length > 0 ? items : productItems);
+  const handleApplyCsvItems = (items: Omit<ProductItem, 'skuPreview'>[]) => {
+    const withPreview: ProductItem[] = items.map(item => ({ ...item, skuPreview: null }));
+    setProductItems(withPreview.length > 0 ? withPreview : productItems);
     if (!isModalOpen) setIsModalOpen(true);
+    const uniqueCategoryIds = [...new Set(withPreview.map(item => item.category_id))];
+    uniqueCategoryIds.forEach(catId => {
+      fetchSkuPreview(catId).then(sku => {
+        setProductItems(prev => prev.map(item => item.category_id === catId ? { ...item, skuPreview: sku } : item));
+      });
+    });
   };
 
   const fetchProducts = useCallback(async () => {
@@ -114,7 +143,9 @@ export default function ProductsPage() {
 
   // Helper functions for multi-item management
   const addNewProductItem = () => {
-    setProductItems(prev => [...prev, createEmptyProductItem(Date.now().toString())]);
+    const newItem = createEmptyProductItem(Date.now().toString());
+    setProductItems(prev => [...prev, newItem]);
+    fetchSkuPreview('').then(sku => mergeProductItem(newItem.id, { skuPreview: sku }));
   };
 
   const removeProductItem = (id: string) => {
@@ -143,6 +174,9 @@ export default function ProductsPage() {
       createEmptyProductItem(String(i + 1))
     );
     setProductItems(defaultItems);
+    fetchSkuPreview('').then(sku => {
+      setProductItems(prev => prev.map(item => item.category_id === '' ? { ...item, skuPreview: sku } : item));
+    });
   };
 
   const resetInlineItem = () => {
@@ -150,7 +184,9 @@ export default function ProductsPage() {
   };
 
   const addNewInlineItem = () => {
-    setInlineItems(prev => [...prev, createEmptyProductItem(`inline-${Date.now()}`)]);
+    const newItem = createEmptyProductItem(`inline-${Date.now()}`);
+    setInlineItems(prev => [...prev, newItem]);
+    fetchSkuPreview('').then(sku => mergeInlineItem(newItem.id, { skuPreview: sku }));
   };
 
   const removeInlineItem = (id: string) => {
@@ -168,38 +204,6 @@ export default function ProductsPage() {
     setInlineItems(prev => prev.map(item =>
       item.id === id ? { ...item, ...fields } : item
     ));
-  };
-
-  if (loading) return <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>Loading products…</div>;
-
-  const handleCreateCategory = async () => {
-    if (!newCategoryName.trim() || addCategoryLoading) return;
-    setAddCategoryLoading(true);
-    try {
-      const res = await authFetch('/api/categories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category_name: newCategoryName.trim() }),
-      });
-      if (res.ok) {
-        const created = await res.json();
-        setCategories(prev => [...prev, created]);
-        if (addCategoryForContext) {
-          if (addCategoryForContext.type === 'modal') {
-            updateProductItem(addCategoryForContext.itemId, 'category_id', created.category_id);
-          } else {
-            updateInlineItem(addCategoryForContext.itemId, 'category_id', created.category_id);
-          }
-        }
-        setNewCategoryName('');
-        setShowAddCategoryModal(false);
-        setAddCategoryForContext(null);
-      }
-    } catch (err) {
-      console.error('Error creating category:', err);
-    } finally {
-      setAddCategoryLoading(false);
-    }
   };
 
   // Helper to normalize product data
@@ -250,64 +254,89 @@ export default function ProductsPage() {
       if (sortField === 'price') {
         av = Number(na.cost ?? na.price ?? na.unit_cost ?? 0);
         bv = Number(nb.cost ?? nb.price ?? nb.unit_cost ?? 0);
-      } else if (sortField === 'stock') {
+      } else {
         av = na.stocks?.quantity ?? na.stock ?? na.quantity ?? 0;
         bv = nb.stocks?.quantity ?? nb.stock ?? nb.quantity ?? 0;
-      } else {
-        av = na.low_stock_threshold ?? 0;
-        bv = nb.low_stock_threshold ?? 0;
       }
       return sortDir === 'asc' ? av - bv : bv - av;
     });
   }
 
-  const LIST_ROWS_PER_PAGE = 20;
-  const listTotalPages = Math.max(1, Math.ceil(filteredProducts.length / LIST_ROWS_PER_PAGE));
-  const listStartIdx = (listCurrentPage - 1) * LIST_ROWS_PER_PAGE;
-  const listEndIdx = listStartIdx + LIST_ROWS_PER_PAGE;
-  const listPageRows = listShowAll ? filteredProducts : filteredProducts.slice(listStartIdx, listEndIdx);
+  // A touched row must have name/qty/cost filled in before it can be saved;
+  // untouched rows are fine as-is (they're skipped on submit, not validated).
+  const hasIncompleteProductRow = productItems.some(
+    (item) => isProductItemTouched(item) && (!item.productName.trim() || item.quantity === '' || item.cost === '')
+  );
 
-  const handleProductSort = (field: 'price' | 'stock' | 'threshold') => {
+  const { page: listPage, setPage: setListPage, totalPages: listTotalPages, pageRows: listRealPageRows, padRows: listPadRows, showAll: listShowAll, setShowAll: setListShowAll, startIdx: listStartIdx, endIdx: listEndIdx } = usePagination(filteredProducts, { pageSize: 50 });
+
+  if (loading) return <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>Loading products…</div>;
+
+  const handleProductSort = (field: 'price' | 'stock') => {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortField(field); setSortDir('asc'); }
-    setListCurrentPage(1);
+    setListPage(1);
   };
 
-  function ProductSortIcon({ field: f }: { field: 'price' | 'stock' | 'threshold' }) {
+  function ProductSortIcon({ field: f }: { field: 'price' | 'stock' }) {
     if (sortField !== f) return <span style={{ opacity: 0.3, fontSize: 10, marginLeft: 3 }}>↑</span>;
     return <span style={{ color: 'var(--accent)', fontSize: 10, marginLeft: 3 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>;
   }
 
-  const handleOpenUpdateStock = (product: any) => {
-    setSelectedProduct(product);
-    setAdditionalStock('');
-    setNewUnitCost(product.unit_cost || '');
-    setIsUpdateStockModalOpen(true);
+  // Restocking now only happens via the Invoice page (Upload Invoice), which
+  // links parsed line items to existing products or creates new ones — this
+  // just gets the user there.
+  const handleAddClick = () => {
+    router.push('/billing');
   };
 
-  const handleUpdateStock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedProduct) return;
-    setSaving(true);
+  const openManualEntryModal = () => {
+    setIsModalOpen(true);
+    fetchSkuPreview('').then(sku => {
+      setProductItems(prev => prev.map(item => (item.category_id === '' && item.skuPreview === null) ? { ...item, skuPreview: sku } : item));
+    });
+  };
+
+  const handleDeleteProduct = async (product: any) => {
+    const productId = product.product_id || product.id;
+    if (!productId) return;
+    const name = product.product_name || product.name || 'this product';
+    if (!(await showConfirm(`Delete "${name}"? This action cannot be undone.`))) return;
+
+    setDeletingId(productId);
     try {
-      const body: any = {};
-      if (additionalStock !== '' && additionalStock !== 0) body.additionalStock = Number(additionalStock);
-      if (newUnitCost !== '' && newUnitCost !== selectedProduct.unit_cost) body.unitCost = Number(newUnitCost);
-      const productId = selectedProduct.product_id || selectedProduct.id;
-      const res = await authFetch(`/api/products/${productId}/update-stock`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) { console.error('Failed to update stock', await res.text()); return; }
-      const result = await res.json();
-      setProducts((prevProducts) => prevProducts.map((p) => (p.product_id || p.id) === productId ? { ...p, ...result.product } : p));
-      setIsUpdateStockModalOpen(false);
-      setSelectedProduct(null);
+      const res = await authFetch(`/api/products/${productId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        showToast('Failed to delete product', 'error');
+        return;
+      }
+      setProducts((prev) => prev.filter((p) => (p.product_id || p.id) !== productId));
+      showToast('Product deleted', 'success');
     } catch (err) {
-      console.error('Error updating stock', err);
+      console.error('Error deleting product', err);
+      showToast('Failed to delete product', 'error');
     } finally {
-      setSaving(false);
+      setDeletingId(null);
+    }
+  };
+
+  // Direct upload for the "no image" placeholder affordance on already-saved
+  // products (grid card / list row) — no crop step, just attach whatever was
+  // selected, matching the "cropping is optional" decision for new products.
+  const handleQuickImageUpload = async (productId: string, file: File) => {
+    try {
+      const image_url = await uploadFile(file, 'products', authFetch);
+      const res = await authFetch(`/api/products/${productId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_url }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setProducts((prev) => prev.map((p) => (p.product_id || p.id) === productId ? { ...p, ...updated } : p));
+      }
+    } catch (err) {
+      console.error('Error uploading product image:', err);
     }
   };
 
@@ -345,7 +374,24 @@ export default function ProductsPage() {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={image} alt={name || 'product'} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           ) : (
-            <div style={{ fontSize: 10, color: 'var(--muted)', textAlign: 'center' }}>No image</div>
+            <label
+              onClick={(e) => e.stopPropagation()}
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer', color: 'var(--accent)' }}
+            >
+              <span style={{ fontSize: 18 }}>+</span>
+              <span style={{ fontSize: 10 }}>Upload image</span>
+              <input
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null;
+                  if (f && productId) handleQuickImageUpload(productId, f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
           )}
         </div>
         <div style={{ padding: '10px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -355,10 +401,17 @@ export default function ProductsPage() {
         </div>
         <div style={{ display: 'flex', borderTop: '1px solid var(--border)' }}>
           <button
-            onClick={(e) => { e.stopPropagation(); handleOpenUpdateStock(normalized); }}
-            style={{ flex: 1, padding: '7px 0', fontSize: 11, color: 'var(--fg)', background: 'none', border: 'none', cursor: 'pointer' }}
+            onClick={(e) => { e.stopPropagation(); handleAddClick(); }}
+            style={{ flex: 1, padding: '7px 0', fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', borderRight: '1px solid var(--border)', cursor: 'pointer', fontWeight: 600 }}
           >
-            Update Stock
+            + Add
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleDeleteProduct(normalized); }}
+            disabled={deletingId === productId}
+            style={{ flex: 1, padding: '7px 0', fontSize: 11, color: 'var(--danger, #dc2626)', background: 'none', border: 'none', cursor: deletingId === productId ? 'not-allowed' : 'pointer', opacity: deletingId === productId ? 0.6 : 1 }}
+          >
+            {deletingId === productId ? 'Deleting…' : 'Delete'}
           </button>
         </div>
       </div>
@@ -374,15 +427,6 @@ export default function ProductsPage() {
     background: 'var(--bg)',
     outline: 'none',
     boxSizing: 'border-box',
-  };
-  const labelStyle: React.CSSProperties = {
-    display: 'block',
-    fontSize: 10,
-    fontWeight: 600,
-    color: 'var(--muted)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-    marginBottom: 4,
   };
   const th: React.CSSProperties = {
     padding: '6px 10px',
@@ -408,14 +452,14 @@ export default function ProductsPage() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>Products</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>Stock List</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>All inventory products</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
             placeholder="Search products…"
             value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setListCurrentPage(1); }}
+            onChange={(e) => { setSearchQuery(e.target.value); setListPage(1); }}
             style={{ padding: '5px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: 'var(--bg)', outline: 'none', width: 220 }}
           />
           <div style={{ display: 'flex', border: '1px solid var(--border)' }}>
@@ -435,14 +479,17 @@ export default function ProductsPage() {
           <div style={{ position: 'relative' }}>
             <button
               onClick={() => setShowAddMenu((v) => !v)}
-              style={{ padding: '5px 14px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+              style={{ padding: '10px 22px', fontSize: 14, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 700 }}
             >
               + Add Product ▾
             </button>
             {showAddMenu && (
               <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 6, background: '#fff', border: '1px solid var(--border)', boxShadow: '0 6px 18px rgba(0,0,0,0.12)', zIndex: 20, minWidth: 180 }}>
                 <button
-                  onClick={() => { setShowAddMenu(false); setIsModalOpen(true); }}
+                  onClick={() => {
+                    setShowAddMenu(false);
+                    openManualEntryModal();
+                  }}
                   style={{ width: '100%', textAlign: 'left', padding: '8px 10px', fontSize: 12, background: '#fff', border: 'none', cursor: 'pointer' }}
                 >
                   Manual Entry
@@ -463,7 +510,7 @@ export default function ProductsPage() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
         <select
           value={categoryFilter}
-          onChange={(e) => { setCategoryFilter(e.target.value); setListCurrentPage(1); }}
+          onChange={(e) => { setCategoryFilter(e.target.value); setListPage(1); }}
           style={{ padding: '5px 8px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: 'var(--bg)', outline: 'none', cursor: 'pointer' }}
         >
           <option value="">All Categories</option>
@@ -471,7 +518,7 @@ export default function ProductsPage() {
         </select>
         {(categoryFilter || sortField) && (
           <button
-            onClick={() => { setCategoryFilter(''); setSortField(''); setSortDir('asc'); setListCurrentPage(1); }}
+            onClick={() => { setCategoryFilter(''); setSortField(''); setSortDir('asc'); setListPage(1); }}
             style={{ padding: '5px 8px', fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--muted)', cursor: 'pointer' }}
           >
             Clear filters
@@ -490,11 +537,16 @@ export default function ProductsPage() {
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
+                if (hasIncompleteProductRow) return;
                 setSaving(true);
-                
+
                 try {
-                  // Process each product item
-                  for (const item of productItems) {
+                  // Only rows the user actually started filling get validated/
+                  // saved — a row left completely untouched is silently
+                  // skipped rather than blocking submit or being sent to the API.
+                  const rowsToSave = productItems.filter(isProductItemTouched);
+
+                  for (const item of rowsToSave) {
                     const matched = findExistingMatch(item.productName || "");
                     const matchedId = matched?.product_id ?? matched?.id ?? null;
 
@@ -502,8 +554,7 @@ export default function ProductsPage() {
                     if (matchedId) {
                       const updateBody: any = {};
                       if (item.productName) updateBody.product_name = item.productName;
-                      if (item.sku) updateBody.serial_number = item.sku;
-                      if (item.lowStockThreshold !== '') updateBody.low_stock_threshold = Number(item.lowStockThreshold);
+                      if (item.description) updateBody.description = item.description;
                       if (item.returnable !== null) updateBody.returnable = !!item.returnable;
                       if (item.category_id) updateBody.category_id = item.category_id;
 
@@ -559,34 +610,33 @@ export default function ProductsPage() {
 
                     const body: any = {
                       name: item.productName || undefined,
-                      sku: item.sku || undefined,
+                      description: item.description || undefined,
                       quantity: item.quantity === '' ? undefined : Number(item.quantity),
                       cost: item.cost === '' ? undefined : Number(item.cost),
-                      low_stock_threshold: item.lowStockThreshold === '' ? undefined : Number(item.lowStockThreshold),
                       returnable: item.returnable === null ? undefined : !!item.returnable,
                       image_url: image_url ?? undefined,
                       category_id: item.category_id || undefined,
                     };
 
-                    const res = await authFetch('/api/products', { 
-                      method: 'POST', 
-                      headers: { 'Content-Type': 'application/json' }, 
-                      body: JSON.stringify(body) 
+                    const res = await authFetch('/api/products', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(body)
                     });
-                    
+
                     if (res.ok) {
                       const created = await res.json();
                       const newProduct = created.product || created;
                       const newStock = created.stock;
-                      setProducts((p) => [{ 
-                        ...newProduct, 
-                        stocks: { 
-                          quantity: newStock?.quantity ?? (item.quantity === '' ? 0 : Number(item.quantity)) 
-                        } 
+                      setProducts((p) => [{
+                        ...newProduct,
+                        stocks: {
+                          quantity: newStock?.quantity ?? (item.quantity === '' ? 0 : Number(item.quantity))
+                        }
                       }, ...p]);
                     }
                   }
-                  
+
                   resetProductItems();
                   setIsModalOpen(false);
                 } catch (_err) { 
@@ -597,22 +647,21 @@ export default function ProductsPage() {
               }}
             >
               {/* Header Row */}
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: '40px 50px 2fr 1.5fr 1fr 1fr 1fr 80px 1.2fr 1.2fr 40px', 
-                gap: 8, 
-                marginBottom: 8, 
-                paddingBottom: 6, 
-                borderBottom: '1px solid var(--border)' 
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '40px 50px 2fr 1.5fr 1fr 1fr 80px 1.2fr 1.2fr 40px',
+                gap: 8,
+                marginBottom: 8,
+                paddingBottom: 6,
+                borderBottom: '1px solid var(--border)'
               }}>
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>S.no</div>
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Image</div>
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Product Name</div>
-                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>SKU</div>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Description</div>
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Qty</div>
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Cost</div>
-                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Threshold</div>
-                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Type</div>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>SKU</div>
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Category</div>
                 <div></div>
                 <div></div>
@@ -623,10 +672,12 @@ export default function ProductsPage() {
                 {productItems.map((item, index) => {
                   const matched = findExistingMatch(item.productName || "");
                   const matchedName = matched?.product_name ?? matched?.name ?? null;
+                  const touched = isProductItemTouched(item);
+                  const incomplete = touched && (!item.productName.trim() || item.quantity === '' || item.cost === '');
                   return (
-                  <div key={item.id} style={{ 
-                    display: 'grid', 
-                    gridTemplateColumns: '40px 50px 2fr 1.5fr 1fr 1fr 1fr 80px 1.2fr 1.2fr 40px', 
+                  <div key={item.id} style={{
+                    display: 'grid',
+                    gridTemplateColumns: '40px 50px 2fr 1.5fr 1fr 1fr 80px 1.2fr 1.2fr 40px',
                     gap: 8,
                     alignItems: 'start',
                     padding: '8px 4px',
@@ -678,11 +729,10 @@ export default function ProductsPage() {
 
                     {/* Product Name */}
                     <div>
-                      <input 
-                        required
-                        value={item.productName} 
-                        onChange={(e) => updateProductItem(item.id, 'productName', e.target.value)} 
-                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
+                      <input
+                        value={item.productName}
+                        onChange={(e) => updateProductItem(item.id, 'productName', e.target.value)}
+                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, borderColor: incomplete && !item.productName.trim() ? 'var(--danger)' : undefined }}
                         placeholder="Product name"
                       />
                       {matchedName && (
@@ -690,74 +740,60 @@ export default function ProductsPage() {
                           Found in inventory: {matchedName}
                         </div>
                       )}
+                      {incomplete && (
+                        <div style={{ fontSize: 10, color: 'var(--danger)', marginTop: 4 }}>
+                          Fill in name, qty, and cost to save this row (or clear it to skip)
+                        </div>
+                      )}
                     </div>
 
-                    {/* SKU */}
-                    <input 
-                      value={item.sku} 
-                      onChange={(e) => updateProductItem(item.id, 'sku', e.target.value)} 
+                    {/* Description (optional) */}
+                    <input
+                      value={item.description}
+                      onChange={(e) => updateProductItem(item.id, 'description', e.target.value)}
                       style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
-                      placeholder="SKU"
+                      placeholder="Description (optional)"
                     />
 
                     {/* Quantity */}
-                    <input 
-                      type="number" 
-                      min={0} 
-                      value={item.quantity as any} 
-                      onChange={(e) => updateProductItem(item.id, 'quantity', e.target.value === '' ? '' : Number(e.target.value))} 
-                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
+                    <input
+                      type="number"
+                      min={0}
+                      value={item.quantity as any}
+                      onChange={(e) => updateProductItem(item.id, 'quantity', e.target.value === '' ? '' : Number(e.target.value))}
+                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, borderColor: incomplete && item.quantity === '' ? 'var(--danger)' : undefined }}
                       placeholder="0"
                     />
 
                     {/* Cost */}
-                    <input 
-                      type="number" 
-                      step="0.01" 
-                      min={0} 
-                      value={item.cost as any} 
-                      onChange={(e) => updateProductItem(item.id, 'cost', e.target.value === '' ? '' : Number(e.target.value))} 
-                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
+                    <input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      value={item.cost as any}
+                      onChange={(e) => updateProductItem(item.id, 'cost', e.target.value === '' ? '' : Number(e.target.value))}
+                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, borderColor: incomplete && item.cost === '' ? 'var(--danger)' : undefined }}
                       placeholder="0.00"
                     />
 
-                    {/* Low Stock Threshold */}
-                    <input 
-                      type="number" 
-                      min={0} 
-                      value={item.lowStockThreshold as any} 
-                      onChange={(e) => updateProductItem(item.id, 'lowStockThreshold', e.target.value === '' ? '' : Number(e.target.value))} 
-                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
-                      placeholder="0"
-                    />
-
-                    {/* Type */}
-                    <select
-                      value={item.returnable === null ? '' : item.returnable ? 'returnable' : 'consumable'}
-                      onChange={(e) => updateProductItem(item.id, 'returnable', e.target.value === '' ? null : e.target.value === 'returnable')}
-                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
-                    >
-                      <option value="">Select</option>
-                      <option value="returnable">Returnable</option>
-                      <option value="consumable">Consumable</option>
-                    </select>
+                    {/* SKU (auto-generated, preview only) */}
+                    <div style={{ padding: '5px 6px', fontSize: 11, color: 'var(--muted)', fontStyle: 'italic', fontFamily: 'monospace' }}>
+                      {item.skuPreview ?? '…'}
+                    </div>
 
                     {/* Category */}
                     <select
                       value={item.category_id}
                       onChange={(e) => {
-                        if (e.target.value === '__add_new__') {
-                          setAddCategoryForContext({ type: 'modal', itemId: item.id });
-                          setShowAddCategoryModal(true);
-                        } else {
-                          updateProductItem(item.id, 'category_id', e.target.value);
-                        }
+                        const newCategoryId = e.target.value;
+                        updateProductItem(item.id, 'category_id', newCategoryId);
+                        mergeProductItem(item.id, { skuPreview: null });
+                        fetchSkuPreview(newCategoryId).then(sku => mergeProductItem(item.id, { skuPreview: sku }));
                       }}
                       style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
                     >
                       <option value="">Category…</option>
                       {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
-                      <option value="__add_new__">╋ Add New Category</option>
                     </select>
 
                     {/* Re-crop button (if image exists) */}
@@ -837,17 +873,24 @@ export default function ProductsPage() {
                   onClick={() => setShowCsvModal(true)}
                   style={{
                     marginLeft: 8,
-                    padding: '6px 12px',
+                    padding: '6px 14px',
                     fontSize: 11,
-                    border: '1px dashed var(--border)',
-                    background: 'var(--bg)',
-                    color: 'var(--fg)',
+                    border: 'none',
+                    background: 'var(--fg)',
+                    color: '#fff',
                     cursor: 'pointer',
                     fontWeight: 600
                   }}
                 >
                   Bulk Upload (CSV)
                 </button>
+                <a
+                  href="/templates/products-sample.csv"
+                  download
+                  style={{ marginLeft: 10, fontSize: 11, color: 'var(--accent)', textDecoration: 'underline' }}
+                >
+                  Download sample CSV
+                </a>
               </div>
 
               {/* Form Actions */}
@@ -866,51 +909,29 @@ export default function ProductsPage() {
                 >
                   Cancel
                 </button>
-                <button 
-                  type="submit" 
-                  disabled={saving} 
-                  style={{ 
-                    padding: '5px 14px', 
-                    fontSize: 12, 
-                    background: 'var(--accent)', 
-                    color: '#fff', 
-                    border: 'none', 
-                    cursor: 'pointer', 
-                    fontWeight: 600 
+                <button
+                  type="submit"
+                  disabled={saving || hasIncompleteProductRow}
+                  style={{
+                    padding: '5px 14px',
+                    fontSize: 12,
+                    background: 'var(--accent)',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: saving || hasIncompleteProductRow ? 'not-allowed' : 'pointer',
+                    opacity: hasIncompleteProductRow ? 0.6 : 1,
+                    fontWeight: 600
                   }}
                 >
-                  {saving ? 'Saving…' : `Save ${productItems.length} Product${productItems.length > 1 ? 's' : ''}`}
+                  {saving
+                    ? 'Saving…'
+                    : (() => {
+                        const n = productItems.filter(isProductItemTouched).length;
+                        return n > 0 ? `Save ${n} Product${n > 1 ? 's' : ''}` : 'Save';
+                      })()}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* Add Category Mini Modal */}
-      {showAddCategoryModal && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }}>
-          <div style={{ background: '#fff', border: '1px solid var(--border)', padding: 20, width: 340, boxShadow: '0 4px 20px rgba(0,0,0,0.15)' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)', marginBottom: 14 }}>Add New Category</div>
-            <input
-              autoFocus
-              value={newCategoryName}
-              onChange={e => setNewCategoryName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleCreateCategory()}
-              placeholder="Category name…"
-              style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', boxSizing: 'border-box', marginBottom: 14, outline: 'none' }}
-            />
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => { setShowAddCategoryModal(false); setNewCategoryName(''); setAddCategoryForContext(null); }}
-                style={{ padding: '5px 14px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}
-              >Cancel</button>
-              <button
-                onClick={handleCreateCategory}
-                disabled={!newCategoryName.trim() || addCategoryLoading}
-                style={{ padding: '5px 14px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600, opacity: !newCategoryName.trim() || addCategoryLoading ? 0.5 : 1 }}
-              >{addCategoryLoading ? 'Adding…' : 'Add Category'}</button>
-            </div>
           </div>
         </div>
       )}
@@ -940,51 +961,40 @@ export default function ProductsPage() {
         />
       )}
 
-      {/* Update Stock Modal */}
-      {isUpdateStockModalOpen && selectedProduct && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }}>
-          <div style={{ background: '#fff', width: '90%', maxWidth: 400, padding: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Update Stock</div>
-              <button onClick={() => setIsUpdateStockModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>×</button>
+      {/* Product Grid / List */}
+      {products.length === 0 ? (
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', marginTop: 12, border: '1px solid var(--border)', background: '#fff' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: 40 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--fg)' }}>Add your first stock</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', maxWidth: 280 }}>
+              Your inventory is empty. Add a product manually to get started.
             </div>
-            <form onSubmit={handleUpdateStock} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div>
-                <span style={labelStyle}>Product</span>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>{selectedProduct.product_name || selectedProduct.name || 'N/A'}</div>
-              </div>
-              <div>
-                <span style={labelStyle}>Current Stock</span>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>{selectedProduct.stocks?.quantity ?? 0} units</div>
-              </div>
-              <div>
-                <label style={labelStyle}>Add Quantity</label>
-                <input type="number" min={0} value={additionalStock} onChange={(e) => setAdditionalStock(e.target.value === '' ? '' : Number(e.target.value))} style={inputStyle} placeholder="Quantity to add" />
-              </div>
-              <div>
-                <label style={labelStyle}>Unit Cost</label>
-                <input type="number" step="0.01" min={0} value={newUnitCost} onChange={(e) => setNewUnitCost(e.target.value === '' ? '' : Number(e.target.value))} style={inputStyle} />
-              </div>
-              {additionalStock !== '' && Number(additionalStock) > 0 && (
-                <div style={{ fontSize: 11, color: 'var(--muted)', background: 'var(--surface)', padding: '6px 10px', border: '1px solid var(--border)' }}>
-                  New total: <strong>{(selectedProduct.stocks?.quantity ?? 0) + Number(additionalStock)}</strong> units
-                </div>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-                <button type="button" onClick={() => setIsUpdateStockModalOpen(false)} style={{ padding: '5px 14px', fontSize: 12, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
-                <button type="submit" disabled={saving} style={{ padding: '5px 14px', fontSize: 12, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>{saving ? 'Updating…' : 'Update'}</button>
-              </div>
-            </form>
+            <button
+              onClick={openManualEntryModal}
+              aria-label="Add product"
+              style={{
+                width: 48, height: 48, borderRadius: '50%', background: 'var(--accent)', color: '#fff',
+                border: 'none', fontSize: 26, fontWeight: 700, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
+              }}
+            >
+              +
+            </button>
           </div>
         </div>
-      )}
-
-      {/* Product Grid / List */}
-      {viewMode === 'grid' ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, marginTop: 12 }}>
-          {filteredProducts.map((product , idx) => (
-            <ProductCard key={product.id ?? idx} product={product} />
-          ))}
+      ) : viewMode === 'grid' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, marginTop: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, overflowY: 'auto', flex: 1, minHeight: 0 }}>
+            {listRealPageRows.map((product: any, idx: number) => (
+              <ProductCard key={product.id ?? idx} product={product} />
+            ))}
+          </div>
+          {filteredProducts.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', background: 'var(--surface)', padding: '8px 12px', borderTop: '1px solid var(--border)', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+              <span>Showing {listShowAll ? filteredProducts.length : `${Math.min(listStartIdx + 1, filteredProducts.length)}–${Math.min(listEndIdx, filteredProducts.length)}`} of {filteredProducts.length}</span>
+              <Pagination page={listPage} totalPages={listTotalPages} onPageChange={setListPage} showAll={listShowAll} onToggleShowAll={setListShowAll} />
+            </div>
+          )}
         </div>
       ) : (
         <div style={{ background: '#fff', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, marginTop: 12 }}>
@@ -996,33 +1006,35 @@ export default function ProductsPage() {
                   <th style={{ ...th, width: 80 }}>Image</th>
                   <th style={th}>Product Name</th>
                   <th style={th}>SKU</th>
-                  <th style={th}>Type</th>
                   <th style={th}>Category</th>
                   <th onClick={() => handleProductSort('stock')} style={{ ...th, width: 80, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>Stock<ProductSortIcon field="stock" /></span></th>
                   <th onClick={() => handleProductSort('price')} style={{ ...th, width: 90, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>Price<ProductSortIcon field="price" /></span></th>
-                  <th onClick={() => handleProductSort('threshold')} style={{ ...th, width: 80, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>Threshold<ProductSortIcon field="threshold" /></span></th>
                   <th style={{ ...th, width: 200 }}>Actions</th>
                 </tr>
               </thead>
               <tbody >
-                {listPageRows.map((product, idx) => {
+                {listPadRows.map((product, idx) => {
+                  if (!product) {
+                    return (
+                      <tr key={`empty-${idx}`}>
+                        <td style={{ ...td, border: 'none' }} colSpan={8}>&nbsp;</td>
+                      </tr>
+                    );
+                  }
                   const normalized = (() => {
-                    if (!product) return {} as any;
                     const singleKey = Object.keys(product).length === 1 ? Object.keys(product)[0] : null;
-                    if (singleKey && (singleKey === 'product' || singleKey === 'data' || singleKey === 'row')) return product[singleKey] ?? product;
+                    if (singleKey && (singleKey === 'product' || singleKey === 'data' || singleKey === 'row')) return (product as any)[singleKey] ?? product;
                     return product;
-                  })();
+                  })() as any;
                   const name = normalized.name || normalized.title || normalized.product_name || normalized.productName || normalized.label || 'Unnamed';
                   const id = normalized.id ?? normalized.product_id ?? idx;
                   const cost = normalized.cost ?? normalized.price ?? normalized.unit_cost ?? '—';
                   const stock = normalized.stocks?.quantity ?? normalized.stock ?? normalized.quantity ?? 0;
                   const image = normalized.image_url || normalized.image || normalized.photo || normalized.imageUrl || null;
-                  const returnable = normalized.returnable;
-                  const productType = returnable === true ? 'Returnable' : returnable === false ? 'Consumable' : '—';
-                  const sku = normalized.sku || normalized.product_code || '—';
-                  const threshold = normalized.low_stock_threshold ?? '—';
+                  const sku = normalized.sku_code || normalized.product_code || '—';
                   const categoryName = normalized.category_name ?? '—';
-                  
+                  const rowProductId = normalized.product_id ?? normalized.id;
+
                   return (
                     <tr
                       key={id}
@@ -1031,28 +1043,50 @@ export default function ProductsPage() {
                       onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface)')}
                       onMouseLeave={(e) => (e.currentTarget.style.background = '')}
                     >
-                      <td style={td}>{(listCurrentPage - 1) * 20 + idx + 1}</td>
+                      <td style={td}>{listStartIdx + idx + 1}</td>
                       <td style={td}>
                         <div style={{ width: 60, height: 60, border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 4 }}>
                           {image ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={image} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           ) : (
-                            <div style={{ fontSize: 9, color: 'var(--muted)' }}>No img</div>
+                            <label
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', color: 'var(--accent)' }}
+                            >
+                              <span style={{ fontSize: 14 }}>+</span>
+                              <span style={{ fontSize: 8 }}>Upload</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                style={{ display: 'none' }}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0] ?? null;
+                                  if (f && rowProductId) handleQuickImageUpload(rowProductId, f);
+                                  e.target.value = '';
+                                }}
+                              />
+                            </label>
                           )}
                         </div>
                       </td>
 
                       <td style={{ ...td, fontWeight: 500 }}>{name}</td>
                       <td style={td}>{sku}</td>
-                      <td style={td}>{productType}</td>
                       <td style={td}>{categoryName}</td>
                       <td style={td}>{stock}</td>
                       <td style={td}>{cost}</td>
-                      <td style={td}>{threshold}</td>
                       <td style={td}>
                         <div style={{ display: 'flex', gap: 6 }}>
-                          <button onClick={(e) => { e.stopPropagation(); handleOpenUpdateStock(normalized); }} style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--fg)', cursor: 'pointer' }}>Update Stock</button>
+                          <button onClick={(e) => { e.stopPropagation(); handleAddClick(); }} style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600 }}>+ Add</button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteProduct(normalized); }}
+                            disabled={deletingId === rowProductId}
+                            style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--danger, #dc2626)', background: 'var(--bg)', color: 'var(--danger, #dc2626)', cursor: deletingId === rowProductId ? 'not-allowed' : 'pointer', opacity: deletingId === rowProductId ? 0.6 : 1 }}
+                          >
+                            {deletingId === rowProductId ? 'Deleting…' : 'Delete'}
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1123,41 +1157,20 @@ export default function ProductsPage() {
                         })()}
                       </div>
                     </td>
-                    <td style={td}>
-                      <input 
-                        value={item.sku} 
-                        onChange={(e) => updateInlineItem(item.id, 'sku', e.target.value)} 
-                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
-                        placeholder="SKU"
-                      />
-                    </td>
-                    <td style={td}>
-                      <select
-                        value={item.returnable === null ? '' : item.returnable ? 'returnable' : 'consumable'}
-                        onChange={(e) => updateInlineItem(item.id, 'returnable', e.target.value === '' ? null : e.target.value === 'returnable')}
-                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
-                      >
-                        <option value="">Select</option>
-                        <option value="returnable">Returnable</option>
-                        <option value="consumable">Consumable</option>
-                      </select>
-                    </td>
+                    <td style={{ ...td, color: 'var(--muted)', fontStyle: 'italic', fontFamily: 'monospace' }}>{item.skuPreview ?? '…'}</td>
                     <td style={td}>
                       <select
                         value={item.category_id}
                         onChange={(e) => {
-                          if (e.target.value === '__add_new__') {
-                            setAddCategoryForContext({ type: 'inline', itemId: item.id });
-                            setShowAddCategoryModal(true);
-                          } else {
-                            updateInlineItem(item.id, 'category_id', e.target.value);
-                          }
+                          const newCategoryId = e.target.value;
+                          updateInlineItem(item.id, 'category_id', newCategoryId);
+                          mergeInlineItem(item.id, { skuPreview: null });
+                          fetchSkuPreview(newCategoryId).then(sku => mergeInlineItem(item.id, { skuPreview: sku }));
                         }}
                         style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
                       >
                         <option value="">Category…</option>
                         {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
-                        <option value="__add_new__">╋ Add New Category</option>
                       </select>
                     </td>
                     <td style={td}>
@@ -1182,16 +1195,6 @@ export default function ProductsPage() {
                       />
                     </td>
                     <td style={td}>
-                      <input 
-                        type="number" 
-                        min={0} 
-                        value={item.lowStockThreshold as any} 
-                        onChange={(e) => updateInlineItem(item.id, 'lowStockThreshold', e.target.value === '' ? '' : Number(e.target.value))} 
-                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
-                        placeholder="0"
-                      />
-                    </td>
-                    <td style={td}>
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button 
                           onClick={async () => {
@@ -1204,8 +1207,7 @@ export default function ProductsPage() {
                               if (matchedId) {
                                 const updateBody: any = {};
                                 if (item.productName) updateBody.product_name = item.productName;
-                                if (item.sku) updateBody.serial_number = item.sku;
-                                if (item.lowStockThreshold !== '') updateBody.low_stock_threshold = Number(item.lowStockThreshold);
+                                if (item.description) updateBody.description = item.description;
                                 if (item.returnable !== null) updateBody.returnable = !!item.returnable;
                                 if (item.category_id) updateBody.category_id = item.category_id;
 
@@ -1262,10 +1264,9 @@ export default function ProductsPage() {
 
                               const body: any = {
                                 name: item.productName || undefined,
-                                sku: item.sku || undefined,
+                                description: item.description || undefined,
                                 quantity: item.quantity === '' ? undefined : Number(item.quantity),
                                 cost: item.cost === '' ? undefined : Number(item.cost),
-                                low_stock_threshold: item.lowStockThreshold === '' ? undefined : Number(item.lowStockThreshold),
                                 returnable: item.returnable === null ? undefined : !!item.returnable,
                                 image_url: image_url ?? undefined,
                                 category_id: item.category_id || undefined,
@@ -1344,43 +1345,22 @@ export default function ProductsPage() {
               </button>
               <button
                 onClick={() => setShowCsvModal(true)}
-                style={{ padding: '5px 12px', fontSize: 11, border: '1px dashed var(--border)', background: 'var(--bg)', color: 'var(--fg)', cursor: 'pointer', fontWeight: 600 }}
+                style={{ padding: '5px 14px', fontSize: 11, border: 'none', background: 'var(--fg)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
               >
                 Bulk Upload (CSV)
               </button>
+              <a
+                href="/templates/products-sample.csv"
+                download
+                style={{ fontSize: 11, color: 'var(--accent)', textDecoration: 'underline' }}
+              >
+                Download sample CSV
+              </a>
               {filteredProducts.length > 0 && (
                 <span>Showing {listShowAll ? filteredProducts.length : `${Math.min(listStartIdx + 1, filteredProducts.length)}–${Math.min(listEndIdx, filteredProducts.length)}`} of {filteredProducts.length}</span>
               )}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button
-                onClick={() => setListShowAll(!listShowAll)}
-                style={{ padding: '4px 10px', fontSize: 11, background: listShowAll ? 'var(--accent)' : 'var(--bg)', color: listShowAll ? '#fff' : 'var(--fg)', border: '1px solid var(--border)', cursor: 'pointer' }}
-              >
-                {listShowAll ? 'Paginate' : 'Show All'}
-              </button>
-              {!listShowAll && listTotalPages > 1 && (
-                <>
-                  <button
-                    onClick={() => setListCurrentPage(p => Math.max(1, p - 1))}
-                    disabled={listCurrentPage === 1}
-                    style={{ padding: '4px 8px', fontSize: 11, background: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--border)', cursor: listCurrentPage === 1 ? 'not-allowed' : 'pointer', opacity: listCurrentPage === 1 ? 0.5 : 1 }}
-                  >Prev</button>
-                  {Array.from({ length: listTotalPages }, (_, i) => i + 1).map(page => (
-                    <button
-                      key={page}
-                      onClick={() => setListCurrentPage(page)}
-                      style={{ padding: '4px 8px', fontSize: 11, background: listCurrentPage === page ? 'var(--accent)' : 'var(--bg)', color: listCurrentPage === page ? '#fff' : 'var(--fg)', border: '1px solid var(--border)', cursor: 'pointer', fontWeight: listCurrentPage === page ? 600 : 400 }}
-                    >{page}</button>
-                  ))}
-                  <button
-                    onClick={() => setListCurrentPage(p => Math.min(listTotalPages, p + 1))}
-                    disabled={listCurrentPage === listTotalPages}
-                    style={{ padding: '4px 8px', fontSize: 11, background: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--border)', cursor: listCurrentPage === listTotalPages ? 'not-allowed' : 'pointer', opacity: listCurrentPage === listTotalPages ? 0.5 : 1 }}
-                  >Next</button>
-                </>
-              )}
-            </div>
+            <Pagination page={listPage} totalPages={listTotalPages} onPageChange={setListPage} showAll={listShowAll} onToggleShowAll={setListShowAll} />
           </div>
           {showCsvModal && (
             <UploadProductsCsvModal

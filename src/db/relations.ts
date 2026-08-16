@@ -3,10 +3,10 @@
 // round trip, e.g. a product with its stock/image/category joined).
 import { relations } from "drizzle-orm";
 import { departments } from "./schema/departments";
+import { coe_domains } from "./schema/coeDomains";
 import { users } from "./schema/users";
 import { sessions } from "./schema/sessions";
 import { students } from "./schema/students";
-import { staffs } from "./schema/staffs";
 import { category } from "./schema/category";
 import { products } from "./schema/products";
 import { product_image } from "./schema/productImage";
@@ -19,11 +19,16 @@ import { purchase_invoice_item } from "./schema/purchaseInvoiceItem";
 export const departmentsRelations = relations(departments, ({ many }) => ({
   users: many(users),
   students: many(students),
-  staffs: many(staffs),
+}));
+
+export const coeDomainsRelations = relations(coe_domains, ({ many }) => ({
+  users: many(users),
+  lendingOrders: many(lending_order),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({
   department: one(departments, { fields: [users.department_id], references: [departments.department_id] }),
+  domain: one(coe_domains, { fields: [users.domain_id], references: [coe_domains.domain_id] }),
   sessions: many(sessions),
   products: many(products),
 }));
@@ -35,12 +40,6 @@ export const sessionsRelations = relations(sessions, ({ one }) => ({
 export const studentsRelations = relations(students, ({ one, many }) => ({
   department: one(departments, { fields: [students.department_id], references: [departments.department_id] }),
   lendingOrders: many(lending_order),
-}));
-
-export const staffsRelations = relations(staffs, ({ one, many }) => ({
-  department: one(departments, { fields: [staffs.department_id], references: [departments.department_id] }),
-  lendingOrdersAsBorrower: many(lending_order, { relationName: "borrowerStaff" }),
-  lendingOrdersAsMentor: many(lending_order, { relationName: "mentorStaff" }),
 }));
 
 export const categoryRelations = relations(category, ({ many }) => ({
@@ -65,17 +64,8 @@ export const stocksRelations = relations(stocks, ({ one }) => ({
 
 export const lendingOrderRelations = relations(lending_order, ({ one, many }) => ({
   borrowerStudent: one(students, { fields: [lending_order.borrower_student_id], references: [students.student_id] }),
-  borrowerStaff: one(staffs, {
-    fields: [lending_order.borrower_staff_id],
-    references: [staffs.staff_id],
-    relationName: "borrowerStaff",
-  }),
-  mentorStaff: one(staffs, {
-    fields: [lending_order.mentor_staff_id],
-    references: [staffs.staff_id],
-    relationName: "mentorStaff",
-  }),
   issuedByUser: one(users, { fields: [lending_order.issued_by_user_id], references: [users.user_id] }),
+  domain: one(coe_domains, { fields: [lending_order.domain_id], references: [coe_domains.domain_id] }),
   items: many(lending_item),
 }));
 

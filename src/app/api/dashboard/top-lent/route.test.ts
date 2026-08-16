@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from "vites
 import { NextRequest } from "next/server";
 import { eq, inArray, like } from "drizzle-orm";
 import { db } from "@/db/client";
-import { users, category, products, staffs, departments, lending_order, lending_item } from "@/db/schema";
+import { users, category, products, students, departments, lending_order, lending_item } from "@/db/schema";
 
 vi.mock("@/lib/authMiddleware", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
@@ -24,6 +24,7 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
     full_name: "Test User",
     role: "user",
     is_active: true,
+    domain_id: null,
     ...overrides,
   };
 }
@@ -33,8 +34,8 @@ beforeAll(async () => {
   OWNER_ID = owner.user_id;
   const [dept] = await db.insert(departments).values({ department_name: "Dash Top Lent Dept" }).returning();
   DEPT_ID = dept.department_id;
-  const [borrower] = await db.insert(staffs).values({ name: "Dash Top Lent Borrower", department_id: DEPT_ID }).returning();
-  BORROWER_ID = borrower.staff_id;
+  const [borrower] = await db.insert(students).values({ name: "Dash Top Lent Borrower", department_id: DEPT_ID }).returning();
+  BORROWER_ID = borrower.student_id;
 });
 
 afterAll(async () => {
@@ -44,7 +45,7 @@ afterAll(async () => {
   await db.delete(lending_order).where(eq(lending_order.issued_by_user_id, OWNER_ID));
   await db.delete(products).where(like(products.product_name, "Dash Top Lent%"));
   await db.delete(category).where(eq(category.category_name, "Dash Top Lent Category"));
-  await db.delete(staffs).where(eq(staffs.staff_id, BORROWER_ID));
+  await db.delete(students).where(eq(students.student_id, BORROWER_ID));
   await db.delete(departments).where(eq(departments.department_id, DEPT_ID));
   await db.delete(users).where(eq(users.user_id, OWNER_ID));
 });
@@ -67,8 +68,8 @@ describe("GET /api/dashboard/top-lent", () => {
     const [popular] = await db.insert(products).values({ product_name: "Dash Top Lent Popular", unit_cost: "1", category_id: cat.category_id }).returning();
     const [rare] = await db.insert(products).values({ product_name: "Dash Top Lent Rare", unit_cost: "1", category_id: cat.category_id }).returning();
 
-    const [order1] = await db.insert(lending_order).values({ borrower_type: "STAFF", borrower_staff_id: BORROWER_ID, issued_by_user_id: OWNER_ID, status: "PENDING" }).returning();
-    const [order2] = await db.insert(lending_order).values({ borrower_type: "STAFF", borrower_staff_id: BORROWER_ID, issued_by_user_id: OWNER_ID, status: "RETURNED" }).returning();
+    const [order1] = await db.insert(lending_order).values({ borrower_type: "STUDENT", borrower_student_id: BORROWER_ID, issued_by_user_id: OWNER_ID, status: "PENDING" }).returning();
+    const [order2] = await db.insert(lending_order).values({ borrower_type: "STUDENT", borrower_student_id: BORROWER_ID, issued_by_user_id: OWNER_ID, status: "RETURNED" }).returning();
 
     await db.insert(lending_item).values({ lend_order_id: order1.lending_order_id, product_id: popular.product_id, quantity: 3, original_quantity: 3 });
     await db.insert(lending_item).values({ lend_order_id: order2.lending_order_id, product_id: popular.product_id, quantity: 0, original_quantity: 5 });

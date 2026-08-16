@@ -8,7 +8,6 @@ import { authFetch } from '@/contexts/UserContext'
 interface DashboardStats {
   totalProducts: number
   totalStockQuantity: number
-  lowStockCount: number
   stockDistribution: {
     lent: number
     available: number
@@ -22,14 +21,6 @@ interface DashboardStats {
     lostDamaged: number
     lost: number
   }
-}
-
-interface LowStockProduct {
-  product_id: string
-  product_name: string
-  product_code: string
-  current_stock: number
-  threshold: number
 }
 
 interface OverdueAlert {
@@ -81,7 +72,6 @@ async function fetchJson<T>(url: string, errorMessage: string): Promise<T> {
 export default function Dashboard() {
   const [dismissedOverdue, setDismissedOverdue] = useState<Set<string>>(new Set())
   const [topLentFilter, setTopLentFilter] = useState<string>('Monthly')
-  const [alertTab, setAlertTab] = useState<'low-stock' | 'overdue'>('low-stock')
 
   // TanStack Query replaces 4 independent useEffect+useState fetches with
   // cached, deduped queries — navigating back to the dashboard within the
@@ -90,10 +80,6 @@ export default function Dashboard() {
   const statsQuery = useQuery({
     queryKey: ['dashboard', 'stats'],
     queryFn: () => fetchJson<DashboardStats>('/api/dashboard/stats', 'Failed to fetch stats'),
-  })
-  const lowStockQuery = useQuery({
-    queryKey: ['dashboard', 'low-stock'],
-    queryFn: () => fetchJson<LowStockProduct[]>('/api/dashboard/low-stock', 'Failed to fetch low stock products'),
   })
   const overdueQuery = useQuery({
     queryKey: ['dashboard', 'overdue'],
@@ -105,7 +91,6 @@ export default function Dashboard() {
   })
 
   const stats = statsQuery.data ?? null
-  const lowStockProducts = lowStockQuery.data ?? []
   const overdueAlerts = overdueQuery.data ?? []
   const topLentProducts = topLentQuery.data ?? []
   // Only the stats query gates the full-page loading state, matching the
@@ -152,7 +137,6 @@ export default function Dashboard() {
   const statItems = [
     { label: 'Total Products',    value: stats.totalProducts },
     { label: 'Total Stock',       value: stats.stockDistribution.total },
-    { label: 'Low Stock',         value: stats.lowStockCount,           color: stats.lowStockCount > 0 ? 'var(--danger)' : undefined },
     { label: 'Available',         value: stats.stockDistribution.available },
     { label: 'Currently Lent',    value: stats.stockDistribution.lent },
     { label: 'Overdue',           value: visibleOverdue.length,         color: visibleOverdue.length > 0 ? 'var(--warn)' : undefined },
@@ -177,7 +161,7 @@ export default function Dashboard() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(6, 1fr)',
+          gridTemplateColumns: 'repeat(5, 1fr)',
           background: '#fff',
           border: '1px solid var(--border)',
         }}
@@ -222,98 +206,52 @@ export default function Dashboard() {
         {/* Alerts */}
         <div style={{ ...S.panel, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <span style={S.panelTitle as any}>Alerts</span>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button
-                onClick={() => setAlertTab('low-stock')}
-                style={S.tab(alertTab === 'low-stock')}
-              >
-                Low Stock
-                {lowStockProducts.length > 0 && (
-                  <span style={{ marginLeft: 5, background: 'var(--danger)', color: '#fff', borderRadius: 20, padding: '0 5px', fontSize: 10, fontWeight: 700 }}>
-                    {lowStockProducts.length}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setAlertTab('overdue')}
-                style={S.tab(alertTab === 'overdue')}
-              >
-                Overdue
-                {visibleOverdue.length > 0 && (
-                  <span style={{ marginLeft: 5, background: 'var(--warn)', color: '#fff', borderRadius: 20, padding: '0 5px', fontSize: 10, fontWeight: 700 }}>
-                    {visibleOverdue.length}
-                  </span>
-                )}
-              </button>
-            </div>
+            <span style={S.panelTitle as any}>Overdue Alerts</span>
+            {visibleOverdue.length > 0 && (
+              <span style={{ background: 'var(--warn)', color: '#fff', borderRadius: 20, padding: '0 5px', fontSize: 10, fontWeight: 700 }}>
+                {visibleOverdue.length}
+              </span>
+            )}
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {alertTab === 'low-stock' ? (
-              lowStockProducts.length > 0 ? (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                      <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Product</th>
-                      <th style={{ padding: '4px 8px', textAlign: 'right', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Stock</th>
-                      <th style={{ padding: '4px 8px', textAlign: 'right', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Min</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lowStockProducts.map((p) => (
-                      <tr key={p.product_id} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: '6px 8px', fontSize: 12, color: 'var(--fg)' }}>{p.product_name}</td>
-                        <td style={{ padding: '6px 8px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--danger)' }}>{p.current_stock}</td>
-                        <td style={{ padding: '6px 8px', textAlign: 'right', fontSize: 12, color: 'var(--muted)' }}>{p.threshold}</td>
+            {visibleOverdue.length > 0 ? (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Borrower</th>
+                    <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Product</th>
+                    <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Due</th>
+                    <th style={{ padding: '4px 8px', width: 24 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleOverdue.map((a, i) => {
+                    const d = new Date(a.due_date)
+                    const dateStr = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
+                    return (
+                      <tr key={`${a.lending_order_id}-${i}`} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '6px 8px', fontSize: 12, color: 'var(--fg)' }}>{a.borrower_name}</td>
+                        <td style={{ padding: '6px 8px', fontSize: 12, color: 'var(--fg)' }}>{a.product_name}</td>
+                        <td style={{ padding: '6px 8px', fontSize: 11, color: 'var(--danger)', whiteSpace: 'nowrap' }}>{dateStr}</td>
+                        <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                          <button
+                            onClick={() => dismissOverdue(a.lending_order_id)}
+                            title="Dismiss"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', lineHeight: 1, padding: 2 }}
+                          >
+                            ×
+                          </button>
+                        </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 12, color: 'var(--muted)' }}>
-                  No low stock alerts
-                </div>
-              )
+                    )
+                  })}
+                </tbody>
+              </table>
             ) : (
-              visibleOverdue.length > 0 ? (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                      <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Borrower</th>
-                      <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Product</th>
-                      <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Due</th>
-                      <th style={{ padding: '4px 8px', width: 24 }} />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleOverdue.map((a, i) => {
-                      const d = new Date(a.due_date)
-                      const dateStr = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
-                      return (
-                        <tr key={`${a.lending_order_id}-${i}`} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td style={{ padding: '6px 8px', fontSize: 12, color: 'var(--fg)' }}>{a.borrower_name}</td>
-                          <td style={{ padding: '6px 8px', fontSize: 12, color: 'var(--fg)' }}>{a.product_name}</td>
-                          <td style={{ padding: '6px 8px', fontSize: 11, color: 'var(--danger)', whiteSpace: 'nowrap' }}>{dateStr}</td>
-                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                            <button
-                              onClick={() => dismissOverdue(a.lending_order_id)}
-                              title="Dismiss"
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', lineHeight: 1, padding: 2 }}
-                            >
-                              ×
-                            </button>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              ) : (
-                <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 12, color: 'var(--muted)' }}>
-                  No overdue alerts
-                </div>
-              )
+              <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 12, color: 'var(--muted)' }}>
+                No overdue alerts
+              </div>
             )}
           </div>
         </div>

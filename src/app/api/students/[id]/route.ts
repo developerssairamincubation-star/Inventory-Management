@@ -5,6 +5,7 @@ import { students, departments } from '@/db/schema'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 import { ok, fromError } from '@/lib/api/response'
 import { ApiError } from '@/lib/api/errors'
+import { decodeStudentIdCode, normalizeStudentIdCode } from '@/lib/studentIdCode'
 
 export async function PUT(
   req: NextRequest,
@@ -24,6 +25,35 @@ export async function PUT(
     if (body.email !== undefined) updateData.email = body.email
     if (body.phone_number !== undefined) updateData.phone_number = body.phone_number
 
+    if (body.student_id_code !== undefined) {
+      if (body.student_id_code) {
+        const normalized = normalizeStudentIdCode(body.student_id_code)
+        const decoded = decodeStudentIdCode(normalized)
+        if (!decoded) {
+          throw new ApiError(400, 'VALIDATION_ERROR', 'Unrecognized student ID format')
+        }
+
+        const [existingByCode] = await db
+          .select({ student_id: students.student_id })
+          .from(students)
+          .where(eq(students.student_id_code, normalized))
+        if (existingByCode && existingByCode.student_id !== id) {
+          throw new ApiError(409, 'CONFLICT', 'A student with this ID code already exists')
+        }
+
+        updateData.student_id_code = normalized
+        if (body.department_id === undefined) {
+          const [dept] = await db
+            .select({ department_id: departments.department_id })
+            .from(departments)
+            .where(eq(departments.code, decoded.deptCode))
+          if (dept) updateData.department_id = dept.department_id
+        }
+      } else {
+        updateData.student_id_code = null
+      }
+    }
+
     const [updated] = await db.update(students).set(updateData).where(eq(students.student_id, id)).returning()
 
     if (!updated) {
@@ -35,6 +65,7 @@ export async function PUT(
         student_id: students.student_id,
         name: students.name,
         student_number: students.student_number,
+        student_id_code: students.student_id_code,
         department_id: students.department_id,
         email: students.email,
         phone_number: students.phone_number,

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { like, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { users } from "@/db/schema";
+import { users, coe_domains } from "@/db/schema";
 
 vi.mock("@/lib/authMiddleware", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
@@ -21,6 +21,7 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
     full_name: "Admin",
     role: "super_admin",
     is_active: true,
+    domain_id: null,
     ...overrides,
   };
 }
@@ -32,6 +33,7 @@ async function makeUser(email: string, role: "super_admin" | "user" = "user") {
 
 afterAll(async () => {
   await db.delete(users).where(like(users.email, "admin-users-id-%"));
+  await db.delete(coe_domains).where(like(coe_domains.domain_name, "QaAdminUserIdDomain%"));
 });
 
 beforeEach(() => {
@@ -59,6 +61,26 @@ describe("PUT /api/admin/users/[id]", () => {
     const body = (await res.json()) as { full_name: string; is_active: boolean };
     expect(body.full_name).toBe("Renamed");
     expect(body.is_active).toBe(false);
+  });
+
+  it("assigns a COE domain, and rejects a domain_id that doesn't exist", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const target = await makeUser(`admin-users-id-domain-${Date.now()}@example.com`);
+    const [domain] = await db.insert(coe_domains).values({ domain_name: "QaAdminUserIdDomain X", room_name: "QaAdminUserIdDomain Room X" }).returning();
+
+    const bad = await PUT(
+      new NextRequest(`http://localhost/api/admin/users/${target.user_id}`, { method: "PUT", body: JSON.stringify({ domain_id: "00000000-0000-0000-0000-000000000000" }) }),
+      { params: Promise.resolve({ id: target.user_id }) },
+    );
+    expect(bad.status).toBe(400);
+
+    const good = await PUT(
+      new NextRequest(`http://localhost/api/admin/users/${target.user_id}`, { method: "PUT", body: JSON.stringify({ domain_id: domain.domain_id }) }),
+      { params: Promise.resolve({ id: target.user_id }) },
+    );
+    expect(good.status).toBe(200);
+    const body = (await good.json()) as { domain_id: string };
+    expect(body.domain_id).toBe(domain.domain_id);
   });
 
   it("refuses to demote the only super_admin", async () => {

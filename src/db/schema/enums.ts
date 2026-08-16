@@ -25,3 +25,8 @@ export const lendingOrderStatusEnum = pgEnum("lending_order_status", [
   "DAMAGED",
   "LOST",
 ]);
+
+// Mirrors db/migrations/V15__lending_item_type.sql. Per-item
+// returnable/consumable marking, validated server-side against the
+// product's own returnable/consumable flags at lending creation time.
+export const lendingItemTypeEnum = pgEnum("lending_item_type_enum", ["RETURNABLE", "CONSUMABLE"]);

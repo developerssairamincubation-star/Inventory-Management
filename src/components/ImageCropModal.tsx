@@ -187,6 +187,16 @@ export default function ImageCropModal({ imageSrc, onCrop, onClose, aspect = 1 }
     onCrop(dataUrl, file)
   }
 
+  // Cropping is optional — the user can save the image exactly as selected,
+  // no crop step required.
+  const handleUseOriginal = async () => {
+    const res = await fetch(imageSrc)
+    const blob = await res.blob()
+    const ext = (blob.type.split('/')[1] || 'jpg').split('+')[0]
+    const file = new File([blob], `original.${ext}`, { type: blob.type || 'image/jpeg' })
+    onCrop(imageSrc, file)
+  }
+
   return (
     <div
       style={{
@@ -292,6 +302,14 @@ export default function ImageCropModal({ imageSrc, onCrop, onClose, aspect = 1 }
             style={{ padding: '5px 16px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}
           >
             Cancel
+          </button>
+          <button
+            onClick={handleUseOriginal}
+            disabled={!imgLoaded}
+            title="Save the image exactly as selected, without cropping"
+            style={{ padding: '5px 16px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: imgLoaded ? 'pointer' : 'default', opacity: imgLoaded ? 1 : 0.5 }}
+          >
+            Use Original
           </button>
           <button
             onClick={handleApplyCrop}

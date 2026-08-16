@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
-import { lending_order, lending_item, students, staffs, departments, products } from "@/db/schema";
+import { lending_order, lending_item, students, departments, products } from "@/db/schema";
 import { getPeriod, getStartDateByPeriod } from '@/lib/api/request'
 import { fromError, ok } from '@/lib/api/response'
 import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
@@ -31,9 +31,7 @@ export async function GET(request: NextRequest) {
         due_date: lending_order.due_date,
         return_date: lending_order.return_date,
         status: lending_order.status,
-        borrower_type: lending_order.borrower_type,
         borrower_student_id: lending_order.borrower_student_id,
-        mentor_staff_id: lending_order.mentor_staff_id,
       })
       .from(lending_order)
       .where(
@@ -76,6 +74,7 @@ export async function GET(request: NextRequest) {
           .select({
             student_id: students.student_id,
             name: students.name,
+            student_id_code: students.student_id_code,
             department_id: students.department_id,
             departments: { department_name: departments.department_name },
           })
@@ -84,51 +83,41 @@ export async function GET(request: NextRequest) {
           .where(inArray(students.student_id, studentIds))
       : []
 
-    const mentorIds = lendingOrders.filter((o) => o.mentor_staff_id).map((o) => o.mentor_staff_id as string)
-
-    const mentorRows = mentorIds.length
-      ? await db.select({ staff_id: staffs.staff_id, name: staffs.name }).from(staffs).where(inArray(staffs.staff_id, mentorIds))
-      : []
-
     const studentMap = new Map(studentRows.map((s) => [s.student_id, s]))
-    const mentorMap = new Map(mentorRows.map((m) => [m.staff_id, m.name]))
 
     const records = lendingOrders.flatMap((order) => {
       const student = order.borrower_student_id ? studentMap.get(order.borrower_student_id) : undefined
       const orderItems = itemsByOrderId.get(order.lending_order_id) || []
 
+      const base = {
+        student_id: student?.student_id || "",
+        student_name: student?.name || "—",
+        student_id_code: student?.student_id_code || null,
+        department: student?.departments?.department_name || "—",
+        borrow_date: order.created_at,
+        return_date: order.return_date,
+        status: order.status || "PENDING",
+        mobile: "—",
+      }
+
       if (orderItems.length === 0) {
         return [{
-          student_id: student?.student_id || "",
-          student_name: student?.name || "—",
-          department: student?.departments?.department_name || "—",
-          mentor: (order.mentor_staff_id && mentorMap.get(order.mentor_staff_id)) || "—",
+          ...base,
           product_name: "—",
           quantity: 0,
           original_quantity: 0,
           damaged_quantity: 0,
           lost_quantity: 0,
-          borrow_date: order.created_at,
-          return_date: order.return_date,
-          status: order.status || "PENDING",
-          mobile: "—",
         }]
       }
 
       return orderItems.map((item) => ({
-        student_id: student?.student_id || "",
-        student_name: student?.name || "—",
-        department: student?.departments?.department_name || "—",
-        mentor: (order.mentor_staff_id && mentorMap.get(order.mentor_staff_id)) || "—",
+        ...base,
         product_name: item.products?.product_name || "—",
         quantity: item.quantity || 0,
         original_quantity: item.original_quantity ?? item.quantity ?? 0,
         damaged_quantity: item.damaged_quantity ?? 0,
         lost_quantity: item.lost_quantity ?? 0,
-        borrow_date: order.created_at,
-        return_date: order.return_date,
-        status: order.status || "PENDING",
-        mobile: "—",
       }))
     })
 

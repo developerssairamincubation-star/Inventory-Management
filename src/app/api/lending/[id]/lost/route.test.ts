@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from "vites
 import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { users, departments, products, category, stocks, staffs, lending_order, lending_item } from "@/db/schema";
+import { users, departments, products, category, stocks, students, lending_order, lending_item } from "@/db/schema";
 
 vi.mock("@/lib/authMiddleware", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
@@ -25,12 +25,13 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
     full_name: "Test User",
     role: "user",
     is_active: true,
+    domain_id: null,
     ...overrides,
   };
 }
 
 async function makeOrderWithItem(quantity: number) {
-  const [order] = await db.insert(lending_order).values({ borrower_type: "STAFF", borrower_staff_id: BORROWER_ID, issued_by_user_id: OWNER_ID, status: "PENDING" }).returning();
+  const [order] = await db.insert(lending_order).values({ borrower_type: "STUDENT", borrower_student_id: BORROWER_ID, issued_by_user_id: OWNER_ID, status: "PENDING" }).returning();
   await db.insert(lending_item).values({ lend_order_id: order.lending_order_id, product_id: PRODUCT_ID, quantity, original_quantity: quantity });
   return order;
 }
@@ -40,8 +41,8 @@ beforeAll(async () => {
   OWNER_ID = owner.user_id;
   const [dept] = await db.insert(departments).values({ department_name: "Lending Lost Dept" }).returning();
   DEPT_ID = dept.department_id;
-  const [borrower] = await db.insert(staffs).values({ name: "Lending Lost Borrower", department_id: DEPT_ID }).returning();
-  BORROWER_ID = borrower.staff_id;
+  const [borrower] = await db.insert(students).values({ name: "Lending Lost Borrower", department_id: DEPT_ID }).returning();
+  BORROWER_ID = borrower.student_id;
   const [cat] = await db.insert(category).values({ category_name: "Lending Lost Category" }).returning();
   const [product] = await db.insert(products).values({ product_name: "Lending Lost Product", unit_cost: "1", category_id: cat.category_id }).returning();
   PRODUCT_ID = product.product_id;
@@ -61,7 +62,7 @@ afterAll(async () => {
   await db.delete(stocks).where(eq(stocks.product_id, PRODUCT_ID));
   await db.delete(products).where(eq(products.product_id, PRODUCT_ID));
   await db.delete(category).where(eq(category.category_name, "Lending Lost Category"));
-  await db.delete(staffs).where(eq(staffs.staff_id, BORROWER_ID));
+  await db.delete(students).where(eq(students.student_id, BORROWER_ID));
   await db.delete(departments).where(eq(departments.department_id, DEPT_ID));
   await db.delete(users).where(eq(users.user_id, OWNER_ID));
 });

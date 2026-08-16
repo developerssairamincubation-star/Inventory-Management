@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import ImageCropModal from '@/components/ImageCropModal'
+import BarcodeLabel from '@/components/BarcodeLabel'
 import { authFetch } from '@/contexts/UserContext'
 import { uploadFile } from '@/lib/uploadClient'
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from 'lucide-react'
@@ -11,9 +12,9 @@ interface ProductDetail {
   product_id: string
   product_name: string
   product_code: string
-  serial_number: string | null
+  sku_code: string | null
+  description: string | null
   unit_cost: number
-  low_stock_threshold: number | null
   returnable: boolean | null
   image_url: string | null
   created_at: string
@@ -35,7 +36,7 @@ interface BorrowRecord {
   sno: number
   lending_order_id: string
   borrower_name: string
-  borrower_type: 'STUDENT' | 'STAFF'
+  borrower_type: 'STUDENT'
   department: string
   borrow_date: string
   return_date: string | null
@@ -45,7 +46,6 @@ interface BorrowRecord {
   original_quantity: number
   damaged_quantity: number
   lost_quantity: number
-  mentor: string
 }
 
 const ROWS_PER_PAGE = 20
@@ -218,9 +218,8 @@ function EditModal({
   onSaved: (updated: ProductDetail) => void
 }) {
   const [name, setName] = useState(product.product_name)
-  const [serial, setSerial] = useState(product.serial_number ?? '')
+  const [description, setDescription] = useState(product.description ?? '')
   const [cost, setCost] = useState<number | ''>(product.unit_cost ?? '')
-  const [threshold, setThreshold] = useState<number | ''>(product.low_stock_threshold ?? '')
   const [returnable, setReturnable] = useState<boolean | null>(product.returnable ?? null)
   const [categoryId, setCategoryId] = useState<string>(product.category_id ?? '')
   const [stockQuantity, setStockQuantity] = useState<number | ''>(product.stocks?.quantity ?? '')
@@ -230,6 +229,7 @@ function EditModal({
   const [categories, setCategories] = useState<{category_id: string; category_name: string}[]>([])
   const [showAddCatModal, setShowAddCatModal] = useState(false)
   const [newCatName, setNewCatName] = useState('')
+  const [newCatCode, setNewCatCode] = useState('')
   const [addCatLoading, setAddCatLoading] = useState(false)
 
   useEffect(() => {
@@ -243,13 +243,14 @@ function EditModal({
       const res = await authFetch('/api/categories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category_name: newCatName.trim() }),
+        body: JSON.stringify({ category_name: newCatName.trim(), code: newCatCode.trim() || undefined }),
       })
       if (res.ok) {
         const created = await res.json()
         setCategories(prev => [...prev, created])
         setCategoryId(created.category_id)
         setNewCatName('')
+        setNewCatCode('')
         setShowAddCatModal(false)
       }
     } catch { /* ignore */ } finally {
@@ -282,9 +283,8 @@ function EditModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           product_name: name,
-          serial_number: serial || null,
+          description: description || null,
           unit_cost: cost === '' ? undefined : Number(cost),
-          low_stock_threshold: threshold === '' ? undefined : Number(threshold),
           returnable: returnable,
           category_id: categoryId || null,
           // Only send image_url if a new file was uploaded
@@ -326,21 +326,21 @@ function EditModal({
               style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
           </div>
           <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Serial Number / SKU</div>
-            <input value={serial} onChange={e => setSerial(e.target.value)}
-              style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>SKU</div>
+            <div style={{ padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--muted)', background: 'var(--surface)' }}>
+              {product.sku_code || 'Generated on save'}
+            </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Description (optional)</div>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} maxLength={2000}
+              style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const, resize: 'vertical' }} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
               <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Unit Cost (₹)</div>
               <input type="number" step="0.01" min={0} value={cost as number | ''}
                 onChange={e => setCost(e.target.value === '' ? '' : Number(e.target.value))}
-                style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
-            </div>
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Low Stock Threshold</div>
-              <input type="number" min={0} value={threshold as number | ''}
-                onChange={e => setThreshold(e.target.value === '' ? '' : Number(e.target.value))}
                 style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
             </div>
             <div>
@@ -437,9 +437,14 @@ function EditModal({
                 <input autoFocus value={newCatName} onChange={e => setNewCatName(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateCat(); } }}
                   placeholder='Category name…'
-                  style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', marginBottom: 12, boxSizing: 'border-box' as const }} />
+                  style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', marginBottom: 8, boxSizing: 'border-box' as const }} />
+                <input value={newCatCode} onChange={e => setNewCatCode(e.target.value.slice(0, 4))}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateCat(); } }}
+                  placeholder='Code (optional) — SKU prefix'
+                  maxLength={4}
+                  style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', marginBottom: 12, boxSizing: 'border-box' as const, textTransform: 'uppercase' }} />
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                  <button type='button' onClick={() => { setShowAddCatModal(false); setNewCatName(''); }}
+                  <button type='button' onClick={() => { setShowAddCatModal(false); setNewCatName(''); setNewCatCode(''); }}
                     style={{ padding: '4px 14px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>Cancel</button>
                   <button type='button' onClick={handleCreateCat} disabled={addCatLoading || !newCatName.trim()}
                     style={{ padding: '4px 14px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer', opacity: (addCatLoading || !newCatName.trim()) ? 0.5 : 1 }}>
@@ -480,12 +485,12 @@ export default function ProductDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [printingBarcode, setPrintingBarcode] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [showAll, setShowAll] = useState(false)
 
   // Filters
-  const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
 
@@ -502,6 +507,20 @@ export default function ProductDetailPage() {
     if (!id || loading) return
     fetchLendingSummary(lendingPeriod)
   }, [lendingPeriod])
+
+  // Print-just-the-label flow: mount the label (hidden via @media print CSS
+  // below), trigger the browser print dialog, then unmount once the user is
+  // done — no PDF generation needed, plain browser print-to-label-printer.
+  useEffect(() => {
+    if (!printingBarcode) return
+    const handle = window.setTimeout(() => window.print(), 50)
+    const onAfterPrint = () => setPrintingBarcode(false)
+    window.addEventListener('afterprint', onAfterPrint)
+    return () => {
+      window.clearTimeout(handle)
+      window.removeEventListener('afterprint', onAfterPrint)
+    }
+  }, [printingBarcode])
 
   const fetchProductDetail = async (period: LendingPeriod = 'monthly') => {
     setLoading(true)
@@ -578,7 +597,6 @@ export default function ProductDetailPage() {
       )
       if (!match) return false
     }
-    if (typeFilter && r.borrower_type !== typeFilter) return false
     if (statusFilter && !matchesStatusFilterH(r.status, statusFilter)) return false
     if (deptFilter && r.department !== deptFilter) return false
     return true
@@ -617,12 +635,23 @@ export default function ProductDetailPage() {
   const stock = product.stocks?.quantity ?? 0
   const damaged = product.stocks?.damaged_quantity ?? 0
   const lost = product.stocks?.lost_quantity ?? 0
-  const threshold = product.low_stock_threshold ?? 0
-  const isLow = threshold > 0 && stock <= threshold
 
-  // stock bar width (relative to threshold * 3 or stock, whichever is larger)
-  const barMax = Math.max(stock + damaged + lost, threshold * 2, 1)
-  const stockBarPct = Math.min(100, (stock / barMax) * 100)
+  const handleQuickImageUpload = async (file: File) => {
+    try {
+      const image_url = await uploadFile(file, 'products', authFetch)
+      const res = await authFetch(`/api/products/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_url }),
+      })
+      if (res.ok) {
+        setSelectedImage(image_url)
+        setProduct(prev => prev ? { ...prev, image_url } : prev)
+      }
+    } catch (err) {
+      console.error('Error uploading product image:', err)
+    }
+  }
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -637,13 +666,17 @@ export default function ProductDetailPage() {
           <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>{product.product_name}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
             S/N: {product.product_code}
-            {product.serial_number && <span style={{ marginLeft: 12 }}>SKU: {product.serial_number}</span>}
-            <span style={{ marginLeft: 12, fontWeight: 600, color: isLow ? '#dc2626' : '#16a34a' }}>
-              {isLow ? 'Low Stock' : 'Active Stock'}
-            </span>
+            {product.sku_code && <span style={{ marginLeft: 12 }}>SKU: {product.sku_code}</span>}
           </div>
+          {product.description && (
+            <div style={{ fontSize: 12, color: 'var(--fg)', marginTop: 6, maxWidth: 480 }}>{product.description}</div>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setPrintingBarcode(true)}
+            style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>
+            Print Barcode
+          </button>
           <button onClick={() => setEditOpen(true)}
             style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>
             Edit Product
@@ -655,6 +688,23 @@ export default function ProductDetailPage() {
         </div>
       </div>
 
+      {/* Print-only barcode label — hidden on screen, shown (and everything
+          else hidden) when the browser print dialog is triggered. */}
+      {printingBarcode && (
+        <>
+          <style>{`
+            @media print {
+              body * { visibility: hidden; }
+              .barcode-print-area, .barcode-print-area * { visibility: visible; }
+              .barcode-print-area { position: absolute; top: 0; left: 0; }
+            }
+          `}</style>
+          <div className="barcode-print-area" style={{ position: 'fixed', top: -9999, left: -9999 }}>
+            <BarcodeLabel skuCode={product.sku_code || product.product_code} productName={product.product_name} />
+          </div>
+        </>
+      )}
+
       {/* Info Strip */}
       <div style={{ display: 'flex', border: '1px solid var(--border)', background: '#fff' }}>
         {/* Image */}
@@ -663,21 +713,26 @@ export default function ProductDetailPage() {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={selectedImage} alt={product.product_name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           ) : (
-            <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', padding: 8 }}>No image</div>
+            <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer', color: 'var(--accent)' }}>
+              <span style={{ fontSize: 22 }}>+</span>
+              <span style={{ fontSize: 11 }}>Upload image</span>
+              <input
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null
+                  if (f) handleQuickImageUpload(f)
+                  e.target.value = ''
+                }}
+              />
+            </label>
           )}
         </div>
         {/* Current Stock */}
         <div style={{ flex: 1, padding: '14px 18px', borderRight: '1px solid var(--border)' }}>
           <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Current Stock</div>
           <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--fg)', marginTop: 4 }}>{stock} <span style={{ fontSize: 12, color: 'var(--muted)' }}>units</span></div>
-          {threshold > 0 && (
-            <div style={{ marginTop: 6 }}>
-              <div style={{ width: '100%', height: 4, background: 'var(--surface)', borderRadius: 2 }}>
-                <div style={{ width: `${stockBarPct}%`, height: 4, background: isLow ? '#dc2626' : 'var(--accent)', borderRadius: 2 }} />
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>Threshold: {threshold}</div>
-            </div>
-          )}
           {product.unit_cost != null && (
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
               ₹{Number(product.unit_cost).toLocaleString('en-US', { minimumFractionDigits: 2 })} / unit
@@ -756,11 +811,6 @@ export default function ProductDetailPage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Borrowing History</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <select value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setCurrentPage(1) }} style={selectStyleH}>
-              <option value="">All Types</option>
-              <option value="STUDENT">Student</option>
-              <option value="STAFF">Staff</option>
-            </select>
             <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setCurrentPage(1) }} style={selectStyleH}>
               <option value="">All Status</option>
               <option value="PENDING">Pending</option>
@@ -776,8 +826,8 @@ export default function ProductDetailPage() {
             <input type="text" placeholder="Search name, dept, status..." value={searchQuery}
               onChange={e => { setSearchQuery(e.target.value); setCurrentPage(1) }}
               style={{ padding: '5px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: '#fff', width: 200, outline: 'none' }} />
-            {(typeFilter || statusFilter || deptFilter || searchQuery) && (
-              <button onClick={() => { setTypeFilter(''); setStatusFilter(''); setDeptFilter(''); setSearchQuery(''); setCurrentPage(1) }}
+            {(statusFilter || deptFilter || searchQuery) && (
+              <button onClick={() => { setStatusFilter(''); setDeptFilter(''); setSearchQuery(''); setCurrentPage(1) }}
                 style={{ padding: '5px 10px', fontSize: 11, border: '1px solid var(--border)', background: '#fff', color: 'var(--muted)', cursor: 'pointer' }}>Clear</button>
             )}
           </div>
@@ -796,7 +846,7 @@ export default function ProductDetailPage() {
                 ))}
                 <th onClick={() => handleSortH('borrow_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Borrow Date <SortIconH col="borrow_date" /></span></th>
                 <th onClick={() => handleSortH('return_date')} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Return Date <SortIconH col="return_date" /></span></th>
-                {['Status', 'Mentor'].map(h => (
+                {['Status'].map(h => (
                   <th key={h} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>{h}</th>
                 ))}
               </tr>
@@ -804,7 +854,7 @@ export default function ProductDetailPage() {
             <tbody>
               {pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={13} style={{ padding: '32px 10px', textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
+                  <td colSpan={12} style={{ padding: '32px 10px', textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
                     {searchQuery ? 'No records match your search.' : 'No borrowing history found.'}
                   </td>
                 </tr>
@@ -837,7 +887,6 @@ export default function ProductDetailPage() {
                         {row.return_date ? formatDate(row.return_date) : (row.due_date ? formatDate(row.due_date) : '—')}
                       </td>
                       <td style={{ padding: '7px 10px' }}><LendingStatusDisplay record={row} /></td>
-                      <td style={{ padding: '7px 10px', color: 'var(--fg)' }}>{row.mentor || '—'}</td>
                     </tr>
                   )
                 })

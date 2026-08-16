@@ -8,8 +8,8 @@ import {
   category,
   lending_item,
   lending_order,
+  purchase_invoice_item,
   students,
-  staffs,
   departments,
 } from '@/db/schema'
 import { deleteFromS3, getS3KeyFromUrl } from '@/lib/s3'
@@ -97,7 +97,6 @@ export async function GET(
       original_quantity: number
       damaged_quantity: number
       lost_quantity: number
-      mentor: string
     }
 
     let borrowingHistory: BorrowingHistoryRow[] = []
@@ -113,8 +112,6 @@ export async function GET(
           status: lending_order.status,
           borrower_type: lending_order.borrower_type,
           borrower_student_id: lending_order.borrower_student_id,
-          borrower_staff_id: lending_order.borrower_staff_id,
-          mentor_staff_id: lending_order.mentor_staff_id,
         })
         .from(lending_order)
         .where(and(inArray(lending_order.lending_order_id, orderIds), eq(lending_order.issued_by_user_id, user.user_id)))
@@ -145,43 +142,30 @@ export async function GET(
             return s + Math.max(0, orig - dmg - lst)
           }, 0)
 
-        const studentIds = [...new Set(orders.filter((o) => o.borrower_type === 'STUDENT' && o.borrower_student_id).map((o) => o.borrower_student_id as string))]
-        const staffIds = [...new Set(orders.filter((o) => o.borrower_type === 'STAFF' && o.borrower_staff_id).map((o) => o.borrower_staff_id as string))]
-        const mentorIds = [...new Set(orders.filter((o) => o.mentor_staff_id).map((o) => o.mentor_staff_id as string))]
-        const allStaffIds = [...new Set([...staffIds, ...mentorIds])]
+        const studentIds = [...new Set(orders.filter((o) => o.borrower_student_id).map((o) => o.borrower_student_id as string))]
 
-        const [studentRows, staffRows] = await Promise.all([
-          studentIds.length > 0
-            ? db
-                .select({
-                  student_id: students.student_id,
-                  name: students.name,
-                  departments: { department_name: departments.department_name },
-                })
-                .from(students)
-                .leftJoin(departments, eq(departments.department_id, students.department_id))
-                .where(inArray(students.student_id, studentIds))
-            : Promise.resolve([]),
-          allStaffIds.length > 0
-            ? db.select({ staff_id: staffs.staff_id, name: staffs.name }).from(staffs).where(inArray(staffs.staff_id, allStaffIds))
-            : Promise.resolve([]),
-        ])
+        const studentRows = studentIds.length > 0
+          ? await db
+              .select({
+                student_id: students.student_id,
+                name: students.name,
+                departments: { department_name: departments.department_name },
+              })
+              .from(students)
+              .leftJoin(departments, eq(departments.department_id, students.department_id))
+              .where(inArray(students.student_id, studentIds))
+          : []
 
         const studentMap = new Map(studentRows.map((s) => [s.student_id, s]))
-        const staffMap = new Map(staffRows.map((s) => [s.staff_id, s]))
 
         borrowingHistory = orders.map((order, idx) => {
           let borrowerName = '—'
           let department = '—'
-          if (order.borrower_type === 'STUDENT' && order.borrower_student_id) {
+          if (order.borrower_student_id) {
             const student = studentMap.get(order.borrower_student_id)
             borrowerName = student?.name || '—'
             department = student?.departments?.department_name || '—'
-          } else if (order.borrower_type === 'STAFF' && order.borrower_staff_id) {
-            borrowerName = staffMap.get(order.borrower_staff_id)?.name || '—'
-            department = 'Staff'
           }
-          const mentor = order.mentor_staff_id ? staffMap.get(order.mentor_staff_id)?.name || '—' : '—'
           const currentQty = qtyByOrder.get(order.lending_order_id) ?? 0
           const originalQty = origQtyByOrder.get(order.lending_order_id) ?? currentQty
           const damagedQty = damagedByOrder.get(order.lending_order_id) || 0
@@ -201,7 +185,6 @@ export async function GET(
             original_quantity: originalQty,
             damaged_quantity: damagedQty,
             lost_quantity: lostQty,
-            mentor,
           }
         })
       }
@@ -225,11 +208,13 @@ export async function PUT(
     const { id } = await params
     const body = await request.json()
 
+    // sku_code is intentionally not editable here — it's auto-generated at
+    // creation and printed as a barcode; changing it after the fact would
+    // orphan any already-printed label.
     const updateData: Partial<typeof products.$inferInsert> = {}
     if (body.product_name !== undefined) updateData.product_name = body.product_name
-    if (body.serial_number !== undefined) updateData.serial_number = body.serial_number
     if (body.unit_cost !== undefined) updateData.unit_cost = String(body.unit_cost)
-    if (body.low_stock_threshold !== undefined) updateData.low_stock_threshold = body.low_stock_threshold
+    if (body.description !== undefined) updateData.description = typeof body.description === 'string' ? body.description.slice(0, 2000) : null
     if (body.returnable !== undefined) updateData.returnable = body.returnable
     if (body.category_id !== undefined) updateData.category_id = body.category_id
 
@@ -278,16 +263,25 @@ export async function DELETE(
 
     const images = await db.select({ image_url: product_image.image_url }).from(product_image).where(eq(product_image.product_id, id))
 
-    const items = await db.select({ lend_order_id: lending_item.lend_order_id }).from(lending_item).where(eq(lending_item.product_id, id))
-    const orderIds = [...new Set(items.map((li) => li.lend_order_id))]
+    // Transactional: a partial delete (e.g. stock/lending rows gone but the
+    // product row itself blocked by a FK) would leave the catalog corrupted.
+    await db.transaction(async (tx) => {
+      const items = await tx.select({ lend_order_id: lending_item.lend_order_id }).from(lending_item).where(eq(lending_item.product_id, id))
+      const orderIds = [...new Set(items.map((li) => li.lend_order_id))]
 
-    await db.delete(lending_item).where(eq(lending_item.product_id, id))
-    if (orderIds.length > 0) {
-      await db.delete(lending_order).where(inArray(lending_order.lending_order_id, orderIds))
-    }
-    await db.delete(stocks).where(eq(stocks.product_id, id))
-    await db.delete(product_image).where(eq(product_image.product_id, id))
-    await db.delete(products).where(eq(products.product_id, id))
+      await tx.delete(lending_item).where(eq(lending_item.product_id, id))
+      if (orderIds.length > 0) {
+        await tx.delete(lending_order).where(inArray(lending_order.lending_order_id, orderIds))
+      }
+      await tx.delete(stocks).where(eq(stocks.product_id, id))
+      await tx.delete(product_image).where(eq(product_image.product_id, id))
+      // purchase_invoice_item.product_id is ON DELETE RESTRICT — past invoice
+      // line items must survive product deletion as a purchase record, so
+      // unlink rather than delete them (product_name is already stored on the
+      // row for exactly this case, see purchaseInvoiceItem.ts).
+      await tx.update(purchase_invoice_item).set({ product_id: null }).where(eq(purchase_invoice_item.product_id, id))
+      await tx.delete(products).where(eq(products.product_id, id))
+    })
 
     for (const img of images) {
       const key = getS3KeyFromUrl(img.image_url)

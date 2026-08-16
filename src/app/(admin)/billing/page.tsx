@@ -5,8 +5,8 @@ import { useEffect, useState } from "react";
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
 import UploadInvoiceModal from "@/components/UploadInvoiceModal";
 import { useToast } from "@/components/ui/Toast";
-
-const ROWS_PER_PAGE = 20;
+import Pagination from "@/components/Pagination";
+import { usePagination } from "@/hooks/usePagination";
 
 // Utility function to format date as DD/MM/YYYY
 const formatDate = (dateString: string | null): string => {
@@ -20,14 +20,6 @@ const formatDate = (dateString: string | null): string => {
 
 type SortColB = 'invoice_number' | 'received_date' | 'items_count' | 'total_amount' | null;
 type SortDirB = 'asc' | 'desc';
-
-type InvoiceItem = {
-  product_id: string;
-  product_name: string;
-  quantity: number;
-  unit_cost: number;
-  total_cost: number;
-};
 
 type Product = {
   product_id: string;
@@ -60,26 +52,16 @@ type InvoiceDetail = {
 };
 
 export default function BillingPage() {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [invoiceNo, setInvoiceNo] = useState("");
-  const [supplierName, setSupplierName] = useState("");
-  const [receivedDate, setReceivedDate] = useState("");
-  const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([
-    { product_id: "", product_name: "", quantity: 1, unit_cost: 0, total_cost: 0 }
-  ]);
-  
   const [products, setProducts] = useState<Product[]>([]);
-  const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
-  const [showProductDropdown, setShowProductDropdown] = useState<number | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [supplierFilter, setSupplierFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [showAll, setShowAll] = useState(false);
 
   // Sort
   const [sortColB, setSortColB] = useState<SortColB>(null);
@@ -93,8 +75,9 @@ export default function BillingPage() {
   }, []);
 
   useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, sortColB, sortDirB]);
+    setPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, supplierFilter, dateFrom, dateTo, sortColB, sortDirB]);
 
   async function fetchInvoices() {
     try {
@@ -124,124 +107,6 @@ export default function BillingPage() {
     }
   }
 
-  async function fetchNextInvoiceNo() {
-    try {
-      const res = await authFetch("/api/invoices/next-number");
-      if (res.ok) {
-        const data = await res.json();
-        setInvoiceNo(data.invoice_no);
-      } else {
-        console.error("Failed to fetch invoice number");
-      }
-    } catch (error) {
-      console.error("Error fetching invoice number:", error);
-    }
-  }
-
-  const handleOpenModal = () => {
-    setIsModalOpen(true);
-    fetchNextInvoiceNo();
-    // Set today's date as default
-    const today = new Date().toISOString().split('T')[0];
-    setReceivedDate(today);
-  };
-
-  const handleProductSearch = (index: number, query: string) => {
-    const updated = [...invoiceItems];
-    updated[index].product_name = query;
-    setInvoiceItems(updated);
-
-    if (query.trim()) {
-      const filtered = products.filter(p =>
-        p.product_name.toLowerCase().includes(query.toLowerCase())
-      );
-      setFilteredProducts(filtered);
-      setShowProductDropdown(index);
-    } else {
-      setFilteredProducts([]);
-      setShowProductDropdown(null);
-    }
-  };
-
-  const selectProduct = (index: number, product: Product) => {
-    const updated = [...invoiceItems];
-    updated[index] = {
-      ...updated[index],
-      product_id: product.product_id,
-      product_name: product.product_name,
-      unit_cost: product.unit_cost,
-      total_cost: updated[index].quantity * product.unit_cost,
-    };
-    setInvoiceItems(updated);
-    setShowProductDropdown(null);
-    setFilteredProducts([]);
-  };
-
-  const addInvoiceItem = () => {
-    setInvoiceItems([...invoiceItems, { product_id: "", product_name: "", quantity: 1, unit_cost: 0, total_cost: 0 }]);
-  };
-
-  const removeInvoiceItem = (index: number) => {
-    if (invoiceItems.length === 1) return;
-    setInvoiceItems(invoiceItems.filter((_, i) => i !== index));
-  };
-
-  const updateInvoiceItem = (index: number, field: keyof InvoiceItem, value: any) => {
-    const updated = [...invoiceItems];
-    updated[index] = { ...updated[index], [field]: value };
-    setInvoiceItems(updated);
-  };
-
-  const resetModal = () => {
-    setInvoiceNo("");
-    setSupplierName("");
-    setReceivedDate("");
-    setInvoiceItems([{ product_id: "", product_name: "", quantity: 1, unit_cost: 0, total_cost: 0 }]);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    // Prevent double submission
-    if (isSubmitting) return;
-
-    // Validate items
-    const validItems = invoiceItems.filter(item => item.product_id && item.quantity > 0);
-    if (validItems.length === 0) {
-      showToast("Please add at least one item with a valid product", "warning");
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const res = await authFetch("/api/invoices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          invoice_number: invoiceNo,
-          supplier_name: supplierName,
-          received_date: receivedDate,
-          items: validItems,
-        }),
-      });
-
-      if (res.ok) {
-        showToast("Invoice created successfully!", "success");
-        setIsModalOpen(false);
-        resetModal();
-        fetchInvoices();
-      } else {
-        const error = await res.json();
-        showToast(`Error: ${error.error || "Failed to create invoice"}`, "error");
-      }
-    } catch (error) {
-      console.error("Error creating invoice:", error);
-      showToast("An error occurred while creating the invoice", "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const handleSortB = (col: SortColB) => {
     if (sortColB === col) setSortDirB(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortColB(col); setSortDirB('asc'); }
@@ -254,13 +119,20 @@ export default function BillingPage() {
       : <ArrowUpWideNarrow size={11} style={{ flexShrink: 0, color: 'var(--accent)' }} />;
   };
 
+  const supplierOptions = Array.from(new Set(invoices.map((inv) => inv.supplier_name).filter(Boolean))).sort();
+
   let filteredInvoices = invoices.filter((invoice) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      invoice.invoice_number?.toLowerCase().includes(query) ||
-      invoice.supplier_name?.toLowerCase().includes(query)
-    );
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      const matches =
+        invoice.invoice_number?.toLowerCase().includes(query) ||
+        invoice.supplier_name?.toLowerCase().includes(query);
+      if (!matches) return false;
+    }
+    if (supplierFilter && invoice.supplier_name !== supplierFilter) return false;
+    if (dateFrom && invoice.received_date && invoice.received_date < dateFrom) return false;
+    if (dateTo && invoice.received_date && invoice.received_date > dateTo) return false;
+    return true;
   });
 
   if (sortColB) {
@@ -274,14 +146,7 @@ export default function BillingPage() {
     });
   }
 
-  const totalPages = Math.ceil(filteredInvoices.length / ROWS_PER_PAGE);
-  const startIdx = (currentPage - 1) * ROWS_PER_PAGE;
-  const endIdx = startIdx + ROWS_PER_PAGE;
-  const pageRows = showAll ? filteredInvoices : filteredInvoices.slice(startIdx, endIdx);
-
-  const calculateGrandTotal = () => {
-    return invoiceItems.reduce((sum, item) => sum + (item.total_cost || 0), 0);
-  };
+  const { page, setPage, totalPages, padRows, showAll, setShowAll, startIdx, endIdx } = usePagination(filteredInvoices, { pageSize: 50 });
 
   const fetchInvoiceDetails = async (invoiceId: string) => {
     try {
@@ -325,14 +190,6 @@ export default function BillingPage() {
     }
   };
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%', padding: '5px 8px', fontSize: 12, border: '1px solid var(--border)',
-    color: 'var(--fg)', background: 'var(--bg)', outline: 'none', boxSizing: 'border-box',
-  };
-  const labelStyle: React.CSSProperties = {
-    display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--muted)',
-    textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4,
-  };
   const th: React.CSSProperties = {
     padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)',
     textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', userSelect: 'none',
@@ -348,21 +205,15 @@ export default function BillingPage() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>Billing / Invoices</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>Invoice</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Manage purchase invoices</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={() => setIsUploadModalOpen(true)}
-            style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: '#fff', color: 'var(--accent)', border: '1px solid var(--accent)', cursor: 'pointer' }}
-          >
-            ↑ Upload Invoice
-          </button>
-          <button
-            onClick={handleOpenModal}
             style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}
           >
-            + Create Invoice
+            ↑ Upload Invoice
           </button>
         </div>
       </div>
@@ -375,6 +226,44 @@ export default function BillingPage() {
         onChange={(e) => setSearchQuery(e.target.value)}
         style={{ padding: '6px 10px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: 'var(--bg)', outline: 'none', width: '100%', boxSizing: 'border-box' }}
       />
+
+      {/* Filters Row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <select
+          value={supplierFilter}
+          onChange={(e) => setSupplierFilter(e.target.value)}
+          style={{ padding: '5px 8px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: 'var(--bg)', outline: 'none', cursor: 'pointer' }}
+        >
+          <option value="">All Suppliers</option>
+          {supplierOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
+          From
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            style={{ padding: '5px 8px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: 'var(--bg)', outline: 'none' }}
+          />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
+          To
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            style={{ padding: '5px 8px', fontSize: 12, border: '1px solid var(--border)', color: 'var(--fg)', background: 'var(--bg)', outline: 'none' }}
+          />
+        </label>
+        {(searchQuery || supplierFilter || dateFrom || dateTo) && (
+          <button
+            onClick={() => { setSearchQuery(''); setSupplierFilter(''); setDateFrom(''); setDateTo(''); }}
+            style={{ padding: '5px 8px', fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--muted)', cursor: 'pointer' }}
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
 
       {/* Invoices Table */}
       <div style={{ background: '#fff', border: '1px solid var(--border)', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -392,11 +281,18 @@ export default function BillingPage() {
             </tr>
           </thead>
           <tbody>
-            {pageRows.length === 0 ? (
+            {filteredInvoices.length === 0 ? (
               <tr><td colSpan={7} style={{ ...td, textAlign: 'center', color: 'var(--muted)', padding: '24px 10px' }}>No invoices found</td></tr>
             ) : (
-              pageRows.map((invoice, localIdx) => {
-                const idx = showAll ? localIdx : (currentPage - 1) * ROWS_PER_PAGE + localIdx;
+              padRows.map((invoice, localIdx) => {
+                if (!invoice) {
+                  return (
+                    <tr key={`empty-${localIdx}`}>
+                      <td style={{ ...td, border: 'none' }} colSpan={7}>&nbsp;</td>
+                    </tr>
+                  );
+                }
+                const idx = showAll ? localIdx : startIdx + localIdx;
                 return (
                   <tr key={invoice.invoice_id}>
                     <td style={{ ...td, color: 'var(--muted)' }}>{idx + 1}</td>
@@ -435,148 +331,10 @@ export default function BillingPage() {
           <div>
             Showing {showAll ? filteredInvoices.length : `${startIdx + 1}-${Math.min(endIdx, filteredInvoices.length)}`} of {filteredInvoices.length}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button
-              onClick={() => setShowAll(!showAll)}
-              style={{ padding: '4px 10px', fontSize: 11, background: showAll ? 'var(--accent)' : 'var(--bg)', color: showAll ? '#fff' : 'var(--fg)', border: '1px solid var(--border)', cursor: 'pointer' }}
-            >
-              {showAll ? 'Paginate' : 'Show All'}
-            </button>
-            {!showAll && totalPages > 1 && (
-              <>
-                <button
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  style={{ padding: '4px 8px', fontSize: 11, background: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--border)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.5 : 1 }}
-                >
-                  Prev
-                </button>
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    style={{ padding: '4px 8px', fontSize: 11, background: currentPage === page ? 'var(--accent)' : 'var(--bg)', color: currentPage === page ? '#fff' : 'var(--fg)', border: '1px solid var(--border)', cursor: 'pointer', fontWeight: currentPage === page ? 600 : 400 }}
-                  >
-                    {page}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  style={{ padding: '4px 8px', fontSize: 11, background: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--border)', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.5 : 1 }}
-                >
-                  Next
-                </button>
-              </>
-            )}
-          </div>
+          <Pagination page={page} totalPages={totalPages} onPageChange={setPage} showAll={showAll} onToggleShowAll={setShowAll} />
         </div>
       )}
       </div>
-
-      {/* Create Invoice Modal */}
-      {isModalOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', padding: 16 }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: 760, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Create New Invoice</div>
-              <button onClick={() => { setIsModalOpen(false); resetModal(); }} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>×</button>
-            </div>
-            <div style={{ overflowY: 'auto', flex: 1 }}>
-              <form onSubmit={handleSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
-                {/* Invoice header fields */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-                  <div>
-                    <label style={labelStyle}>Invoice No</label>
-                    <input type="text" readOnly value={invoiceNo} style={{ ...inputStyle, background: 'var(--surface)', color: 'var(--muted)', cursor: 'not-allowed' }} />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Supplier Name</label>
-                    <input type="text" required value={supplierName} onChange={(e) => setSupplierName(e.target.value)} style={inputStyle} placeholder="Enter supplier name" />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Delivered On</label>
-                    <input type="date" required value={receivedDate} onChange={(e) => setReceivedDate(e.target.value)} style={inputStyle} />
-                  </div>
-                </div>
-
-                {/* Items */}
-                <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Invoice Items</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 1fr 1fr auto', gap: 6, marginBottom: 4 }}>
-                    {['Product', 'Qty', 'Unit Cost', 'Total', ''].map((h) => (
-                      <div key={h} style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</div>
-                    ))}
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {invoiceItems.map((item, index) => (
-                      <div key={index} style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 1fr 1fr auto', gap: 6, alignItems: 'start' }}>
-                        <div style={{ position: 'relative' }}>
-                          <input
-                            type="text"
-                            placeholder="Search product…"
-                            value={item.product_name}
-                            onChange={(e) => handleProductSearch(index, e.target.value)}
-                            onFocus={() => { if (item.product_name) handleProductSearch(index, item.product_name); }}
-                            style={inputStyle}
-                          />
-                          {showProductDropdown === index && filteredProducts.length > 0 && (
-                            <div style={{ position: 'absolute', zIndex: 10, width: '100%', background: '#fff', border: '1px solid var(--border)', maxHeight: 180, overflowY: 'auto', top: '100%', left: 0 }}>
-                              {filteredProducts.map((p) => (
-                                <button key={p.product_id} type="button" onClick={() => selectProduct(index, p)}
-                                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', fontSize: 12, color: 'var(--fg)', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}>
-                                  <div style={{ fontWeight: 500 }}>{p.product_name}</div>
-                                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>₹{p.unit_cost}</div>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <input type="number" min="1" value={item.quantity}
-                          onChange={(e) => {
-                            const qty = parseInt(e.target.value) || 1;
-                            const updated = [...invoiceItems];
-                            updated[index] = { ...updated[index], quantity: qty, total_cost: qty * updated[index].unit_cost };
-                            setInvoiceItems(updated);
-                          }}
-                          style={inputStyle} />
-                        <input type="number" step="0.01" value={item.unit_cost} readOnly style={{ ...inputStyle, background: 'var(--surface)', color: 'var(--muted)' }} />
-                        <input type="number" step="0.01" value={item.total_cost.toFixed(2)} readOnly style={{ ...inputStyle, background: 'var(--surface)', color: 'var(--muted)' }} />
-                        <button type="button" onClick={() => removeInvoiceItem(index)} disabled={invoiceItems.length === 1}
-                          style={{ padding: '5px 8px', fontSize: 11, border: '1px solid var(--border)', background: 'none', color: invoiceItems.length === 1 ? 'var(--muted)' : '#b91c1c', cursor: invoiceItems.length === 1 ? 'not-allowed' : 'pointer' }}>
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  <button type="button" onClick={addInvoiceItem}
-                    style={{ marginTop: 8, fontSize: 12, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                    + Add item
-                  </button>
-                </div>
-
-                {/* Grand total */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-                  <span style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Grand Total</span>
-                  <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--fg)' }}>₹{calculateGrandTotal().toFixed(2)}</span>
-                </div>
-
-                {/* Actions */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                  <button type="button" onClick={() => { setIsModalOpen(false); resetModal(); }} disabled={isSubmitting}
-                    style={{ padding: '5px 14px', fontSize: 12, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--fg)', cursor: 'pointer' }}>
-                    Cancel
-                  </button>
-                  <button type="submit" disabled={isSubmitting}
-                    style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}>
-                    {isSubmitting ? 'Creating…' : 'Create Invoice'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Upload Invoice Modal */}
       {isUploadModalOpen && (
@@ -653,4 +411,3 @@ export default function BillingPage() {
     </div>
   );
 }
-      {/* Header */}

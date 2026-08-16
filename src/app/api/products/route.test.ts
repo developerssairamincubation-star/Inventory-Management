@@ -22,6 +22,7 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
     full_name: "Test User",
     role: "user",
     is_active: true,
+    domain_id: null,
     ...overrides,
   };
 }
@@ -98,6 +99,39 @@ describe("POST /api/products", () => {
     const body = (await res.json()) as { product: { product_code: string; product_name: string }; stock: { quantity: number } };
     expect(body.product.product_code).toMatch(/^STIC\d{3}$/);
     expect(body.stock.quantity).toBe(4);
+  });
+
+  it("backfills a unique SKU prefix (not the shared GEN fallback) for a category with no code, and persists it", async () => {
+    // Regression test: two categories that both lack a code must never both
+    // fall back to the literal "GEN" — that's also the uncategorized-product
+    // prefix, so two such categories would generate colliding SKUs for
+    // different products (this happened before this fix).
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const [catA] = await db.insert(category).values({ category_name: "Products Route NoCode Alpha" }).returning();
+    const [catB] = await db.insert(category).values({ category_name: "Products Route NoCode Beta" }).returning();
+
+    const resA = await POST(new NextRequest("http://localhost/api/products", {
+      method: "POST",
+      body: JSON.stringify({ product_name: "Products Route NoCode A", unit_cost: 1, quantity: 1, category_id: catA.category_id }),
+    }));
+    const resB = await POST(new NextRequest("http://localhost/api/products", {
+      method: "POST",
+      body: JSON.stringify({ product_name: "Products Route NoCode B", unit_cost: 1, quantity: 1, category_id: catB.category_id }),
+    }));
+    const bodyA = (await resA.json()) as { product: { sku_code: string } };
+    const bodyB = (await resB.json()) as { product: { sku_code: string } };
+
+    expect(bodyA.product.sku_code).not.toMatch(/^GEN-/);
+    expect(bodyB.product.sku_code).not.toMatch(/^GEN-/);
+    // Different categories must never end up with the same prefix.
+    expect(bodyA.product.sku_code.split("-")[0]).not.toBe(bodyB.product.sku_code.split("-")[0]);
+
+    const [updatedCatA] = await db.select({ code: category.code }).from(category).where(eq(category.category_id, catA.category_id));
+    expect(updatedCatA.code).not.toBeNull();
+    expect(updatedCatA.code).not.toBe("GEN");
+
+    await db.delete(category).where(eq(category.category_id, catA.category_id));
+    await db.delete(category).where(eq(category.category_id, catB.category_id));
   });
 
   it("never allocates the same product_code twice under concurrent creation", async () => {

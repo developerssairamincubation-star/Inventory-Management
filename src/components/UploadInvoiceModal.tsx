@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { Fragment, useEffect, useRef, useState, useCallback } from "react";
 import ImageCropModal from "@/components/ImageCropModal";
+import LoadingState from "@/components/LoadingState";
 import { useToast } from "@/components/ui/Toast";
 import { authFetch } from "@/contexts/UserContext";
 import { uploadFile } from "@/lib/uploadClient";
@@ -20,38 +21,29 @@ type ExistingProduct = {
   product_id: string;
   product_name: string;
   unit_cost: number;
-  serial_number?: string;
+  sku_code?: string;
   product_code?: string;
 };
 
-type NewProductDraft = {
+type ItemAction = "add_stock" | "new_product" | "invoice_only";
+
+// One row per invoice line item — the whole review-and-decide flow (used to
+// be a one-item-at-a-time modal wizard) now lives inline in this row: the
+// Action select decides whether it adds to an existing product's stock,
+// creates a brand-new product (category/description/image fields appear in
+// an inline sub-row below), or is logged for the invoice only.
+type InvoiceRow = {
   product_name: string;
-  serial_number: string;     // SKU
-  unit_cost: number;
-  quantity: number;          // initial stock (0 — invoice adds its own qty)
-  low_stock_threshold: number;
-  type: "consumable" | "returnable" | "both" | "";
-  category_id: string;
-};
-
-type Decision = {
-  index: number;
-  action: "add_stock" | "new_product" | "invoice_only";
-  existingProductId?: string;
-  newProductDraft?: NewProductDraft;
-  newProductImageFile?: File | null;
-};
-
-type ConfirmItem = {
-  index: number;
-  parsed: ParsedProduct;
-  match: ExistingProduct | null;
-};
-
-type ConfirmState = {
-  items: ConfirmItem[];
-  currentIdx: number;
-  decisions: Decision[];
+  quantity: number;
+  unit_price: number;
+  total: number;
+  action: ItemAction;
+  linkedProductId: string | null; // add_stock target — auto-filled on an exact name match, otherwise picked via the inline search
+  linkQuery: string; // search text for the inline "link to existing product" box
+  category_id: string; // new_product only
+  description: string; // new_product only
+  imageFile: File | null; // new_product only
+  imagePreview: string | null; // new_product only
 };
 
 type Props = {
@@ -67,14 +59,16 @@ function normalise(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+// Exact match only — a substring/fuzzy fallback here would silently
+// conflate different product variants (e.g. "ESP32" matching "ESP32-C3" by
+// substring containment), merging distinct catalog items and their SKUs
+// into one. searchProducts() below still does loose matching for the
+// user-driven manual "link to existing product" search, where a human
+// picks the right one instead of the system guessing on their behalf.
 function findMatch(name: string, products: ExistingProduct[]): ExistingProduct | null {
   if (!name.trim()) return null;
   const n = normalise(name);
-  return (
-    products.find((p) => normalise(p.product_name) === n) ??
-    products.find((p) => normalise(p.product_name).includes(n) || n.includes(normalise(p.product_name))) ??
-    null
-  );
+  return products.find((p) => normalise(p.product_name) === n) ?? null;
 }
 
 function searchProducts(query: string, products: ExistingProduct[]): ExistingProduct[] {
@@ -89,7 +83,28 @@ function searchProducts(query: string, products: ExistingProduct[]): ExistingPro
     .slice(0, 8);
 }
 
-const emptyProduct = (): ParsedProduct => ({ product_name: "", quantity: 1, unit_price: 0, total: 0 });
+// A row's default action/link is decided once, from whatever name it starts
+// with (parsed from the PDF, or blank for a manually added row) — editing
+// the name afterward doesn't silently flip a row the user already reviewed.
+function createRow(base: Partial<ParsedProduct>, existingProducts: ExistingProduct[]): InvoiceRow {
+  const product_name = base.product_name ?? "";
+  const match = findMatch(product_name, existingProducts);
+  return {
+    product_name,
+    quantity: base.quantity ?? 1,
+    unit_price: base.unit_price ?? 0,
+    total: base.total ?? 0,
+    action: match ? "add_stock" : "new_product",
+    linkedProductId: match?.product_id ?? null,
+    linkQuery: "",
+    category_id: "",
+    description: "",
+    imageFile: null,
+    imagePreview: null,
+  };
+}
+
+const isRowTouched = (r: InvoiceRow) => r.product_name.trim() !== "" || r.quantity !== 0 || r.unit_price !== 0;
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -105,6 +120,11 @@ const inp: React.CSSProperties = {
   outline: "none", boxSizing: "border-box",
 };
 const inpRO: React.CSSProperties = { ...inp, background: "var(--surface, #f8f9fa)", color: "var(--muted)" };
+const th: React.CSSProperties = {
+  padding: "4px 5px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "var(--muted)",
+  textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap",
+};
+const td: React.CSSProperties = { padding: "4px 5px", verticalAlign: "top" };
 
 // ---------------------------------------------------------------------------
 // Main component
@@ -121,43 +141,35 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
   const [supplierName,  setSupplierName]  = useState("");
   const [deliveryDate,  setDeliveryDate]  = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [products,      setProducts]      = useState<ParsedProduct[]>([emptyProduct()]);
+  // The invoice's own printed grand total — may include shipping/tax/discounts
+  // and so can legitimately differ from the items subtotal below. This is
+  // what actually gets saved as the invoice's total_amount.
+  const [invoiceTotal,  setInvoiceTotal]  = useState<number | "">("");
+  const [rows,          setRows]          = useState<InvoiceRow[]>([createRow({}, [])]);
   const [autoInvoiceNo, setAutoInvoiceNo] = useState("");
-  // ── Categories ─────────────────────────────────────────────────────────────────────────
+  // ── Categories — read-only here; created/edited only from Admin Settings ──
   const [categories, setCategories] = useState<{category_id: string; category_name: string}[]>([]);
-  const [showAddCatModal, setShowAddCatModal] = useState(false);
-  const [newCatName, setNewCatName] = useState("");
-  const [addCatLoading, setAddCatLoading] = useState(false);
-  // ── Confirmation flow ─────────────────────────────────────────────────────
-  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
-  const [linkExistingEnabled, setLinkExistingEnabled] = useState(false);
-  const [linkExistingQuery, setLinkExistingQuery] = useState("");
-  const [linkExistingSelection, setLinkExistingSelection] = useState<ExistingProduct | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { showToast } = useToast();
 
-  // ── New product details form (shown when user accepts adding a new product) ─
-  const [newProductForm, setNewProductForm] = useState<{
-    item: ConfirmItem;
-    draft: NewProductDraft;
-    imageFile: File | null;
-    imagePreview: string | null;
-    cropSrc: string | null;
-    showCrop: boolean;
-  } | null>(null);
+  // ── Image crop (for new_product rows) ─────────────────────────────────────
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [currentCropRowIdx, setCurrentCropRowIdx] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Fetch next invoice number on mount ───────────────────────────────────
+  // ── Fetch next invoice number + categories on mount ──────────────────────
   useEffect(() => {
     authFetch("/api/invoices/next-number")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (d?.invoice_no) setAutoInvoiceNo(d.invoice_no); })
-      .catch(() => {});    // Fetch categories
+      .catch(() => {});
     authFetch("/api/categories")
       .then((r) => r.ok ? r.json() : [])
       .then((d) => setCategories(Array.isArray(d) ? d : []))
-      .catch(() => {});  }, []);
+      .catch(() => {});
+  }, []);
 
   // ── File handling ─────────────────────────────────────────────────────────
   const handleFile = useCallback(
@@ -184,15 +196,11 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
         if (data.supplier_name)  setSupplierName(data.supplier_name);
         if (data.delivery_date)  setDeliveryDate(data.delivery_date);
         if (data.invoice_number) setInvoiceNumber(data.invoice_number);
+        if (typeof data.total_amount === "number" && Number.isFinite(data.total_amount)) {
+          setInvoiceTotal(data.total_amount);
+        }
         if (data.products?.length > 0) {
-          setProducts(
-            data.products.map((p: ParsedProduct) => ({
-              product_name: p.product_name,
-              quantity:     p.quantity,
-              unit_price:   p.unit_price,
-              total:        p.total,
-            }))
-          );
+          setRows(data.products.map((p: ParsedProduct) => createRow(p, existingProducts)));
         }
       } catch (err: any) {
         setParseError(err.message || "Unexpected error");
@@ -218,181 +226,115 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
     setParseError(null);
   };
 
-  // ── Product helpers ────────────────────────────────────────────────────────
-  const updateProduct = (idx: number, field: keyof ParsedProduct, val: string | number) => {
-    setProducts((prev) => {
-      const next = [...prev];
-      const p = { ...next[idx], [field]: field === "product_name" ? val : (parseFloat(String(val)) || 0) };
-      if (field === "quantity" || field === "unit_price") p.total = p.quantity * p.unit_price;
-      next[idx] = p;
-      return next;
-    });
+  // ── Row helpers ────────────────────────────────────────────────────────────
+  const updateRow = (idx: number, patch: Partial<InvoiceRow>) => {
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   };
-  const addRow    = () => setProducts((p) => [...p, emptyProduct()]);
-  const removeRow = (i: number) => setProducts((p) => p.filter((_, j) => j !== i));
-  const grandTotal = products.reduce((s, p) => s + (p.total || 0), 0);
+
+  const updateNumberField = (idx: number, field: "quantity" | "unit_price", val: string) => {
+    setRows((prev) => prev.map((r, i) => {
+      if (i !== idx) return r;
+      const num = parseFloat(val) || 0;
+      const next = { ...r, [field]: num };
+      next.total = next.quantity * next.unit_price;
+      return next;
+    }));
+  };
+
+  const updateAction = (idx: number, action: ItemAction) => {
+    setRows((prev) => prev.map((r, i) => {
+      if (i !== idx) return r;
+      if (action === "add_stock" && !r.linkedProductId) {
+        const match = findMatch(r.product_name, existingProducts);
+        return { ...r, action, linkedProductId: match?.product_id ?? null, linkQuery: match ? "" : r.product_name };
+      }
+      return { ...r, action };
+    }));
+  };
+
+  const addRow    = () => setRows((prev) => [...prev, createRow({}, existingProducts)]);
+  const removeRow = (i: number) => setRows((prev) => prev.filter((_, j) => j !== i));
+  const itemsSubtotal = rows.reduce((s, r) => s + (r.total || 0), 0);
 
   // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmitClick = () => {
-    if (!supplierName.trim())                           { showToast("Please enter a supplier name.", "warning"); return; }
-    if (!deliveryDate)                                  { showToast("Please enter a delivery date.", "warning"); return; }
-    if (products.length === 0)                          { showToast("Please add at least one product.", "warning"); return; }
-    if (products.some((p) => !p.product_name.trim()))  { showToast("All products must have a name.", "warning"); return; }
-    const items: ConfirmItem[] = products.map((p, i) => ({ index: i, parsed: p, match: findMatch(p.product_name, existingProducts) }));
-    setConfirmState({ items, currentIdx: 0, decisions: [] });
+    if (!supplierName.trim()) { showToast("Please enter a supplier name.", "warning"); return; }
+    if (!deliveryDate)        { showToast("Please enter a delivery date.", "warning"); return; }
+
+    // Untouched blank rows (e.g. a leftover "+ Add row") are silently
+    // skipped rather than blocking submit — same pattern as the Stock
+    // List's Add Products form.
+    const touched = rows.filter(isRowTouched);
+    if (touched.length === 0)                          { showToast("Please add at least one product.", "warning"); return; }
+    if (touched.some((r) => !r.product_name.trim()))  { showToast("All products must have a name.", "warning"); return; }
+    const unresolved = touched.find((r) => r.action === "add_stock" && !r.linkedProductId);
+    if (unresolved) { showToast(`Select an existing product to link "${unresolved.product_name}" to, or change its action.`, "warning"); return; }
+
+    executeSubmit(touched);
   };
 
-  useEffect(() => {
-    setLinkExistingEnabled(false);
-    setLinkExistingQuery("");
-    setLinkExistingSelection(null);
-  }, [confirmState?.currentIdx]);
-
-  // ── Confirmation step ─────────────────────────────────────────────────────
-  const handleDecision = (action: "add_stock" | "new_product" | "invoice_only", selectedProduct?: ExistingProduct | null) => {
-    if (!confirmState) return;
-    const cur = confirmState.items[confirmState.currentIdx];
-
-    // For new_product, pause and show the full new-product details form
-    if (action === "new_product") {
-      setNewProductForm({
-        item: cur,
-        draft: {
-          product_name: cur.parsed.product_name,
-          serial_number: "",
-          unit_cost: cur.parsed.unit_price,
-          quantity: 0,
-          low_stock_threshold: 0,
-          type: "",
-          category_id: "",
-        },
-        imageFile: null,
-        imagePreview: null,
-        cropSrc: null,
-        showCrop: false,
-      });
-      return;
-    }
-
-    const newDec: Decision = {
-      index: cur.index,
-      action,
-      existingProductId: action === "add_stock" ? selectedProduct?.product_id ?? cur.match?.product_id : undefined,
-    };
-    advanceConfirm([...confirmState.decisions, newDec]);
-  };
-
-  // Advance to next confirm item or finish
-  const advanceConfirm = (decisions: Decision[]) => {
-    if (!confirmState) return;
-    const nextIdx = confirmState.currentIdx + 1;
-    if (nextIdx >= confirmState.items.length) {
-      setConfirmState(null);
-      executeSubmit(decisions, confirmState.items);
-    } else {
-      setConfirmState({ ...confirmState, currentIdx: nextIdx, decisions });
-    }
-  };
-
-  // ── New product form handlers ─────────────────────────────────────────────
-  const handleNewProductDone = (draft: NewProductDraft, imageFile: File | null) => {
-    if (!confirmState || !newProductForm) return;
-    const cur = newProductForm.item;
-    const newDec: Decision = { index: cur.index, action: "new_product", newProductDraft: draft, newProductImageFile: imageFile };
-    setNewProductForm(null);
-    advanceConfirm([...confirmState.decisions, newDec]);
-  };
-
-  const handleNewProductSkip = () => {
-    if (!confirmState || !newProductForm) return;
-    const cur = newProductForm.item;
-    const newDec: Decision = { index: cur.index, action: "invoice_only" };
-    setNewProductForm(null);
-    advanceConfirm([...confirmState.decisions, newDec]);
-  };
-
-  const handleCreateCategoryInModal = async () => {
-    if (!newCatName.trim() || addCatLoading) return;
-    setAddCatLoading(true);
-    try {
-      const res = await fetch('/api/categories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category_name: newCatName.trim() }),
-      });
-      if (res.ok) {
-        const created = await res.json();
-        setCategories(prev => [...prev, created]);
-        // Auto-select the newly created category in the draft
-        setNewProductForm(prev => prev ? { ...prev, draft: { ...prev.draft, category_id: created.category_id } } : prev);
-        setNewCatName("");
-        setShowAddCatModal(false);
-      }
-    } catch { /* ignore */ } finally {
-      setAddCatLoading(false);
-    }
-  };
-
-  const executeSubmit = async (decisions: ConfirmState["decisions"], items: ConfirmItem[]) => {
+  const executeSubmit = async (touchedRows: InvoiceRow[]) => {
     setIsSubmitting(true);
     try {
-      const productIdMap: Record<number, string> = {};
-      for (const dec of decisions) {
-        const item = items[dec.index];
-        if (dec.action === "add_stock" && dec.existingProductId) {
-          productIdMap[dec.index] = dec.existingProductId;
-        } else if (dec.action === "new_product" && dec.newProductDraft) {
-          const d = dec.newProductDraft;
-          // Upload image first if provided
+      const items: Array<{ product_id: string | null; product_name: string; quantity: number; unit_cost: number; total_cost: number }> = [];
+
+      for (const row of touchedRows) {
+        let product_id: string | null = null;
+
+        if (row.action === "add_stock") {
+          product_id = row.linkedProductId;
+        } else if (row.action === "new_product") {
           let image_url: string | undefined;
-          if (dec.newProductImageFile) {
+          if (row.imageFile) {
             try {
-              image_url = await uploadFile(dec.newProductImageFile, "products", authFetch);
+              image_url = await uploadFile(row.imageFile, "products", authFetch);
             } catch (uploadErr) {
               console.error("Image upload error:", uploadErr);
             }
           }
           const body: Record<string, unknown> = {
-            product_name: d.product_name,
-            unit_cost: d.unit_cost,
-            quantity: d.quantity,
-            serial_number: d.serial_number || undefined,
-            low_stock_threshold: d.low_stock_threshold || undefined,
+            product_name: row.product_name,
+            description: row.description || undefined,
+            unit_cost: row.unit_price,
+            // Initial stock stays 0 — the invoice's own quantity (added
+            // below via POST /api/invoices' per-item stock increment) is
+            // what actually sets this product's starting stock. Sending
+            // the invoice quantity here too would double-count it.
+            quantity: 0,
             ...(image_url ? { image_url } : {}),
           };
-          if (d.type === "consumable") { body.consumable = true; body.returnable = false; }
-          else if (d.type === "returnable") { body.consumable = false; body.returnable = true; }
-          else if (d.type === "both") { body.consumable = true; body.returnable = true; }
-          if (d.category_id) body.category_id = d.category_id;
+          // returnable/consumable are left unset — the DB defaults to
+          // Returnable, same as the manual product-entry forms; editable
+          // afterward on the product detail page.
+          if (row.category_id) body.category_id = row.category_id;
           const res = await authFetch("/api/products", { method: "POST", body: JSON.stringify(body) });
           if (!res.ok) {
             const e = await res.json();
-            throw new Error(`Failed to create "${d.product_name}": ${e.error}`);
+            throw new Error(`Failed to create "${row.product_name}": ${e.error}`);
           }
           const newProd = await res.json();
-          productIdMap[dec.index] = newProd.product?.product_id ?? newProd.product_id;
+          product_id = newProd.product?.product_id ?? newProd.product_id;
         }
+        // invoice_only rows keep product_id === null
+
+        items.push({
+          product_id,
+          product_name: row.product_name,
+          quantity: row.quantity,
+          unit_cost: row.unit_price,
+          total_cost: row.total,
+        });
       }
 
-      const invoiceItems = decisions.map((d) => {
-        const p = items[d.index].parsed;
-        return {
-          product_id: productIdMap[d.index] ?? null,
-          product_name: p.product_name,
-          quantity: p.quantity,
-          unit_cost: p.unit_price,
-          total_cost: p.total,
-        };
-      });
-
-      if (invoiceItems.length === 0) {
+      if (items.length === 0) {
         showToast("Please add at least one invoice item.", "warning");
         setIsSubmitting(false);
         return;
       }
 
       const invNo = invoiceNumber.trim() || autoInvoiceNo;
-      const res = await authFetch("/api/invoices", { method: "POST", body: JSON.stringify({ invoice_number: invNo, supplier_name: supplierName, received_date: deliveryDate, items: invoiceItems }) });
+      const total_amount = invoiceTotal === "" ? itemsSubtotal : invoiceTotal;
+      const res = await authFetch("/api/invoices", { method: "POST", body: JSON.stringify({ invoice_number: invNo, supplier_name: supplierName, received_date: deliveryDate, total_amount, items }) });
       if (!res.ok) {
         const e = await res.json();
         throw new Error(e.error || "Failed to create invoice");
@@ -401,317 +343,16 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
       onSuccess();
       onClose();
     } catch (err: any) {
-      showToast(`Error: ${err.message}`, "error");    } finally {
+      showToast(`Error: ${err.message}`, "error");
+    } finally {
       setIsSubmitting(false);
     }
   };
 
-  // ── New Product Details screen ────────────────────────────────────────────
-  if (newProductForm) {
-    const { item, draft, imageFile, imagePreview, cropSrc, showCrop } = newProductForm;
-    const progress = confirmState
-      ? `${confirmState.currentIdx + 1} / ${confirmState.items.length}`
-      : "1 / 1";
-
-    const setDraft = (patch: Partial<NewProductDraft>) =>
-      setNewProductForm((prev) => prev ? { ...prev, draft: { ...prev.draft, ...patch } } : prev);
-    const setImg = (patch: Partial<{ imageFile: File | null; imagePreview: string | null; cropSrc: string | null; showCrop: boolean }>) =>
-      setNewProductForm((prev) => prev ? { ...prev, ...patch } : prev);
-
-    const canSave = draft.product_name.trim() !== "" && draft.unit_cost >= 0 && draft.type !== "";
-
-    return (
-      <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.55)" }}>
-        <div style={{ background: "#fff", width: "100%", maxWidth: 700, padding: 28, display: "flex", flexDirection: "column", gap: 18, boxShadow: "0 8px 32px rgba(0,0,0,.18)", maxHeight: "90vh", overflowY: "auto" }}>
-
-          {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--fg)" }}>Add New Product</div>
-            <div style={{ fontSize: 10, color: "var(--muted)", background: "var(--surface, #f1f5f9)", padding: "2px 8px" }}>{progress}</div>
-          </div>
-
-          {/* Invoice reference */}
-          <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 4, padding: "10px 14px", fontSize: 11, color: "#92400e" }}>
-            <strong>From invoice:</strong>&nbsp; {item.parsed.product_name}
-            &nbsp;·&nbsp; Invoice Qty: <strong>{item.parsed.quantity}</strong>
-            &nbsp;·&nbsp; Unit: <strong>₹{item.parsed.unit_price.toFixed(2)}</strong>
-          </div>
-
-          {/* Form table — matches the Add New Products layout */}
-          <div>
-            {/* Column headers */}
-            <div style={{ display: "grid", gridTemplateColumns: "3fr 1.5fr 80px 90px 80px 110px 130px", gap: 8, marginBottom: 6 }}>
-              {["PRODUCT NAME", "SKU", "QTY", "COST", "THRESHOLD", "TYPE", "CATEGORY"].map((h) => (
-                <div key={h} style={{ fontSize: 9, fontWeight: 700, color: "#b45309", textTransform: "uppercase", letterSpacing: "0.06em" }}>{h}</div>
-              ))}
-            </div>
-
-            {/* Single data row */}
-            <div style={{ display: "grid", gridTemplateColumns: "3fr 1.5fr 80px 90px 80px 110px 130px", gap: 8, alignItems: "center" }}>
-              <input style={inp} value={draft.product_name} placeholder="Product name"
-                onChange={(e) => setDraft({ product_name: e.target.value })} />
-              <input style={inp} value={draft.serial_number} placeholder="SKU"
-                onChange={(e) => setDraft({ serial_number: e.target.value })} />
-              <input type="number" min="0" style={inp} value={draft.quantity}
-                onChange={(e) => setDraft({ quantity: parseFloat(e.target.value) || 0 })} />
-              <input type="number" min="0" step="0.01" style={inp} value={draft.unit_cost}
-                onChange={(e) => setDraft({ unit_cost: parseFloat(e.target.value) || 0 })} />
-              <input type="number" min="0" style={inp} value={draft.low_stock_threshold}
-                onChange={(e) => setDraft({ low_stock_threshold: parseInt(e.target.value) || 0 })} />
-              <select style={{ ...inp, cursor: "pointer" }} value={draft.type}
-                onChange={(e) => setDraft({ type: e.target.value as NewProductDraft["type"] })}>
-                <option value="">Select</option>
-                <option value="consumable">Consumable</option>
-                <option value="returnable">Returnable</option>
-                <option value="both">Both</option>
-              </select>
-              <select style={{ ...inp, cursor: "pointer" }} value={draft.category_id}
-                onChange={(e) => {
-                  if (e.target.value === "__add_new__") { setShowAddCatModal(true); }
-                  else { setDraft({ category_id: e.target.value }); }
-                }}>
-                <option value="">Category…</option>
-                {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
-                <option value="__add_new__">╋ Add New Category</option>
-              </select>
-            </div>
-
-            {/* Field notes */}
-            <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 6, lineHeight: 1.6 }}>
-              <strong>QTY</strong> = initial stock when product is created.&nbsp;
-              Invoice quantity ({item.parsed.quantity}) will be added automatically.
-            </div>
-          </div>
-
-          {/* Image upload */}
-          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
-              Product Photo <span style={{ fontWeight: 400, color: "var(--muted)", textTransform: "none", letterSpacing: 0 }}>(optional)</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              {/* Preview */}
-              {imagePreview ? (
-                <div style={{ flexShrink: 0, width: 80, height: 80, border: "1px solid var(--border)", overflow: "hidden", background: "var(--surface, #f8f9fa)" }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={imagePreview} alt="preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                </div>
-              ) : (
-                <div style={{ flexShrink: 0, width: 80, height: 80, border: "1px dashed var(--border)", background: "var(--surface, #f8f9fa)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span style={{ fontSize: 22, opacity: 0.3 }}>📷</span>
-                </div>
-              )}
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--fg)", cursor: "pointer", padding: "5px 12px", border: "1px solid var(--border)", background: "var(--surface, #f8f9fa)", whiteSpace: "nowrap" }}>
-                  {imagePreview ? "Replace Photo" : "Upload & Crop Photo"}
-                  <input type="file" accept="image/*" style={{ display: "none" }}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null;
-                      if (f) {
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                          if (typeof reader.result === "string") {
-                            setImg({ cropSrc: reader.result, showCrop: true });
-                          }
-                        };
-                        reader.readAsDataURL(f);
-                      }
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
-                {imagePreview && (
-                  <button type="button" onClick={() => setImg({ imageFile: null, imagePreview: null })}
-                    style={{ fontSize: 11, color: "#b91c1c", background: "none", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}>
-                    Remove photo
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Crop modal */}
-          {showCrop && cropSrc && (
-            <ImageCropModal
-              imageSrc={cropSrc}
-              aspect={1}
-              onCrop={(dataUrl, file) => {
-                setImg({ imageFile: file, imagePreview: dataUrl, cropSrc: null, showCrop: false });
-              }}
-              onClose={() => setImg({ cropSrc: null, showCrop: false })}
-            />
-          )}
-
-          {/* Add Category Mini Modal */}
-          {showAddCatModal && (
-            <div style={{ position: "fixed", inset: 0, zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.45)" }}>
-              <div style={{ background: "#fff", border: "1px solid var(--border)", padding: 20, width: 320, boxShadow: "0 4px 20px rgba(0,0,0,0.15)" }}>
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 14 }}>Add New Category</div>
-                <input
-                  autoFocus
-                  value={newCatName}
-                  onChange={e => setNewCatName(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleCreateCategoryInModal()}
-                  placeholder="Category name…"
-                  style={{ width: "100%", padding: "6px 8px", fontSize: 12, border: "1px solid var(--border)", color: "var(--fg)", boxSizing: "border-box", marginBottom: 14, outline: "none" }}
-                />
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                  <button onClick={() => { setShowAddCatModal(false); setNewCatName(""); }}
-                    style={{ padding: "5px 14px", fontSize: 12, border: "1px solid var(--border)", background: "#fff", color: "var(--fg)", cursor: "pointer" }}>Cancel</button>
-                  <button onClick={handleCreateCategoryInModal} disabled={!newCatName.trim() || addCatLoading}
-                    style={{ padding: "5px 14px", fontSize: 12, background: "var(--accent)", color: "#fff", border: "none", cursor: "pointer", fontWeight: 600, opacity: !newCatName.trim() || addCatLoading ? 0.5 : 1 }}>
-                    {addCatLoading ? "Adding…" : "Add Category"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Validation hint */}
-          {!canSave && (
-            <div style={{ fontSize: 11, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", padding: "6px 12px" }}>
-              Please fill in Product Name, Cost and Type before saving.
-            </div>
-          )}
-
-          {/* Actions */}
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={handleNewProductSkip}
-              style={{ padding: "6px 14px", fontSize: 12, border: "1px solid var(--border)", background: "#fff", color: "var(--muted)", cursor: "pointer" }}>
-              Invoice Only
-            </button>
-            <button onClick={() => canSave && handleNewProductDone(draft, imageFile)} disabled={!canSave}
-              style={{ padding: "6px 20px", fontSize: 12, fontWeight: 600, background: "var(--accent)", color: "#fff", border: "none", cursor: canSave ? "pointer" : "not-allowed", opacity: canSave ? 1 : 0.5 }}>
-              Add Product ✓
-            </button>
-          </div>
-
-        </div>
-      </div>
-    );
-  }
-
-  // ── Confirmation dialog ───────────────────────────────────────────────────
-  if (confirmState) {
-    const cur      = confirmState.items[confirmState.currentIdx];
-    const isExist  = cur.match !== null;
-    const progress = `${confirmState.currentIdx + 1} / ${confirmState.items.length}`;
-    const existingMatches = searchProducts(linkExistingQuery, existingProducts)
-      .filter((product) => product.product_id !== linkExistingSelection?.product_id);
-
-    return (
-      <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.55)" }}>
-        <div style={{ background: "#fff", width: "100%", maxWidth: 460, padding: 28, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 8px 32px rgba(0,0,0,.18)" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--fg)" }}>
-              {isExist ? "Product Already Exists" : "New Product Detected"}
-            </div>
-            <div style={{ fontSize: 10, color: "var(--muted)", background: "var(--surface, #f1f5f9)", padding: "2px 8px" }}>{progress}</div>
-          </div>
-          <div style={{ background: "var(--surface, #f8f9fa)", border: "1px solid var(--border)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>{cur.parsed.product_name}</div>
-            <div style={{ fontSize: 11, color: "var(--muted)" }}>
-              Qty: <strong>{cur.parsed.quantity}</strong> &nbsp;·&nbsp; Unit: <strong>₹{cur.parsed.unit_price.toFixed(2)}</strong> &nbsp;·&nbsp; Total: <strong>₹{cur.parsed.total.toFixed(2)}</strong>
-            </div>
-          </div>
-          {isExist ? (
-            <>
-              <div style={{ fontSize: 12, color: "var(--fg)" }}>A matching product was found in your catalog:</div>
-              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "10px 14px", fontSize: 12, color: "#166534", fontWeight: 500 }}>
-                {cur.match!.product_name} &nbsp;—&nbsp; ₹{cur.match!.unit_cost.toFixed(2)}
-              </div>
-              <div style={{ fontSize: 12, color: "var(--fg)" }}>Add <strong>{cur.parsed.quantity} units</strong> to existing stock?</div>
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <button onClick={() => handleDecision("invoice_only")}
-                  style={{ padding: "5px 12px", fontSize: 12, border: "1px solid var(--border)", background: "#fff", color: "var(--muted)", cursor: "pointer" }}>Invoice Only</button>
-                <button onClick={() => handleDecision("new_product")}
-                  style={{ padding: "5px 12px", fontSize: 12, border: "1px solid #d97706", background: "#fffbeb", color: "#b45309", cursor: "pointer", fontWeight: 500 }}>Add as New Product</button>
-                <button onClick={() => handleDecision("add_stock")}
-                  style={{ padding: "5px 14px", fontSize: 12, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontWeight: 600 }}>Add to Stock ✓</button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div style={{ fontSize: 12, color: "var(--fg)" }}>This product is not in your catalog. You can add it as a new product, or link it to an existing product and update that stock.</div>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--fg)", cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={linkExistingEnabled}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setLinkExistingEnabled(checked);
-                    setLinkExistingSelection(null);
-                    setLinkExistingQuery(checked ? cur.parsed.product_name : "");
-                  }}
-                />
-                Add as existing product
-              </label>
-              {linkExistingEnabled && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ position: "relative" }}>
-                    <input
-                      autoFocus
-                      style={inp}
-                      value={linkExistingQuery}
-                      placeholder="Type to search products"
-                      onChange={(e) => {
-                        setLinkExistingQuery(e.target.value);
-                        setLinkExistingSelection(null);
-                      }}
-                    />
-                    {linkExistingQuery.trim() && existingMatches.length > 0 && !linkExistingSelection && (
-                      <div style={{ position: "absolute", zIndex: 2, top: "calc(100% + 4px)", left: 0, right: 0, border: "1px solid var(--border)", background: "#fff", maxHeight: 180, overflowY: "auto", boxShadow: "0 10px 24px rgba(0,0,0,0.08)" }}>
-                        {existingMatches.map((product) => (
-                          <button
-                            key={product.product_id}
-                            type="button"
-                            onClick={() => {
-                              setLinkExistingSelection(product);
-                              setLinkExistingQuery(product.product_name);
-                            }}
-                            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px", background: "#fff", border: "none", borderBottom: "1px solid var(--border)", cursor: "pointer" }}
-                          >
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--fg)" }}>{product.product_name}</div>
-                            <div style={{ fontSize: 10, color: "var(--muted)" }}>₹{product.unit_cost.toFixed(2)}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  {linkExistingSelection ? (
-                    <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", padding: "10px 12px", fontSize: 12, color: "#1d4ed8" }}>
-                      Selected existing product: <strong>{linkExistingSelection.product_name}</strong>
-                    </div>
-                  ) : linkExistingQuery.trim() ? (
-                    <div style={{ fontSize: 11, color: "var(--muted)" }}>No matching products selected yet.</div>
-                  ) : null}
-                </div>
-              )}
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <button onClick={() => handleDecision("invoice_only")}
-                  style={{ padding: "5px 12px", fontSize: 12, border: "1px solid var(--border)", background: "#fff", color: "var(--muted)", cursor: "pointer" }}>Invoice Only</button>
-                <button onClick={() => handleDecision("new_product")}
-                  style={{ padding: "5px 14px", fontSize: 12, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontWeight: 600 }}>Add New Product ✓</button>
-                {linkExistingEnabled && (
-                  <button
-                    onClick={() => linkExistingSelection && handleDecision("add_stock", linkExistingSelection)}
-                    disabled={!linkExistingSelection}
-                    style={{ padding: "5px 14px", fontSize: 12, border: "1px solid #1d4ed8", background: linkExistingSelection ? "#eff6ff" : "#dbeafe", color: "#1d4ed8", cursor: linkExistingSelection ? "pointer" : "not-allowed", fontWeight: 600, opacity: linkExistingSelection ? 1 : 0.6 }}
-                  >
-                    Add to Existing Stock
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
-
   // ── Main screen ───────────────────────────────────────────────────────────
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "stretch", justifyContent: "center" }}>
-      <div style={{ background: "#fff", width: "100%", maxWidth: 1200, margin: 16, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 8px 40px rgba(0,0,0,.22)" }}>
+      <div style={{ background: "#fff", width: "100%", maxWidth: 1520, margin: 16, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 8px 40px rgba(0,0,0,.22)" }}>
 
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 20px", borderBottom: "1px solid var(--border)", flexShrink: 0, background: "var(--surface, #f8f9fa)" }}>
@@ -726,7 +367,17 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
         <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
 
           {/* ── LEFT: PDF zone ── */}
-          <div style={{ width: "45%", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ width: "38%", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", minHeight: 0, position: "relative" }}>
+            {isParsing && (
+              <div style={{
+                position: "absolute", inset: 0, zIndex: 5, display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "center", gap: 10,
+                background: "rgba(255,255,255,0.92)",
+              }}>
+                <LoadingState label="Analysing your invoice" />
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>Extracting supplier, dates, total, and line items</div>
+              </div>
+            )}
             {!pdfFile ? (
               <div
                 onDragOver={(e) => { e.preventDefault(); setIsDrag(true); }}
@@ -753,7 +404,12 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 14px", borderBottom: "1px solid var(--border)", flexShrink: 0, background: "var(--surface, #f8f9fa)" }}>
                   <span style={{ fontSize: 13 }}>📄</span>
                   <div style={{ fontSize: 11, color: "var(--fg)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pdfFile.name}</div>
-                  {isParsing && <span style={{ fontSize: 10, color: "var(--accent)", whiteSpace: "nowrap" }}>Parsing…</span>}
+                  {isParsing && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: "#1d4ed8", whiteSpace: "nowrap" }}>
+                      <span style={{ width: 9, height: 9, border: "2px solid #bfdbfe", borderTopColor: "#1d4ed8", borderRadius: "50%", animation: "invoiceParseSpin 0.8s linear infinite" }} />
+                      Parsing…
+                    </span>
+                  )}
                   <button onClick={removePdf}
                     style={{ fontSize: 11, color: "#b91c1c", background: "none", border: "none", cursor: "pointer", padding: "2px 6px", whiteSpace: "nowrap" }}>Remove</button>
                   <button onClick={() => fileInputRef.current?.click()}
@@ -780,24 +436,46 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
           <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", minWidth: 0 }}>
             <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16, flex: 1 }}>
 
+              {isParsing && (
+                <div style={{
+                  display: "flex", alignItems: "center", padding: "10px 14px",
+                  background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 4,
+                }}>
+                  <LoadingState label="Analysing your invoice" />
+                </div>
+              )}
+
               {/* Invoice meta */}
               <div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
                   Invoice Details
-                  {isParsing && <span style={{ fontWeight: 400, color: "var(--accent)", textTransform: "none", letterSpacing: 0 }}>⏳ Auto-filling from PDF…</span>}
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  <div style={{ gridColumn: "1/-1" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div>
                     <label style={lbl}>Supplier / Merchant Name *</label>
                     <input style={inp} value={supplierName} onChange={(e) => setSupplierName(e.target.value)} placeholder="e.g. ABC Distributors" />
                   </div>
-                  <div>
-                    <label style={lbl}>Delivery Date *</label>
-                    <input type="date" style={inp} value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                    <div>
+                      <label style={lbl}>Delivery Date *</label>
+                      <input type="date" style={inp} value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
+                    </div>
+                    <div>
+                      <label style={lbl}>Invoice Number</label>
+                      <input style={inp} value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder={autoInvoiceNo || "e.g. INV-001"} />
+                    </div>
+                    <div>
+                      <label style={lbl}>Invoice Total (₹)</label>
+                      <input
+                        type="number" min="0" step="0.01" style={inp}
+                        value={invoiceTotal}
+                        onChange={(e) => setInvoiceTotal(e.target.value === "" ? "" : (parseFloat(e.target.value) || 0))}
+                        placeholder={itemsSubtotal.toFixed(2)}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label style={lbl}>Invoice Number</label>
-                    <input style={inp} value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder={autoInvoiceNo || "e.g. INV-001"} />
+                  <div style={{ fontSize: 9, color: "var(--muted)", lineHeight: 1.5 }}>
+                    This is the total as printed on the invoice, and is what gets saved — it can differ from the items subtotal below (shipping, tax, discounts, etc.). Leave blank to save the items subtotal instead.
                   </div>
                 </div>
               </div>
@@ -808,44 +486,174 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
                   <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Products &amp; Items</div>
                   <button onClick={addRow} style={{ fontSize: 11, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", padding: 0, fontWeight: 600 }}>+ Add row</button>
                 </div>
-                {/* Column headers */}
-                <div style={{ display: "grid", gridTemplateColumns: "3fr 70px 90px 90px 24px", gap: 4, marginBottom: 4 }}>
-                  {["Product Name", "Qty", "Unit Cost", "Total", ""].map((h) => (
-                    <div key={h} style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</div>
-                  ))}
-                </div>
-                {/* Rows */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {products.map((p, idx) => {
-                    const match = findMatch(p.product_name, existingProducts);
-                    return (
-                      <div key={idx}>
-                        <div style={{ display: "grid", gridTemplateColumns: "3fr 70px 90px 90px 24px", gap: 4, alignItems: "center" }}>
-                          <input style={inp} value={p.product_name} placeholder="Product name"
-                            onChange={(e) => updateProduct(idx, "product_name", e.target.value)} />
-                          <input type="number" min="0" style={inp} value={p.quantity}
-                            onChange={(e) => updateProduct(idx, "quantity", e.target.value)} />
-                          <input type="number" min="0" step="0.01" style={inp} value={p.unit_price}
-                            onChange={(e) => updateProduct(idx, "unit_price", e.target.value)} />
-                          <input type="number" min="0" step="0.01" style={inpRO} value={p.total.toFixed(2)} readOnly />
-                          <button onClick={() => removeRow(idx)} disabled={products.length === 1}
-                            style={{ fontSize: 16, color: products.length === 1 ? "#ccc" : "#b91c1c", background: "none", border: "none", cursor: products.length === 1 ? "not-allowed" : "pointer", padding: 0, lineHeight: 1 }}>×</button>
-                        </div>
-                        {p.product_name.trim() && (
-                          <div style={{ fontSize: 9, marginTop: 3, marginLeft: 2, color: match ? "#166534" : "#92400e" }}>
-                            {match ? `✓ Matches existing: ${match.product_name}` : "⚠ New product detected — review can add it to catalog or link it to an existing product"}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 780 }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                        <th style={{ ...th, width: 28 }}>S.No</th>
+                        <th style={{ ...th, minWidth: 180 }}>Product Name</th>
+                        <th style={{ ...th, width: 60 }}>Qty</th>
+                        <th style={{ ...th, width: 80 }}>Unit Cost</th>
+                        <th style={{ ...th, width: 80 }}>Total</th>
+                        <th style={{ ...th, width: 130 }}>Action</th>
+                        <th style={{ ...th, minWidth: 180 }}>Match / Link to Existing</th>
+                        <th style={{ ...th, width: 20 }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, idx) => {
+                        const linkedProduct = row.linkedProductId ? existingProducts.find((p) => p.product_id === row.linkedProductId) : null;
+                        const linkMatches = row.action === "add_stock" && !row.linkedProductId
+                          ? searchProducts(row.linkQuery, existingProducts)
+                          : [];
+                        return (
+                          <Fragment key={idx}>
+                            <tr style={{ borderBottom: row.action === "new_product" ? "none" : "1px solid var(--border)" }}>
+                              <td style={{ ...td, fontSize: 11, color: "var(--muted)", paddingTop: 10 }}>{idx + 1}</td>
+                              <td style={td}>
+                                <input style={inp} value={row.product_name} placeholder="Product name"
+                                  onChange={(e) => updateRow(idx, { product_name: e.target.value })} />
+                              </td>
+                              <td style={td}>
+                                <input type="number" min="0" style={inp} value={row.quantity}
+                                  onChange={(e) => updateNumberField(idx, "quantity", e.target.value)} />
+                              </td>
+                              <td style={td}>
+                                <input type="number" min="0" step="0.01" style={inp} value={row.unit_price}
+                                  onChange={(e) => updateNumberField(idx, "unit_price", e.target.value)} />
+                              </td>
+                              <td style={td}>
+                                <input type="number" min="0" step="0.01" style={inpRO} value={row.total.toFixed(2)} readOnly />
+                              </td>
+                              <td style={td}>
+                                <select
+                                  style={{ ...inp, cursor: "pointer" }}
+                                  value={row.action}
+                                  onChange={(e) => updateAction(idx, e.target.value as ItemAction)}
+                                >
+                                  <option value="add_stock">Add to Stock</option>
+                                  <option value="new_product">New Product</option>
+                                  <option value="invoice_only">Invoice Only</option>
+                                </select>
+                              </td>
+                              <td style={td}>
+                                {row.action === "add_stock" ? (
+                                  linkedProduct ? (
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                      <span style={{ fontSize: 11, color: "#166534", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                        → {linkedProduct.product_name}
+                                      </span>
+                                      <button type="button"
+                                        onClick={() => updateRow(idx, { linkedProductId: null, linkQuery: row.product_name })}
+                                        style={{ fontSize: 10, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", padding: 0, whiteSpace: "nowrap" }}>
+                                        change
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div style={{ position: "relative" }}>
+                                      <input
+                                        style={inp}
+                                        value={row.linkQuery}
+                                        placeholder="Search existing product…"
+                                        onChange={(e) => updateRow(idx, { linkQuery: e.target.value })}
+                                      />
+                                      {row.linkQuery.trim() && linkMatches.length > 0 && (
+                                        <div style={{ position: "absolute", zIndex: 5, top: "calc(100% + 2px)", left: 0, right: 0, border: "1px solid var(--border)", background: "#fff", maxHeight: 160, overflowY: "auto", boxShadow: "0 10px 24px rgba(0,0,0,0.08)" }}>
+                                          {linkMatches.map((p) => (
+                                            <button
+                                              key={p.product_id}
+                                              type="button"
+                                              onClick={() => updateRow(idx, { linkedProductId: p.product_id, linkQuery: "" })}
+                                              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", fontSize: 11, background: "#fff", border: "none", borderBottom: "1px solid var(--border)", cursor: "pointer" }}
+                                            >
+                                              {p.product_name}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      )}
+                                      {row.linkQuery.trim() && linkMatches.length === 0 && (
+                                        <div style={{ fontSize: 9, color: "#b91c1c", marginTop: 2 }}>No matching product found.</div>
+                                      )}
+                                    </div>
+                                  )
+                                ) : row.action === "new_product" ? (
+                                  <span style={{ fontSize: 10, color: "#92400e" }}>Fill in details below ↓</span>
+                                ) : (
+                                  <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
+                                )}
+                              </td>
+                              <td style={td}>
+                                {rows.length > 1 && (
+                                  <button onClick={() => removeRow(idx)}
+                                    style={{ fontSize: 16, color: "#b91c1c", background: "none", border: "none", cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
+                                )}
+                              </td>
+                            </tr>
+                            {row.action === "new_product" && (
+                              <tr key={`${idx}-details`} style={{ borderBottom: "1px solid var(--border)" }}>
+                                <td colSpan={8} style={{ ...td, paddingTop: 0, paddingBottom: 10, background: "#fffbeb" }}>
+                                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "8px 10px", border: "1px solid #fde68a", borderTop: "none" }}>
+                                    <label style={{
+                                      flexShrink: 0, width: 44, height: 44, border: "1px dashed var(--border)", cursor: "pointer",
+                                      overflow: "hidden", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", background: "#fff",
+                                    }}>
+                                      {row.imagePreview ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img src={row.imagePreview} alt="preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                      ) : (
+                                        <span style={{ fontSize: 16, color: "var(--muted)" }}>+</span>
+                                      )}
+                                      <input
+                                        type="file" accept="image/*" style={{ display: "none" }}
+                                        onChange={(e) => {
+                                          const f = e.target.files?.[0] ?? null;
+                                          if (f) {
+                                            const reader = new FileReader();
+                                            reader.onload = () => {
+                                              if (typeof reader.result === "string") {
+                                                setCropSrc(reader.result);
+                                                setCurrentCropRowIdx(idx);
+                                                setShowCropModal(true);
+                                              }
+                                            };
+                                            reader.readAsDataURL(f);
+                                          }
+                                          e.target.value = "";
+                                        }}
+                                      />
+                                    </label>
+                                    <div style={{ flex: 1, display: "grid", gridTemplateColumns: "2fr 3fr", gap: 8 }}>
+                                      <div>
+                                        <label style={{ ...lbl, color: "#b45309" }}>Category</label>
+                                        <select style={{ ...inp, cursor: "pointer" }} value={row.category_id}
+                                          onChange={(e) => updateRow(idx, { category_id: e.target.value })}>
+                                          <option value="">Category…</option>
+                                          {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
+                                        </select>
+                                      </div>
+                                      <div>
+                                        <label style={{ ...lbl, color: "#b45309" }}>Description (optional)</label>
+                                        <input style={inp} value={row.description} placeholder="Description (optional)"
+                                          onChange={(e) => updateRow(idx, { description: e.target.value })} />
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
-              {/* Grand total */}
+              {/* Items subtotal (reference only — Invoice Total above is what's saved) */}
               <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
-                <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Grand Total</span>
-                <span style={{ fontSize: 20, fontWeight: 700, color: "var(--fg)" }}>₹{grandTotal.toFixed(2)}</span>
+                <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Items Subtotal</span>
+                <span style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)" }}>₹{itemsSubtotal.toFixed(2)}</span>
               </div>
 
               {/* Actions */}
@@ -856,7 +664,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
                 </button>
                 <button onClick={handleSubmitClick} disabled={isSubmitting || isParsing}
                   style={{ padding: "6px 20px", fontSize: 12, fontWeight: 600, background: "var(--accent)", color: "#fff", border: "none", cursor: "pointer", opacity: isSubmitting || isParsing ? 0.6 : 1 }}>
-                  {isSubmitting ? "Saving…" : "Review & Save"}
+                  {isSubmitting ? "Saving…" : "Save Invoice"}
                 </button>
               </div>
 
@@ -864,6 +672,29 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
           </div>
         </div>
       </div>
+
+      {/* Crop modal (new_product rows) */}
+      {showCropModal && cropSrc && (
+        <ImageCropModal
+          imageSrc={cropSrc}
+          aspect={1}
+          onCrop={(dataUrl, file) => {
+            if (currentCropRowIdx !== null) {
+              updateRow(currentCropRowIdx, { imageFile: file, imagePreview: dataUrl });
+            }
+            setShowCropModal(false);
+            setCropSrc(null);
+            setCurrentCropRowIdx(null);
+          }}
+          onClose={() => { setShowCropModal(false); setCropSrc(null); setCurrentCropRowIdx(null); }}
+        />
+      )}
+
+      <style>{`
+        @keyframes invoiceParseSpin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }

@@ -23,9 +23,12 @@ export async function POST(
     const [order] = await db.select({ lending_order_id: lending_order.lending_order_id }).from(lending_order).where(and(eq(lending_order.lending_order_id, id), eq(lending_order.issued_by_user_id, user.user_id)))
     if (!order) return NextResponse.json({ error: "Lending record not found" }, { status: 404 });
 
-    const [lendingItem] = await db.select({ quantity: lending_item.quantity, damaged_quantity: lending_item.damaged_quantity }).from(lending_item).where(and(eq(lending_item.lend_order_id, id), eq(lending_item.product_id, product_id)))
+    const [lendingItem] = await db.select({ quantity: lending_item.quantity, damaged_quantity: lending_item.damaged_quantity, item_type: lending_item.item_type }).from(lending_item).where(and(eq(lending_item.lend_order_id, id), eq(lending_item.product_id, product_id)))
     if (!lendingItem) {
       return NextResponse.json({ error: "Lending item not found" }, { status: 404 });
+    }
+    if (lendingItem.item_type !== 'RETURNABLE') {
+      return NextResponse.json({ error: "Consumable items can't be marked damaged" }, { status: 400 });
     }
 
     if (damaged_quantity > lendingItem.quantity) {

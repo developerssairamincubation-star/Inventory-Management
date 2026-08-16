@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   if (!user) return unauthorizedResponse()
 
   try {
-    const userProducts = await db.select({ product_id: products.product_id, low_stock_threshold: products.low_stock_threshold }).from(products).where(eq(products.user_id, user.user_id))
+    const userProducts = await db.select({ product_id: products.product_id }).from(products).where(eq(products.user_id, user.user_id))
 
     const totalProducts = userProducts.length
     const productIds = userProducts.map((p) => p.product_id)
@@ -24,12 +24,6 @@ export async function GET(req: NextRequest) {
     const totalStockQuantity = stocksData.reduce((sum, s) => sum + (s.quantity || 0), 0)
     const damagedQuantity = stocksData.reduce((sum, s) => sum + (s.damaged_quantity || 0), 0)
     const lostQuantity = stocksData.reduce((sum, s) => sum + (s.lost_quantity || 0), 0)
-
-    const stockByProduct = new Map(stocksData.map((s) => [s.product_id, s.quantity ?? 0]))
-
-    const lowStockCount = userProducts.filter((product) =>
-      product.low_stock_threshold && (stockByProduct.get(product.product_id) ?? 0) <= product.low_stock_threshold
-    ).length
 
     const userOrders = await db.select({ lending_order_id: lending_order.lending_order_id, status: lending_order.status }).from(lending_order).where(eq(lending_order.issued_by_user_id, user.user_id))
 
@@ -62,7 +56,7 @@ export async function GET(req: NextRequest) {
       lost: Math.round((lostQuantity / grandTotal) * 100),
     }
 
-    return ok({ totalProducts, totalStockQuantity, lowStockCount, stockDistribution, stockDistributionPercentages })
+    return ok({ totalProducts, totalStockQuantity, stockDistribution, stockDistributionPercentages })
   } catch (error) {
     return fromError(error)
   }

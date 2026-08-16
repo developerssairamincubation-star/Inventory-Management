@@ -37,12 +37,14 @@ export async function GET(
       supplier_name: invoice.supplier_name,
       received_date: invoice.received_date,
       created_at: invoice.created_at,
-      total_amount: invoice.total_amount,
+      // numeric columns come back as strings from Drizzle over JSON — coerce
+      // to match the frontend's `number` type (see src/app/api/invoices/route.ts).
+      total_amount: Number(invoice.total_amount) || 0,
       items: items.map((item) => ({
         product_name: item.products?.product_name || item.product_name || "Unknown Product",
         quantity: item.quantity,
-        unit_cost: item.unit_cost,
-        total_cost: item.total_cost,
+        unit_cost: Number(item.unit_cost) || 0,
+        total_cost: Number(item.total_cost) || 0,
       })),
     });
   } catch (error) {

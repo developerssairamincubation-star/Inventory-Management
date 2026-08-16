@@ -21,6 +21,7 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
     full_name: "Test User",
     role: "user",
     is_active: true,
+    domain_id: null,
     ...overrides,
   };
 }
@@ -70,5 +71,46 @@ describe("POST /api/departments", () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as { department_name: string };
     expect(body.department_name).toBe("QaDeptList New");
+  });
+
+  it("accepts and uppercases a valid 2-letter code", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser({ role: "super_admin" }));
+    const res = await POST(
+      new NextRequest("http://localhost/api/departments", {
+        method: "POST",
+        body: JSON.stringify({ department_name: "QaDeptList Coded", code: "cs" }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe("CS");
+  });
+
+  it("rejects a code that isn't exactly 2 letters", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser({ role: "super_admin" }));
+    const res = await POST(
+      new NextRequest("http://localhost/api/departments", {
+        method: "POST",
+        body: JSON.stringify({ department_name: "QaDeptList BadCode", code: "csx" }),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a duplicate code", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser({ role: "super_admin" }));
+    await POST(
+      new NextRequest("http://localhost/api/departments", {
+        method: "POST",
+        body: JSON.stringify({ department_name: "QaDeptList DupA", code: "dp" }),
+      }),
+    );
+    const res = await POST(
+      new NextRequest("http://localhost/api/departments", {
+        method: "POST",
+        body: JSON.stringify({ department_name: "QaDeptList DupB", code: "dp" }),
+      }),
+    );
+    expect(res.status).toBe(409);
   });
 });

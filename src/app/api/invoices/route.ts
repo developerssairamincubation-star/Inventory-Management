@@ -37,7 +37,10 @@ export async function GET(request: NextRequest) {
       supplier_name: invoice.supplier_name,
       received_date: invoice.received_date,
       items_count: itemsMap.get(invoice.invoice_id) || 0,
-      total_amount: invoice.total_amount || 0,
+      // total_amount is a Postgres numeric column — Drizzle returns those as
+      // strings over JSON, not numbers, so this must be coerced here to
+      // match the frontend's `number` type (see the same fix in [id]/route.ts).
+      total_amount: Number(invoice.total_amount) || 0,
     }))
 
     return NextResponse.json({ invoices });
@@ -52,7 +55,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { invoice_number, supplier_name, received_date, items } = body;
+    const { invoice_number, supplier_name, received_date, items, total_amount: providedTotal } = body;
 
     if (!invoice_number || !supplier_name || !received_date || !items || items.length === 0) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -70,7 +73,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Each invoice item must include a product name, quantity and cost" }, { status: 400 });
     }
 
-    const total_amount = normalisedItems.reduce((sum, item) => sum + item.total_cost, 0)
+    // The invoice's own printed total (which may include shipping/tax/discounts
+    // and so can legitimately differ from the line items' sum) takes precedence
+    // when the client provides one — see UploadInvoiceModal's "Invoice Total"
+    // field. Falls back to the computed sum when omitted or invalid.
+    const computedTotal = normalisedItems.reduce((sum, item) => sum + item.total_cost, 0)
+    const total_amount = typeof providedTotal === 'number' && Number.isFinite(providedTotal) && providedTotal >= 0
+      ? providedTotal
+      : computedTotal
 
     const invoice = await db.transaction(async (tx) => {
       const [invoiceRow] = await tx
