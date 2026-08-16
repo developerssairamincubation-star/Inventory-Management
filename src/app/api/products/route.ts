@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { and, desc, eq, getTableColumns } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { products, stocks, product_image, category } from '@/db/schema'
+import { products, stocks, product_image, category, users, coe_domains } from '@/db/schema'
 import { allocateNextCode, allocateNextSkuCode } from '@/lib/idSequences'
 import { suggestCategoryCode } from '@/lib/categoryCode'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
@@ -18,22 +18,29 @@ export async function GET(req: NextRequest) {
     // the scan-to-fetch match is case-insensitive without needing a
     // functional index.
     const sku = searchParams.get('sku')?.trim().toUpperCase()
+    // super_admin sees every user's/domain's stock, not just their own —
+    // everyone else stays scoped to products they personally added.
+    const isAdmin = user.role === 'super_admin'
 
     const rows = await db
       .select({
         ...getTableColumns(products),
         image_url: product_image.image_url,
         category_name: category.category_name,
-        stocks: { quantity: stocks.quantity },
+        stocks: { quantity: stocks.quantity, location: stocks.location },
+        owner_name: users.full_name,
+        domain_name: coe_domains.domain_name,
       })
       .from(products)
       .leftJoin(stocks, eq(stocks.product_id, products.product_id))
       .leftJoin(product_image, eq(product_image.product_id, products.product_id))
       .leftJoin(category, eq(category.category_id, products.category_id))
+      .leftJoin(users, eq(users.user_id, products.user_id))
+      .leftJoin(coe_domains, eq(coe_domains.domain_id, users.domain_id))
       .where(
-        sku
-          ? and(eq(products.user_id, user.user_id), eq(products.sku_code, sku))
-          : eq(products.user_id, user.user_id)
+        isAdmin
+          ? (sku ? eq(products.sku_code, sku) : undefined)
+          : (sku ? and(eq(products.user_id, user.user_id), eq(products.sku_code, sku)) : eq(products.user_id, user.user_id))
       )
       .orderBy(desc(products.created_at))
 
@@ -66,6 +73,7 @@ export async function POST(req: NextRequest) {
 
     const quantity = body.quantity ?? body.initial_quantity ?? null
     const category_id = body.category_id ?? null
+    const location: string | null = typeof body.location === 'string' && body.location.trim() ? body.location.trim().slice(0, 50) : null
 
     if (!product_name || unit_cost == null || quantity == null) {
       return NextResponse.json({ error: 'Missing required fields: product_name, unit_cost, quantity' }, { status: 400 })
@@ -108,7 +116,7 @@ export async function POST(req: NextRequest) {
 
       const [product] = await tx.insert(products).values(insertData).returning()
 
-      const [stock] = await tx.insert(stocks).values({ product_id: product.product_id, quantity: Number(quantity) }).returning()
+      const [stock] = await tx.insert(stocks).values({ product_id: product.product_id, quantity: Number(quantity), location }).returning()
 
       if (image_url) {
         await tx.insert(product_image).values({ product_id: product.product_id, image_url })

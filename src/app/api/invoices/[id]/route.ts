@@ -14,7 +14,12 @@ export async function GET(
   try {
     const { id: invoiceId } = await params;
 
-    const [invoice] = await db.select().from(purchase_invoice).where(and(eq(purchase_invoice.invoice_id, invoiceId), eq(purchase_invoice.user_id, user.user_id)))
+    // super_admin can open any invoice's detail (visibility only — delete
+    // below stays owner-scoped); everyone else only their own.
+    const invoiceCond = user.role === "super_admin"
+      ? eq(purchase_invoice.invoice_id, invoiceId)
+      : and(eq(purchase_invoice.invoice_id, invoiceId), eq(purchase_invoice.user_id, user.user_id))
+    const [invoice] = await db.select().from(purchase_invoice).where(invoiceCond)
     if (!invoice) {
       return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     }
@@ -62,7 +67,11 @@ export async function DELETE(
   try {
     const { id: invoiceId } = await params;
 
-    const [invoice] = await db.select({ invoice_id: purchase_invoice.invoice_id }).from(purchase_invoice).where(and(eq(purchase_invoice.invoice_id, invoiceId), eq(purchase_invoice.user_id, user.user_id)))
+    // super_admin can delete any user's invoice; everyone else only their own.
+    const deleteCond = user.role === "super_admin"
+      ? eq(purchase_invoice.invoice_id, invoiceId)
+      : and(eq(purchase_invoice.invoice_id, invoiceId), eq(purchase_invoice.user_id, user.user_id))
+    const [invoice] = await db.select({ invoice_id: purchase_invoice.invoice_id }).from(purchase_invoice).where(deleteCond)
     if (!invoice) {
       return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     }

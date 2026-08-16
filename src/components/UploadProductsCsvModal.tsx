@@ -17,6 +17,7 @@ type ProductItemDraft = {
   imageFile: File | null;
   imagePreview: string | null;
   category_id: string;
+  location: string;
 };
 
 // SKUs are auto-generated server-side (category-scoped, printable as a
@@ -27,6 +28,7 @@ const KNOWN_FIELDS: { key: string; label: string }[] = [
   { key: "quantity", label: "Quantity" },
   { key: "cost", label: "Cost" },
   { key: "category", label: "Category" },
+  { key: "location", label: "Location/Rack" },
   { key: "ignore", label: "Ignore" },
 ];
 
@@ -108,6 +110,7 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
           else if (/(qty|quantity|stock)/.test(n)) suggested[idx] = "quantity";
           else if (/(cost|price|unit)/.test(n)) suggested[idx] = "cost";
           else if (/(cat|category)/.test(n)) suggested[idx] = "category";
+          else if (/(location|rack|shelf|bin)/.test(n)) suggested[idx] = "location";
           else suggested[idx] = "ignore";
         });
         setMapping(suggested);
@@ -153,6 +156,7 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
         imageFile: null,
         imagePreview: null,
         category_id: "",
+        location: "",
       };
 
       for (let col = 0; col < headers.length; col++) {
@@ -172,6 +176,8 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
           draft.description = String(v);
         } else if (key === 'category') {
           draft.category_id = String(v);
+        } else if (key === 'location') {
+          draft.location = String(v).slice(0, 50);
         }
       }
 

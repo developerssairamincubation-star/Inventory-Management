@@ -23,6 +23,7 @@ interface ProductDetail {
     quantity: number
     damaged_quantity: number
     lost_quantity: number
+    location: string | null
   } | null
 }
 
@@ -221,6 +222,7 @@ function EditModal({
   const [cost, setCost] = useState<number | ''>(product.unit_cost ?? '')
   const [categoryId, setCategoryId] = useState<string>(product.category_id ?? '')
   const [stockQuantity, setStockQuantity] = useState<number | ''>(product.stocks?.quantity ?? '')
+  const [location, setLocation] = useState(product.stocks?.location ?? '')
   const [saving, setSaving] = useState(false)
 
   // Categories
@@ -291,17 +293,29 @@ function EditModal({
       if (!res.ok) throw new Error(await res.text())
       const updated = await res.json()
       const originalStock = product.stocks?.quantity ?? 0
-      if (stockQuantity !== '' && Number(stockQuantity) !== originalStock) {
+      const originalLocation = product.stocks?.location ?? ''
+      const stockPatch: Record<string, unknown> = {}
+      if (stockQuantity !== '' && Number(stockQuantity) !== originalStock) stockPatch.newStock = Number(stockQuantity)
+      if (location.trim() !== originalLocation) stockPatch.location = location.trim() || null
+      if (Object.keys(stockPatch).length > 0) {
         await authFetch(`/api/products/${product.product_id}/update-stock`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ newStock: Number(stockQuantity) }),
+          body: JSON.stringify(stockPatch),
         })
       }
       // Include category_name from categories array
       const selectedCategory = categories.find(c => c.category_id === (categoryId || updated.category_id))
       const category_name = selectedCategory ? selectedCategory.category_name : null
-      onSaved({ ...product, ...updated, category_name, stocks: { ...product.stocks, quantity: stockQuantity !== '' ? Number(stockQuantity) : originalStock } })
+      onSaved({
+        ...product, ...updated, category_name,
+        stocks: {
+          quantity: stockQuantity !== '' ? Number(stockQuantity) : originalStock,
+          damaged_quantity: product.stocks?.damaged_quantity ?? 0,
+          lost_quantity: product.stocks?.lost_quantity ?? 0,
+          location: location.trim() || null,
+        },
+      })
     } catch (err) {
       console.error('Failed to update product:', err)
     } finally {
@@ -344,6 +358,11 @@ function EditModal({
               <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Current Stock</div>
               <input type="number" min={0} value={stockQuantity as number | ''}
                 onChange={e => setStockQuantity(e.target.value === '' ? '' : Number(e.target.value))}
+                style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Location/Rack</div>
+              <input value={location} placeholder="e.g. R2" onChange={e => setLocation(e.target.value)}
                 style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
             </div>
           </div>
@@ -722,6 +741,9 @@ export default function ProductDetailPage() {
               ₹{Number(product.unit_cost).toLocaleString('en-US', { minimumFractionDigits: 2 })} / unit
             </div>
           )}
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+            📍 {product.stocks?.location || 'No location set'}
+          </div>
         </div>
         {/* Lending Summary */}
         <div style={{ flex: 1, padding: '14px 18px', borderRight: '1px solid var(--border)' }}>

@@ -43,10 +43,15 @@ export async function GET(
     const period = searchParams.get('period') || 'monthly'
     const fromDate = getFromDate(period)
 
+    // super_admin can view any product's detail page (read-only — edits/
+    // deletes below stay owner-scoped); everyone else only their own.
+    const productCond = user.role === 'super_admin'
+      ? eq(products.product_id, id)
+      : and(eq(products.product_id, id), eq(products.user_id, user.user_id))
     const [product] = await db
       .select()
       .from(products)
-      .where(and(eq(products.product_id, id), eq(products.user_id, user.user_id)))
+      .where(productCond)
 
     if (!product) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 })
@@ -54,13 +59,13 @@ export async function GET(
 
     const [image] = await db.select({ image_url: product_image.image_url }).from(product_image).where(eq(product_image.product_id, id))
     const [stockRow] = await db
-      .select({ quantity: stocks.quantity, damaged_quantity: stocks.damaged_quantity, lost_quantity: stocks.lost_quantity })
+      .select({ quantity: stocks.quantity, damaged_quantity: stocks.damaged_quantity, lost_quantity: stocks.lost_quantity, location: stocks.location })
       .from(stocks)
       .where(eq(stocks.product_id, id))
 
     const stockData = stockRow
-      ? { quantity: stockRow.quantity ?? 0, damaged_quantity: stockRow.damaged_quantity ?? 0, lost_quantity: stockRow.lost_quantity ?? 0 }
-      : { quantity: 0, damaged_quantity: 0, lost_quantity: 0 }
+      ? { quantity: stockRow.quantity ?? 0, damaged_quantity: stockRow.damaged_quantity ?? 0, lost_quantity: stockRow.lost_quantity ?? 0, location: stockRow.location ?? null }
+      : { quantity: 0, damaged_quantity: 0, lost_quantity: 0, location: null }
 
     let categoryName: string | null = null
     if (product.category_id) {
@@ -217,10 +222,15 @@ export async function PUT(
     if (body.description !== undefined) updateData.description = typeof body.description === 'string' ? body.description.slice(0, 2000) : null
     if (body.category_id !== undefined) updateData.category_id = body.category_id
 
+    // super_admin can edit any user's product (manages inventory across every
+    // domain); everyone else only their own.
+    const productCond = user.role === 'super_admin'
+      ? eq(products.product_id, id)
+      : and(eq(products.product_id, id), eq(products.user_id, user.user_id))
     const [updated] = await db
       .update(products)
       .set(updateData)
-      .where(and(eq(products.product_id, id), eq(products.user_id, user.user_id)))
+      .where(productCond)
       .returning()
 
     if (!updated) {
@@ -257,7 +267,11 @@ export async function DELETE(
   try {
     const { id } = await params
 
-    const [owned] = await db.select({ product_id: products.product_id }).from(products).where(and(eq(products.product_id, id), eq(products.user_id, user.user_id)))
+    // super_admin can delete any user's product; everyone else only their own.
+    const deleteCond = user.role === 'super_admin'
+      ? eq(products.product_id, id)
+      : and(eq(products.product_id, id), eq(products.user_id, user.user_id))
+    const [owned] = await db.select({ product_id: products.product_id }).from(products).where(deleteCond)
     if (!owned) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
 
     const images = await db.select({ image_url: product_image.image_url }).from(product_image).where(eq(product_image.product_id, id))

@@ -1,5 +1,5 @@
 ﻿"use client";
-import { authFetch } from "@/contexts/UserContext";
+import { authFetch, useUser } from "@/contexts/UserContext";
 import { uploadFile } from "@/lib/uploadClient";
 
 import { useEffect, useState, useCallback } from "react";
@@ -23,6 +23,7 @@ interface ProductItem {
   // value is only assigned inside POST /api/products at save time (see
   // GET /api/products/next-sku). Null while unfetched/loading.
   skuPreview: string | null;
+  location: string;
 }
 
 const createEmptyProductItem = (id: string): ProductItem => ({
@@ -35,6 +36,7 @@ const createEmptyProductItem = (id: string): ProductItem => ({
   imagePreview: null,
   category_id: '',
   skuPreview: null,
+  location: '',
 });
 
 // Pure preview fetch — no mutation, see GET /api/products/next-sku's
@@ -64,6 +66,8 @@ const isProductItemTouched = (item: ProductItem): boolean =>
 
 export default function ProductsPage() {
   const router = useRouter();
+  const { appUser } = useUser();
+  const isAdmin = appUser?.role === "super_admin";
   const { showToast, showConfirm } = useToast();
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -581,11 +585,12 @@ export default function ProductsPage() {
 
                       const additionalStock = item.quantity === '' ? undefined : Number(item.quantity);
                       const unitCost = item.cost === '' ? undefined : Number(item.cost);
-                      if (additionalStock !== undefined || unitCost !== undefined) {
+                      const itemLocation = item.location.trim() ? item.location.trim() : undefined;
+                      if (additionalStock !== undefined || unitCost !== undefined || itemLocation !== undefined) {
                         const stockRes = await authFetch(`/api/products/${matchedId}/update-stock`, {
                           method: 'PATCH',
                           headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ additionalStock, unitCost }),
+                          body: JSON.stringify({ additionalStock, unitCost, ...(itemLocation !== undefined ? { location: itemLocation } : {}) }),
                         });
                         if (stockRes.ok) {
                           const result = await stockRes.json();
@@ -625,6 +630,7 @@ export default function ProductsPage() {
                       cost: item.cost === '' ? undefined : Number(item.cost),
                       image_url: image_url ?? undefined,
                       category_id: item.category_id || undefined,
+                      location: item.location.trim() || undefined,
                     };
 
                     const res = await authFetch('/api/products', {
@@ -640,7 +646,8 @@ export default function ProductsPage() {
                       setProducts((p) => [{
                         ...newProduct,
                         stocks: {
-                          quantity: newStock?.quantity ?? (item.quantity === '' ? 0 : Number(item.quantity))
+                          quantity: newStock?.quantity ?? (item.quantity === '' ? 0 : Number(item.quantity)),
+                          location: newStock?.location ?? (item.location.trim() || null),
                         }
                       }, ...p]);
                       succeededIds.push(item.id);
@@ -681,7 +688,7 @@ export default function ProductsPage() {
               {/* Header Row */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: '40px 50px 2fr 1.5fr 1fr 1fr 80px 1.2fr 1.2fr 40px',
+                gridTemplateColumns: '40px 50px 2fr 1.5fr 1fr 1fr 90px 80px 1.2fr 1.2fr 40px',
                 gap: 8,
                 marginBottom: 8,
                 paddingBottom: 6,
@@ -693,6 +700,7 @@ export default function ProductsPage() {
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Description</div>
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Qty</div>
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Cost</div>
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Location</div>
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>SKU</div>
                 <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>Category</div>
                 <div></div>
@@ -709,7 +717,7 @@ export default function ProductsPage() {
                   return (
                   <div key={item.id} style={{
                     display: 'grid',
-                    gridTemplateColumns: '40px 50px 2fr 1.5fr 1fr 1fr 80px 1.2fr 1.2fr 40px',
+                    gridTemplateColumns: '40px 50px 2fr 1.5fr 1fr 1fr 90px 80px 1.2fr 1.2fr 40px',
                     gap: 8,
                     alignItems: 'start',
                     padding: '8px 4px',
@@ -806,6 +814,14 @@ export default function ProductsPage() {
                       onChange={(e) => updateProductItem(item.id, 'cost', e.target.value === '' ? '' : Number(e.target.value))}
                       style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, borderColor: incomplete && item.cost === '' ? 'var(--danger)' : undefined }}
                       placeholder="0.00"
+                    />
+
+                    {/* Location/Rack (optional) */}
+                    <input
+                      value={item.location}
+                      onChange={(e) => updateProductItem(item.id, 'location', e.target.value)}
+                      style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
+                      placeholder="e.g. R2"
                     />
 
                     {/* SKU (auto-generated, preview only) */}
@@ -1040,6 +1056,9 @@ export default function ProductsPage() {
                   <th style={th}>SKU</th>
                   <th style={th}>Category</th>
                   <th onClick={() => handleProductSort('stock')} style={{ ...th, width: 80, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>Stock<ProductSortIcon field="stock" /></span></th>
+                  <th style={{ ...th, width: 90 }}>Location</th>
+                  {isAdmin && <th style={{ ...th, width: 130 }}>Owner</th>}
+                  {isAdmin && <th style={{ ...th, width: 130 }}>Domain</th>}
                   <th onClick={() => handleProductSort('price')} style={{ ...th, width: 90, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>Price<ProductSortIcon field="price" /></span></th>
                   <th style={{ ...th, width: 200 }}>Actions</th>
                 </tr>
@@ -1049,7 +1068,7 @@ export default function ProductsPage() {
                   if (!product) {
                     return (
                       <tr key={`empty-${idx}`}>
-                        <td style={{ ...td, border: 'none' }} colSpan={8}>&nbsp;</td>
+                        <td style={{ ...td, border: 'none' }} colSpan={isAdmin ? 11 : 9}>&nbsp;</td>
                       </tr>
                     );
                   }
@@ -1062,6 +1081,9 @@ export default function ProductsPage() {
                   const id = normalized.id ?? normalized.product_id ?? idx;
                   const cost = normalized.cost ?? normalized.price ?? normalized.unit_cost ?? '—';
                   const stock = normalized.stocks?.quantity ?? normalized.stock ?? normalized.quantity ?? 0;
+                  const location = normalized.stocks?.location || '—';
+                  const ownerName = normalized.owner_name || '—';
+                  const domainName = normalized.domain_name || '—';
                   const image = normalized.image_url || normalized.image || normalized.photo || normalized.imageUrl || null;
                   const sku = normalized.sku_code || normalized.product_code || '—';
                   const categoryName = normalized.category_name ?? '—';
@@ -1108,6 +1130,9 @@ export default function ProductsPage() {
                       <td style={td}>{sku}</td>
                       <td style={td}>{categoryName}</td>
                       <td style={td}>{stock}</td>
+                      <td style={td}>{location}</td>
+                      {isAdmin && <td style={td}>{ownerName}</td>}
+                      {isAdmin && <td style={td}>{domainName}</td>}
                       <td style={td}>{cost}</td>
                       <td style={td}>
                         <div style={{ display: 'flex', gap: 6 }}>
@@ -1206,22 +1231,32 @@ export default function ProductsPage() {
                       </select>
                     </td>
                     <td style={td}>
-                      <input 
-                        type="number" 
-                        min={0} 
-                        value={item.quantity as any} 
-                        onChange={(e) => updateInlineItem(item.id, 'quantity', e.target.value === '' ? '' : Number(e.target.value))} 
+                      <input
+                        type="number"
+                        min={0}
+                        value={item.quantity as any}
+                        onChange={(e) => updateInlineItem(item.id, 'quantity', e.target.value === '' ? '' : Number(e.target.value))}
                         style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
                         placeholder="0"
                       />
                     </td>
                     <td style={td}>
-                      <input 
-                        type="number" 
-                        step="0.01" 
-                        min={0} 
-                        value={item.cost as any} 
-                        onChange={(e) => updateInlineItem(item.id, 'cost', e.target.value === '' ? '' : Number(e.target.value))} 
+                      <input
+                        value={item.location}
+                        onChange={(e) => updateInlineItem(item.id, 'location', e.target.value)}
+                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
+                        placeholder="e.g. R2"
+                      />
+                    </td>
+                    {isAdmin && <td style={{ ...td, color: 'var(--muted)' }}>{appUser?.full_name ?? '—'}</td>}
+                    {isAdmin && <td style={{ ...td, color: 'var(--muted)' }}>{appUser?.domain?.domain_name ?? '—'}</td>}
+                    <td style={td}>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        value={item.cost as any}
+                        onChange={(e) => updateInlineItem(item.id, 'cost', e.target.value === '' ? '' : Number(e.target.value))}
                         style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, width: '100%' }}
                         placeholder="0.00"
                       />
@@ -1262,11 +1297,12 @@ export default function ProductsPage() {
 
                                 const additionalStock = item.quantity === '' ? undefined : Number(item.quantity);
                                 const unitCost = item.cost === '' ? undefined : Number(item.cost);
-                                if (additionalStock !== undefined || unitCost !== undefined) {
+                                const itemLocation = item.location.trim() ? item.location.trim() : undefined;
+                                if (additionalStock !== undefined || unitCost !== undefined || itemLocation !== undefined) {
                                   const stockRes = await authFetch(`/api/products/${matchedId}/update-stock`, {
                                     method: 'PATCH',
                                     headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ additionalStock, unitCost }),
+                                    body: JSON.stringify({ additionalStock, unitCost, ...(itemLocation !== undefined ? { location: itemLocation } : {}) }),
                                   });
                                   if (stockRes.ok) {
                                     const result = await stockRes.json();
@@ -1307,14 +1343,15 @@ export default function ProductsPage() {
                                 cost: item.cost === '' ? undefined : Number(item.cost),
                                 image_url: image_url ?? undefined,
                                 category_id: item.category_id || undefined,
+                                location: item.location.trim() || undefined,
                               };
 
-                              const res = await authFetch('/api/products', { 
-                                method: 'POST', 
-                                headers: { 'Content-Type': 'application/json' }, 
-                                body: JSON.stringify(body) 
+                              const res = await authFetch('/api/products', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(body)
                               });
-                              
+
                               if (res.ok) {
                                 const created = await res.json();
                                 const newProduct = created.product || created;
@@ -1322,7 +1359,8 @@ export default function ProductsPage() {
                                 setProducts((p) => [{
                                   ...newProduct,
                                   stocks: {
-                                    quantity: newStock?.quantity ?? (item.quantity === '' ? 0 : Number(item.quantity))
+                                    quantity: newStock?.quantity ?? (item.quantity === '' ? 0 : Number(item.quantity)),
+                                    location: newStock?.location ?? (item.location.trim() || null),
                                   }
                                 }, ...p]);
                                 showToast(`"${item.productName}" saved`, 'success');

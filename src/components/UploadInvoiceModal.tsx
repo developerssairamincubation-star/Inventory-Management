@@ -44,6 +44,7 @@ type InvoiceRow = {
   description: string; // new_product only
   imageFile: File | null; // new_product only
   imagePreview: string | null; // new_product only
+  location: string; // free-text storage location (e.g. "R2", "L3") — add_stock/new_product only, saved onto the product's stock row
 };
 
 type Props = {
@@ -101,6 +102,7 @@ function createRow(base: Partial<ParsedProduct>, existingProducts: ExistingProdu
     description: "",
     imageFile: null,
     imagePreview: null,
+    location: "",
   };
 }
 
@@ -276,7 +278,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
   const executeSubmit = async (touchedRows: InvoiceRow[]) => {
     setIsSubmitting(true);
     try {
-      const items: Array<{ product_id: string | null; product_name: string; quantity: number; unit_cost: number; total_cost: number }> = [];
+      const items: Array<{ product_id: string | null; product_name: string; quantity: number; unit_cost: number; total_cost: number; location: string | null }> = [];
 
       for (const row of touchedRows) {
         let product_id: string | null = null;
@@ -320,6 +322,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
           quantity: row.quantity,
           unit_cost: row.unit_price,
           total_cost: row.total,
+          location: row.action !== "invoice_only" && row.location.trim() ? row.location.trim() : null,
         });
       }
 
@@ -485,7 +488,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
                 </div>
 
                 <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 780 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
                     <thead>
                       <tr style={{ borderBottom: "1px solid var(--border)" }}>
                         <th style={{ ...th, width: 28 }}>S.No</th>
@@ -493,6 +496,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
                         <th style={{ ...th, width: 60 }}>Qty</th>
                         <th style={{ ...th, width: 80 }}>Unit Cost</th>
                         <th style={{ ...th, width: 80 }}>Total</th>
+                        <th style={{ ...th, width: 80 }}>Location/Rack</th>
                         <th style={{ ...th, width: 130 }}>Action</th>
                         <th style={{ ...th, minWidth: 180 }}>Match / Link to Existing</th>
                         <th style={{ ...th, width: 20 }}></th>
@@ -522,6 +526,14 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
                               </td>
                               <td style={td}>
                                 <input type="number" min="0" step="0.01" style={inpRO} value={row.total.toFixed(2)} readOnly />
+                              </td>
+                              <td style={td}>
+                                {row.action === "invoice_only" ? (
+                                  <input style={inpRO} value="—" readOnly />
+                                ) : (
+                                  <input style={inp} value={row.location} placeholder="e.g. R2"
+                                    onChange={(e) => updateRow(idx, { location: e.target.value })} />
+                                )}
                               </td>
                               <td style={td}>
                                 <select
@@ -589,7 +601,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
                             </tr>
                             {row.action === "new_product" && (
                               <tr key={`${idx}-details`} style={{ borderBottom: "1px solid var(--border)" }}>
-                                <td colSpan={8} style={{ ...td, paddingTop: 0, paddingBottom: 10, background: "#fffbeb" }}>
+                                <td colSpan={9} style={{ ...td, paddingTop: 0, paddingBottom: 10, background: "#fffbeb" }}>
                                   <div style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "8px 10px", border: "1px solid #fde68a", borderTop: "none" }}>
                                     <label style={{
                                       flexShrink: 0, width: 44, height: 44, border: "1px dashed var(--border)", cursor: "pointer",

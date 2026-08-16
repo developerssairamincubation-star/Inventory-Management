@@ -88,4 +88,37 @@ describe("PATCH /api/products/[id]/update-stock", () => {
     expect(body.product.stocks.quantity).toBe(42);
     expect(Number(body.product.unit_cost)).toBe(7.5);
   });
+
+  it("sets location", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const product = await makeProduct("Update Stock Location", 10);
+    const res = await PATCH(
+      new NextRequest(`http://localhost/api/products/${product.product_id}/update-stock`, { method: "PATCH", body: JSON.stringify({ location: " R7 " }) }),
+      { params: Promise.resolve({ id: product.product_id }) },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { product: { stocks: { location: string | null } } };
+    expect(body.product.stocks.location).toBe("R7");
+  });
+
+  it("a regular user cannot restock someone else's product, but a super_admin can", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const product = await makeProduct("Update Stock Other Owner", 10);
+
+    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "user" }));
+    const deniedRes = await PATCH(
+      new NextRequest(`http://localhost/api/products/${product.product_id}/update-stock`, { method: "PATCH", body: JSON.stringify({ additionalStock: 5 }) }),
+      { params: Promise.resolve({ id: product.product_id }) },
+    );
+    expect(deniedRes.status).toBe(404);
+
+    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "11111111-1111-1111-1111-111111111111", role: "super_admin" }));
+    const adminRes = await PATCH(
+      new NextRequest(`http://localhost/api/products/${product.product_id}/update-stock`, { method: "PATCH", body: JSON.stringify({ additionalStock: 5 }) }),
+      { params: Promise.resolve({ id: product.product_id }) },
+    );
+    expect(adminRes.status).toBe(200);
+    const body = (await adminRes.json()) as { product: { stocks: { quantity: number } } };
+    expect(body.product.stocks.quantity).toBe(15);
+  });
 });

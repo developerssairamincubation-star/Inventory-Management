@@ -1,5 +1,5 @@
 ﻿"use client";
-import { authFetch } from "@/contexts/UserContext";
+import { authFetch, useUser } from "@/contexts/UserContext";
 
 import { useEffect, useState } from "react";
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
@@ -34,6 +34,9 @@ type Invoice = {
   received_date: string;
   total_amount: number;
   items_count: number;
+  user_id: string;
+  owner_name: string | null;
+  domain_name: string | null;
 };
 
 type InvoiceDetail = {
@@ -52,6 +55,8 @@ type InvoiceDetail = {
 };
 
 export default function BillingPage() {
+  const { appUser } = useUser();
+  const isAdmin = appUser?.role === "super_admin";
   const [products, setProducts] = useState<Product[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -277,18 +282,20 @@ export default function BillingPage() {
               <th onClick={() => handleSortB('received_date')} style={{ ...th, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Received Date <SortIconB col="received_date" /></span></th>
               <th onClick={() => handleSortB('items_count')} style={{ ...th, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Items <SortIconB col="items_count" /></span></th>
               <th onClick={() => handleSortB('total_amount')} style={{ ...th, textAlign: 'right', cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Total <SortIconB col="total_amount" /></span></th>
+              {isAdmin && <th style={th}>Added By</th>}
+              {isAdmin && <th style={th}>Domain</th>}
               <th style={th}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {filteredInvoices.length === 0 ? (
-              <tr><td colSpan={7} style={{ ...td, textAlign: 'center', color: 'var(--muted)', padding: '24px 10px' }}>No invoices found</td></tr>
+              <tr><td colSpan={isAdmin ? 9 : 7} style={{ ...td, textAlign: 'center', color: 'var(--muted)', padding: '24px 10px' }}>No invoices found</td></tr>
             ) : (
               padRows.map((invoice, localIdx) => {
                 if (!invoice) {
                   return (
                     <tr key={`empty-${localIdx}`}>
-                      <td style={{ ...td, border: 'none' }} colSpan={7}>&nbsp;</td>
+                      <td style={{ ...td, border: 'none' }} colSpan={isAdmin ? 9 : 7}>&nbsp;</td>
                     </tr>
                   );
                 }
@@ -301,6 +308,8 @@ export default function BillingPage() {
                     <td style={td}>{formatDate(invoice.received_date)}</td>
                     <td style={td}>{invoice.items_count || 0}</td>
                     <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>₹{invoice.total_amount?.toFixed(2) || '0.00'}</td>
+                    {isAdmin && <td style={td}>{invoice.owner_name || '—'}</td>}
+                    {isAdmin && <td style={td}>{invoice.domain_name || '—'}</td>}
                     <td style={td}>
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button

@@ -137,4 +137,24 @@ describe("DELETE /api/products/[id]", () => {
     const [remainingStock] = await db.select().from(stocks).where(eq(stocks.product_id, product.product_id));
     expect(remainingStock).toBeUndefined();
   });
+
+  it("a regular user cannot delete someone else's product, but a super_admin can", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const product = await makeProduct("Products Id Other Owners");
+
+    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "user" }));
+    const deniedRes = await DELETE(new NextRequest(`http://localhost/api/products/${product.product_id}`, { method: "DELETE" }), {
+      params: Promise.resolve({ id: product.product_id }),
+    });
+    expect(deniedRes.status).toBe(404);
+
+    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "11111111-1111-1111-1111-111111111111", role: "super_admin" }));
+    const adminRes = await DELETE(new NextRequest(`http://localhost/api/products/${product.product_id}`, { method: "DELETE" }), {
+      params: Promise.resolve({ id: product.product_id }),
+    });
+    expect(adminRes.status).toBe(200);
+
+    const [remainingProduct] = await db.select().from(products).where(eq(products.product_id, product.product_id));
+    expect(remainingProduct).toBeUndefined();
+  });
 });

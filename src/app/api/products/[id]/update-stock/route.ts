@@ -14,7 +14,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { additionalStock, unitCost, newStock } = body
+    const { additionalStock, unitCost, newStock, location } = body
 
     if (additionalStock !== undefined && (typeof additionalStock !== 'number' || additionalStock < 0)) {
       return NextResponse.json({ error: 'Invalid additional stock value' }, { status: 400 })
@@ -25,8 +25,15 @@ export async function PATCH(
     if (unitCost !== undefined && (typeof unitCost !== 'number' || unitCost < 0)) {
       return NextResponse.json({ error: 'Invalid unit cost value' }, { status: 400 })
     }
+    if (location !== undefined && location !== null && typeof location !== 'string') {
+      return NextResponse.json({ error: 'Invalid location value' }, { status: 400 })
+    }
 
-    const [owned] = await db.select({ product_id: products.product_id }).from(products).where(and(eq(products.product_id, id), eq(products.user_id, user.user_id)))
+    // super_admin can restock/relocate any user's product; everyone else only their own.
+    const ownedCond = user.role === 'super_admin'
+      ? eq(products.product_id, id)
+      : and(eq(products.product_id, id), eq(products.user_id, user.user_id))
+    const [owned] = await db.select({ product_id: products.product_id }).from(products).where(ownedCond)
     if (!owned) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
 
     const [currentStock] = await db.select({ quantity: stocks.quantity }).from(stocks).where(eq(stocks.product_id, id))
@@ -34,9 +41,15 @@ export async function PATCH(
       return NextResponse.json({ error: 'Stock record not found' }, { status: 500 })
     }
 
-    if (newStock !== undefined || additionalStock !== undefined) {
-      const newQuantity = newStock !== undefined ? newStock : (currentStock.quantity || 0) + (additionalStock as number)
-      await db.update(stocks).set({ quantity: newQuantity }).where(eq(stocks.product_id, id))
+    if (newStock !== undefined || additionalStock !== undefined || location !== undefined) {
+      const stockUpdate: Partial<typeof stocks.$inferInsert> = {}
+      if (newStock !== undefined || additionalStock !== undefined) {
+        stockUpdate.quantity = newStock !== undefined ? newStock : (currentStock.quantity || 0) + (additionalStock as number)
+      }
+      if (location !== undefined) {
+        stockUpdate.location = typeof location === 'string' ? location.trim().slice(0, 50) || null : null
+      }
+      await db.update(stocks).set(stockUpdate).where(eq(stocks.product_id, id))
     }
 
     if (unitCost !== undefined) {
@@ -44,7 +57,7 @@ export async function PATCH(
     }
 
     const [updatedProduct] = await db
-      .select({ ...getTableColumns(products), stocks: { quantity: stocks.quantity } })
+      .select({ ...getTableColumns(products), stocks: { quantity: stocks.quantity, location: stocks.location } })
       .from(products)
       .leftJoin(stocks, eq(stocks.product_id, products.product_id))
       .where(eq(products.product_id, id))

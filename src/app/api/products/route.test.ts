@@ -78,6 +78,28 @@ describe("GET /api/products", () => {
     // since the original assertion here never checked `stocks` at all.
     expect(widget).toMatchObject({ image_url: "http://example.com/widget.png", category_name: "Products Route Category", stocks: { quantity: 5 } });
   });
+
+  it("a super_admin sees products from every user, with owner_name, and a regular user still only sees their own", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const [product] = await db
+      .insert(products)
+      .values({ product_name: "Products Route Admin-Visible Widget", unit_cost: "3", user_id: OWNER_ID })
+      .returning();
+    await db.insert(stocks).values({ product_id: product.product_id, quantity: 2, location: "R2" });
+
+    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "super_admin" }));
+    const adminRes = await GET(new NextRequest("http://localhost/api/products"));
+    const adminBody = (await adminRes.json()) as Array<{ product_name: string; owner_name: string | null; stocks: { location: string | null } }>;
+    const seen = adminBody.find((p) => p.product_name === "Products Route Admin-Visible Widget");
+    expect(seen).toBeTruthy();
+    expect(seen?.owner_name).toBe("Products Owner");
+    expect(seen?.stocks?.location).toBe("R2");
+
+    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "11111111-1111-1111-1111-111111111111", role: "user" }));
+    const otherUserRes = await GET(new NextRequest("http://localhost/api/products"));
+    const otherUserBody = (await otherUserRes.json()) as Array<{ product_name: string }>;
+    expect(otherUserBody.find((p) => p.product_name === "Products Route Admin-Visible Widget")).toBeUndefined();
+  });
 });
 
 describe("POST /api/products", () => {
@@ -99,6 +121,19 @@ describe("POST /api/products", () => {
     const body = (await res.json()) as { product: { product_code: string; product_name: string }; stock: { quantity: number } };
     expect(body.product.product_code).toMatch(/^STIC\d{3}$/);
     expect(body.stock.quantity).toBe(4);
+  });
+
+  it("persists an optional location onto the created stock row", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    const res = await POST(
+      new NextRequest("http://localhost/api/products", {
+        method: "POST",
+        body: JSON.stringify({ product_name: "Products Route Located", unit_cost: 5, quantity: 2, location: " R9 " }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { stock: { location: string | null } };
+    expect(body.stock.location).toBe("R9");
   });
 
   it("backfills a unique SKU prefix (not the shared GEN fallback) for a category with no code, and persists it", async () => {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { purchase_invoice, purchase_invoice_item, stocks } from "@/db/schema";
+import { purchase_invoice, purchase_invoice_item, stocks, users, coe_domains } from "@/db/schema";
 import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 
 type NormalisedItem = {
@@ -10,6 +10,7 @@ type NormalisedItem = {
   quantity: number;
   unit_cost: number;
   total_cost: number;
+  location: string | null;
 };
 
 export async function GET(request: NextRequest) {
@@ -17,7 +18,26 @@ export async function GET(request: NextRequest) {
   if (!user) return unauthorizedResponse()
 
   try {
-    const invoicesData = await db.select().from(purchase_invoice).where(eq(purchase_invoice.user_id, user.user_id)).orderBy(desc(purchase_invoice.created_at))
+    // super_admin sees invoices from every user/domain, not just their own —
+    // everyone else stays scoped to invoices they personally uploaded.
+    const isAdmin = user.role === "super_admin"
+
+    const invoicesData = isAdmin
+      ? await db
+          .select({
+            ...getTableColumns(purchase_invoice),
+            owner_name: users.full_name,
+            domain_name: coe_domains.domain_name,
+          })
+          .from(purchase_invoice)
+          .leftJoin(users, eq(users.user_id, purchase_invoice.user_id))
+          .leftJoin(coe_domains, eq(coe_domains.domain_id, users.domain_id))
+          .orderBy(desc(purchase_invoice.created_at))
+      : await db
+          .select({ ...getTableColumns(purchase_invoice), owner_name: sql<string | null>`null`, domain_name: sql<string | null>`null` })
+          .from(purchase_invoice)
+          .where(eq(purchase_invoice.user_id, user.user_id))
+          .orderBy(desc(purchase_invoice.created_at))
 
     if (invoicesData.length === 0) {
       return NextResponse.json({ invoices: [] });
@@ -41,6 +61,9 @@ export async function GET(request: NextRequest) {
       // strings over JSON, not numbers, so this must be coerced here to
       // match the frontend's `number` type (see the same fix in [id]/route.ts).
       total_amount: Number(invoice.total_amount) || 0,
+      user_id: invoice.user_id,
+      owner_name: invoice.owner_name ?? null,
+      domain_name: invoice.domain_name ?? null,
     }))
 
     return NextResponse.json({ invoices });
@@ -67,6 +90,7 @@ export async function POST(request: NextRequest) {
       quantity: Number(item.quantity) || 0,
       unit_cost: Number(item.unit_cost) || 0,
       total_cost: Number(item.total_cost) || 0,
+      location: typeof item.location === "string" && item.location.trim() ? item.location.trim().slice(0, 50) : null,
     }))
 
     if (normalisedItems.some((item) => !item.product_name || item.quantity <= 0 || item.unit_cost < 0 || item.total_cost < 0)) {
@@ -103,9 +127,14 @@ export async function POST(request: NextRequest) {
         if (!item.product_id) continue
         const [stockRow] = await tx.select({ quantity: stocks.quantity }).from(stocks).where(eq(stocks.product_id, item.product_id))
         if (stockRow) {
-          await tx.update(stocks).set({ quantity: sql`${stocks.quantity} + ${item.quantity}` }).where(eq(stocks.product_id, item.product_id))
+          // location is only overwritten when this line item actually supplies
+          // one — omitting it on a restock keeps the product's existing location.
+          await tx.update(stocks).set({
+            quantity: sql`${stocks.quantity} + ${item.quantity}`,
+            ...(item.location ? { location: item.location } : {}),
+          }).where(eq(stocks.product_id, item.product_id))
         } else {
-          await tx.insert(stocks).values({ product_id: item.product_id, quantity: item.quantity })
+          await tx.insert(stocks).values({ product_id: item.product_id, quantity: item.quantity, location: item.location })
         }
       }
 

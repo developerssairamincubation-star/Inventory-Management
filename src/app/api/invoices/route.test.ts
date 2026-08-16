@@ -95,4 +95,67 @@ describe("POST /api/invoices", () => {
     const [stock] = await db.select({ quantity: stocks.quantity }).from(stocks).where(eq(stocks.product_id, PRODUCT_ID));
     expect(stock.quantity).toBe(15);
   });
+
+  it("sets the stock's location from a line item, and leaves it untouched on a later restock with no location", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    // A prior test in this file may already have a stocks row for PRODUCT_ID
+    // (stocks.product_id is unique) — reset to a known baseline instead of
+    // assuming this test runs first.
+    await db.delete(stocks).where(eq(stocks.product_id, PRODUCT_ID));
+    await db.insert(stocks).values({ product_id: PRODUCT_ID, quantity: 5 });
+
+    await POST(
+      new NextRequest("http://localhost/api/invoices", {
+        method: "POST",
+        body: JSON.stringify({
+          invoice_number: "INV-TEST-LOC-1",
+          supplier_name: "Invoices Route Supplier",
+          received_date: "2026-01-01",
+          items: [{ product_id: PRODUCT_ID, product_name: "Invoices Route Product", quantity: 3, unit_cost: 2, total_cost: 6, location: " R2 " }],
+        }),
+      }),
+    );
+    let [stock] = await db.select({ quantity: stocks.quantity, location: stocks.location }).from(stocks).where(eq(stocks.product_id, PRODUCT_ID));
+    expect(stock.location).toBe("R2");
+    expect(stock.quantity).toBe(8);
+
+    await POST(
+      new NextRequest("http://localhost/api/invoices", {
+        method: "POST",
+        body: JSON.stringify({
+          invoice_number: "INV-TEST-LOC-2",
+          supplier_name: "Invoices Route Supplier",
+          received_date: "2026-01-02",
+          items: [{ product_id: PRODUCT_ID, product_name: "Invoices Route Product", quantity: 2, unit_cost: 2, total_cost: 4 }],
+        }),
+      }),
+    );
+    ;[stock] = await db.select({ quantity: stocks.quantity, location: stocks.location }).from(stocks).where(eq(stocks.product_id, PRODUCT_ID));
+    expect(stock.location).toBe("R2");
+    expect(stock.quantity).toBe(10);
+  });
+});
+
+describe("GET /api/invoices — super_admin visibility", () => {
+  it("returns invoices from every user, with owner_name, when the caller is super_admin", async () => {
+    mockGetAuthUser.mockResolvedValue(authedUser());
+    await POST(
+      new NextRequest("http://localhost/api/invoices", {
+        method: "POST",
+        body: JSON.stringify({
+          invoice_number: "INV-TEST-ADMIN-VIS",
+          supplier_name: "Invoices Route Supplier",
+          received_date: "2026-01-03",
+          items: [{ product_id: null, product_name: "Invoice-only item", quantity: 1, unit_cost: 1, total_cost: 1 }],
+        }),
+      }),
+    );
+
+    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "super_admin" }));
+    const res = await GET(new NextRequest("http://localhost/api/invoices"));
+    const body = (await res.json()) as { invoices: Array<{ invoice_number: string; owner_name: string | null }> };
+    const created = body.invoices.find((i) => i.invoice_number === "INV-TEST-ADMIN-VIS");
+    expect(created).toBeTruthy();
+    expect(created?.owner_name).toBe("Invoices Owner");
+  });
 });
