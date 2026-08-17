@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const today = new Date().toISOString().split('T')[0]
+    const isAdmin = user.role === 'super_admin'
 
     const overdueOrders = await db
       .select({
@@ -21,7 +22,11 @@ export async function GET(req: NextRequest) {
         borrower_student_id: lending_order.borrower_student_id,
       })
       .from(lending_order)
-      .where(and(eq(lending_order.issued_by_user_id, user.user_id), lt(lending_order.due_date, today), eq(lending_order.status, 'PENDING')))
+      .where(
+        isAdmin
+          ? and(lt(lending_order.due_date, today), eq(lending_order.status, 'PENDING'))
+          : and(eq(lending_order.issued_by_user_id, user.user_id), lt(lending_order.due_date, today), eq(lending_order.status, 'PENDING'))
+      )
 
     if (overdueOrders.length === 0) {
       return NextResponse.json([])

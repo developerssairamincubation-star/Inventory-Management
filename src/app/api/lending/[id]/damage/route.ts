@@ -20,7 +20,11 @@ export async function POST(
       return NextResponse.json({ error: "product_id and damaged_quantity (≥1) are required" }, { status: 400 });
     }
 
-    const [order] = await db.select({ lending_order_id: lending_order.lending_order_id }).from(lending_order).where(and(eq(lending_order.lending_order_id, id), eq(lending_order.issued_by_user_id, user.user_id)))
+    const isAdmin = user.role === 'super_admin'
+    const [order] = await db
+      .select({ lending_order_id: lending_order.lending_order_id })
+      .from(lending_order)
+      .where(isAdmin ? eq(lending_order.lending_order_id, id) : and(eq(lending_order.lending_order_id, id), eq(lending_order.issued_by_user_id, user.user_id)))
     if (!order) return NextResponse.json({ error: "Lending record not found" }, { status: 404 });
 
     const [lendingItem] = await db.select({ quantity: lending_item.quantity, damaged_quantity: lending_item.damaged_quantity, item_type: lending_item.item_type }).from(lending_item).where(and(eq(lending_item.lend_order_id, id), eq(lending_item.product_id, product_id)))

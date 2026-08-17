@@ -12,7 +12,11 @@ export async function GET(req: NextRequest) {
   if (!user) return unauthorizedResponse()
 
   try {
-    const userProducts = await db.select({ product_id: products.product_id }).from(products).where(eq(products.user_id, user.user_id))
+    const isAdmin = user.role === 'super_admin'
+
+    const userProducts = isAdmin
+      ? await db.select({ product_id: products.product_id }).from(products)
+      : await db.select({ product_id: products.product_id }).from(products).where(eq(products.user_id, user.user_id))
 
     const totalProducts = userProducts.length
     const productIds = userProducts.map((p) => p.product_id)
@@ -25,7 +29,9 @@ export async function GET(req: NextRequest) {
     const damagedQuantity = stocksData.reduce((sum, s) => sum + (s.damaged_quantity || 0), 0)
     const lostQuantity = stocksData.reduce((sum, s) => sum + (s.lost_quantity || 0), 0)
 
-    const userOrders = await db.select({ lending_order_id: lending_order.lending_order_id, status: lending_order.status }).from(lending_order).where(eq(lending_order.issued_by_user_id, user.user_id))
+    const userOrders = isAdmin
+      ? await db.select({ lending_order_id: lending_order.lending_order_id, status: lending_order.status }).from(lending_order)
+      : await db.select({ lending_order_id: lending_order.lending_order_id, status: lending_order.status }).from(lending_order).where(eq(lending_order.issued_by_user_id, user.user_id))
 
     const userOrderIds = userOrders.map((o) => o.lending_order_id)
 

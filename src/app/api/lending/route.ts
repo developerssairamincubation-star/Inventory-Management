@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
   try {
     const period = getPeriod(request.nextUrl.searchParams)
     const startDate = getStartDateByPeriod(period)
+    const isAdmin = user.role === 'super_admin'
 
     const lendingOrders = await db
       .select({
@@ -27,7 +28,11 @@ export async function GET(request: NextRequest) {
         domain_id: lending_order.domain_id,
       })
       .from(lending_order)
-      .where(and(eq(lending_order.issued_by_user_id, user.user_id), gte(lending_order.created_at, startDate)))
+      .where(
+        isAdmin
+          ? gte(lending_order.created_at, startDate)
+          : and(eq(lending_order.issued_by_user_id, user.user_id), gte(lending_order.created_at, startDate))
+      )
       .orderBy(desc(lending_order.created_at))
 
     const orderIds = lendingOrders.map((o) => o.lending_order_id)

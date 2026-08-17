@@ -26,11 +26,16 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const period = searchParams.get('period') || 'monthly'
     const startDate = getStartDate(period)
+    const isAdmin = user.role === 'super_admin'
 
     const orders = await db
       .select({ lending_order_id: lending_order.lending_order_id })
       .from(lending_order)
-      .where(and(eq(lending_order.issued_by_user_id, user.user_id), gte(lending_order.created_at, startDate)))
+      .where(
+        isAdmin
+          ? gte(lending_order.created_at, startDate)
+          : and(eq(lending_order.issued_by_user_id, user.user_id), gte(lending_order.created_at, startDate))
+      )
 
     const orderIds = orders.map((o) => o.lending_order_id)
     if (orderIds.length === 0) return NextResponse.json([])

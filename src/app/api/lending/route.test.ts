@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from "vitest";
 import { NextRequest } from "next/server";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users, departments, products, category, stocks, students, lending_order, lending_item, coe_domains } from "@/db/schema";
 
@@ -70,6 +70,51 @@ describe("GET /api/lending", () => {
     mockGetAuthUser.mockResolvedValue(null);
     const res = await GET(new NextRequest("http://localhost/api/lending"));
     expect(res.status).toBe(401);
+  });
+
+  it("super_admin sees lending records issued by every user, not just their own", async () => {
+    const [otherUser] = await db
+      .insert(users)
+      .values({ email: `lending-route-other-${Date.now()}@example.com`, password_hash: "irrelevant", full_name: "Other Issuer" })
+      .returning();
+
+    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: otherUser.user_id }));
+    const postRes = await POST(
+      new NextRequest("http://localhost/api/lending", {
+        method: "POST",
+        body: JSON.stringify({
+          student_id_code: "sit24lr999",
+          student_name: "Admin Visibility Student",
+          lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
+        }),
+      }),
+    );
+    expect(postRes.status).toBe(201);
+    const { order } = (await postRes.json()) as { order: { lending_order_id: string } };
+
+    try {
+      mockGetAuthUser.mockResolvedValue(authedUser({ role: "super_admin" }));
+      const adminRes = await GET(new NextRequest("http://localhost/api/lending?period=yearly"));
+      expect(adminRes.status).toBe(200);
+      const adminBody = (await adminRes.json()) as { records: Array<{ id: string }> };
+      expect(adminBody.records.some((r) => r.id === order.lending_order_id)).toBe(true);
+
+      // A regular user (not the one who issued this order) still shouldn't see it.
+      mockGetAuthUser.mockResolvedValue(authedUser());
+      const ownerRes = await GET(new NextRequest("http://localhost/api/lending?period=yearly"));
+      const ownerBody = (await ownerRes.json()) as { records: Array<{ id: string }> };
+      expect(ownerBody.records.some((r) => r.id === order.lending_order_id)).toBe(false);
+    } finally {
+      await db.delete(lending_item).where(eq(lending_item.lend_order_id, order.lending_order_id));
+      await db.delete(lending_order).where(eq(lending_order.lending_order_id, order.lending_order_id));
+      await db.delete(students).where(eq(students.student_id_code, "sit24lr999"));
+      await db.delete(users).where(eq(users.user_id, otherUser.user_id));
+      // The POST above decremented PRODUCT_ID's shared stock by 1 (real side
+      // effect, same as any other lending) — restore it so sibling tests in
+      // this file that assert on PRODUCT_ID's exact quantity aren't affected
+      // by this test's fixture data regardless of run order.
+      await db.update(stocks).set({ quantity: sql`${stocks.quantity} + 1` }).where(eq(stocks.product_id, PRODUCT_ID));
+    }
   });
 });
 

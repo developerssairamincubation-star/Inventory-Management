@@ -13,8 +13,12 @@ export async function DELETE(
 
   try {
     const { id } = await params;
+    const isAdmin = user.role === 'super_admin'
 
-    const [order] = await db.select({ lending_order_id: lending_order.lending_order_id }).from(lending_order).where(and(eq(lending_order.lending_order_id, id), eq(lending_order.issued_by_user_id, user.user_id)))
+    const [order] = await db
+      .select({ lending_order_id: lending_order.lending_order_id })
+      .from(lending_order)
+      .where(isAdmin ? eq(lending_order.lending_order_id, id) : and(eq(lending_order.lending_order_id, id), eq(lending_order.issued_by_user_id, user.user_id)))
     if (!order) return NextResponse.json({ error: "Lending record not found" }, { status: 404 });
 
     await db.transaction(async (tx) => {
@@ -45,8 +49,12 @@ export async function PUT(
   try {
     const { id } = await params;
     const body = await request.json();
+    const isAdmin = user.role === 'super_admin'
 
-    const [order] = await db.select({ lending_order_id: lending_order.lending_order_id }).from(lending_order).where(and(eq(lending_order.lending_order_id, id), eq(lending_order.issued_by_user_id, user.user_id)))
+    const [order] = await db
+      .select({ lending_order_id: lending_order.lending_order_id })
+      .from(lending_order)
+      .where(isAdmin ? eq(lending_order.lending_order_id, id) : and(eq(lending_order.lending_order_id, id), eq(lending_order.issued_by_user_id, user.user_id)))
     if (!order) return NextResponse.json({ error: "Lending record not found" }, { status: 404 });
 
     const { due_date, return_date, status, quantity, original_quantity, product_id } = body;

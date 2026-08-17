@@ -45,7 +45,8 @@ export async function GET(
 
     // super_admin can view any product's detail page (read-only — edits/
     // deletes below stay owner-scoped); everyone else only their own.
-    const productCond = user.role === 'super_admin'
+    const isAdmin = user.role === 'super_admin'
+    const productCond = isAdmin
       ? eq(products.product_id, id)
       : and(eq(products.product_id, id), eq(products.user_id, user.user_id))
     const [product] = await db
@@ -119,7 +120,11 @@ export async function GET(
           borrower_student_id: lending_order.borrower_student_id,
         })
         .from(lending_order)
-        .where(and(inArray(lending_order.lending_order_id, orderIds), eq(lending_order.issued_by_user_id, user.user_id)))
+        .where(
+          isAdmin
+            ? inArray(lending_order.lending_order_id, orderIds)
+            : and(inArray(lending_order.lending_order_id, orderIds), eq(lending_order.issued_by_user_id, user.user_id))
+        )
         .orderBy(desc(lending_order.created_at))
 
       if (orders.length > 0) {

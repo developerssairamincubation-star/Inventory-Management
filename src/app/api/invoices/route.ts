@@ -123,19 +123,35 @@ export async function POST(request: NextRequest) {
         })),
       )
 
+      // Aggregated in memory (not per-item queries) so a multi-line invoice
+      // costs one round trip here regardless of item count — with the DB on
+      // Neon rather than same-host Postgres, each extra round trip is real,
+      // measurable latency, not just a query-count nicety.
+      const stockUpdates = new Map<string, { quantity: number; location: string | null }>()
       for (const item of normalisedItems) {
         if (!item.product_id) continue
-        const [stockRow] = await tx.select({ quantity: stocks.quantity }).from(stocks).where(eq(stocks.product_id, item.product_id))
-        if (stockRow) {
-          // location is only overwritten when this line item actually supplies
-          // one — omitting it on a restock keeps the product's existing location.
-          await tx.update(stocks).set({
-            quantity: sql`${stocks.quantity} + ${item.quantity}`,
-            ...(item.location ? { location: item.location } : {}),
-          }).where(eq(stocks.product_id, item.product_id))
+        const existing = stockUpdates.get(item.product_id)
+        if (existing) {
+          existing.quantity += item.quantity
+          if (item.location) existing.location = item.location
         } else {
-          await tx.insert(stocks).values({ product_id: item.product_id, quantity: item.quantity, location: item.location })
+          stockUpdates.set(item.product_id, { quantity: item.quantity, location: item.location })
         }
+      }
+
+      if (stockUpdates.size > 0) {
+        await tx
+          .insert(stocks)
+          .values(Array.from(stockUpdates, ([product_id, { quantity, location }]) => ({ product_id, quantity, location })))
+          .onConflictDoUpdate({
+            target: stocks.product_id,
+            set: {
+              quantity: sql`${stocks.quantity} + excluded.quantity`,
+              // location is only overwritten when the incoming value is
+              // non-null — omitting it on a restock keeps the existing location.
+              location: sql`coalesce(excluded.location, ${stocks.location})`,
+            },
+          })
       }
 
       return invoiceRow
