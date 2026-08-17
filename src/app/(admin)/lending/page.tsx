@@ -1,5 +1,6 @@
 ﻿"use client";
 import { authFetch, useUser } from "@/contexts/UserContext";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 
 import { Fragment, useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
@@ -386,10 +387,12 @@ export default function LendingPage() {
         setRecords(fetched);
         applyStats(fetched);
       } else {
-        console.error("Failed to fetch lending records");
+        console.error("Failed to fetch lending records:", res.status);
+        showToast("Couldn't load lending records. Please refresh and try again.", "error");
       }
     } catch (error) {
       console.error("Error fetching lending records:", error);
+      showToast("Couldn't load lending records. Please check your connection and try again.", "error");
     } finally {
       setLoading(false);
     }
@@ -492,12 +495,14 @@ export default function LendingPage() {
       if (!res.ok) {
         setRecords(prevRecords);
         applyStats(prevRecords);
-        console.error("Failed to delete record");
+        console.error("Failed to delete record:", res.status);
+        showToast("Couldn't delete this record. Please try again.", "error");
       }
     } catch (error) {
       setRecords(prevRecords);
       applyStats(prevRecords);
       console.error("Error deleting record:", error);
+      showToast("Couldn't delete this record. Please check your connection and try again.", "error");
     }
   };
 
@@ -554,7 +559,7 @@ export default function LendingPage() {
         setRecords(prevRecords);
         applyStats(prevRecords);
         const data = await res.json();
-        showToast(data.error || "Failed to mark items as damaged", "error");
+        showToast(extractErrorMessage(data, "Failed to mark items as damaged"), "error");
       }
     } catch (error) {
       setRecords(prevRecords);
@@ -601,7 +606,7 @@ export default function LendingPage() {
         setRecords(prevRecords);
         applyStats(prevRecords);
         const data = await res.json();
-        showToast(data.error || "Failed to mark items as lost", "error");
+        showToast(extractErrorMessage(data, "Failed to mark items as lost"), "error");
       }
     } catch (error) {
       setRecords(prevRecords);
@@ -639,12 +644,14 @@ export default function LendingPage() {
       if (!res.ok) {
         setRecords(prevRecords);
         applyStats(prevRecords);
-        console.error("Failed to update record");
+        console.error("Failed to update record:", res.status);
+        showToast("Couldn't save that change. Please try again.", "error");
       }
     } catch (error) {
       setRecords(prevRecords);
       applyStats(prevRecords);
       console.error("Error updating record:", error);
+      showToast("Couldn't save that change. Please check your connection and try again.", "error");
     }
   };
 
@@ -807,7 +814,7 @@ export default function LendingPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        mergeRow(rowId, { decoded: null, decodeError: data.error || "Unrecognized student ID format" });
+        mergeRow(rowId, { decoded: null, decodeError: extractErrorMessage(data, "Unrecognized student ID format") });
         return;
       }
       mergeRow(rowId, {
@@ -820,7 +827,7 @@ export default function LendingPage() {
           existing: data.existing,
           student_name: data.student_name,
         },
-        decodeError: data.department_id ? null : (data.error || "Unknown department code — check Admin Settings"),
+        decodeError: data.department_id ? null : (extractErrorMessage(data, "Unknown department code — check Admin Settings")),
         studentName: data.existing && data.student_name ? data.student_name : "",
       });
     } catch (error) {
@@ -989,16 +996,19 @@ export default function LendingPage() {
       if (!res.ok) {
         setRecords(prevRecords);
         applyStats(prevRecords);
-        console.error("Failed to update return date");
+        console.error("Failed to update return date:", res.status);
+        showToast("Couldn't record the return. Please try again.", "error");
       }
     } catch (error) {
       setRecords(prevRecords);
       applyStats(prevRecords);
       console.error("Error updating return date:", error);
+      showToast("Couldn't record the return. Please check your connection and try again.", "error");
     }
   };
 
   const exportPDF = () => {
+   try {
     const doc = new jsPDF({ orientation: 'landscape' });
     const extractDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
     doc.setFontSize(14);
@@ -1047,9 +1057,14 @@ export default function LendingPage() {
       alternateRowStyles: { fillColor: [245, 247, 250] },
     });
     doc.save(`lending-data-${new Date().toISOString().split('T')[0]}.pdf`);
+   } catch (err) {
+    console.error('[lending] PDF export failed:', err);
+    showToast("Couldn't generate the PDF. Please try again.", 'error');
+   }
   };
 
   const exportExcel = () => {
+   try {
     const FULLY_RETURNED_STATUSES = ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST'];
     const data = filteredRecords.map((record, i) => {
       const borrowed = record.original_quantity ?? record.quantity;
@@ -1084,6 +1099,10 @@ export default function LendingPage() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Lending Data');
     XLSX.writeFile(wb, `lending-data-${new Date().toISOString().split('T')[0]}.xlsx`);
+   } catch (err) {
+    console.error('[lending] Excel export failed:', err);
+    showToast("Couldn't generate the spreadsheet. Please try again.", 'error');
+   }
   };
 
   // The per-item row — used both for a single-item group (identical to the

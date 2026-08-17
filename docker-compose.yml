@@ -73,14 +73,6 @@ services:
       migrate
     restart: "no"
 
-  # SMTP catcher for local password-reset email testing. Web UI at :8025.
-  mailpit:
-    image: axllent/mailpit:latest
-    ports:
-      - "8025:8025"
-      - "1025:1025"
-    restart: unless-stopped
-
   # Daily pg_dump to a volume separate from the live data volume, so a
   # corrupted pgdata volume can't also destroy the backups. See the backup
   # runbook in db/README.md for restore steps.
@@ -126,10 +118,6 @@ services:
       CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
       CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
       CLOUDINARY_UPLOAD_FOLDER: ${CLOUDINARY_UPLOAD_FOLDER:-dev}
-      # Mailpit, container-network address (host-side `npm run dev` uses
-      # .env's SMTP_HOST=localhost instead).
-      SMTP_HOST: mailpit
-      SMTP_PORT: 1025
     depends_on:
       flyway:
         condition: service_completed_successfully

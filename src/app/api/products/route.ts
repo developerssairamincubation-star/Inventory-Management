@@ -5,6 +5,7 @@ import { products, stocks, product_image, category, users, coe_domains } from '@
 import { allocateNextCode, allocateNextSkuCode } from '@/lib/idSequences'
 import { suggestCategoryCode } from '@/lib/categoryCode'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
+import { classifyError } from '@/lib/api/classifyError'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,9 +54,9 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json(rows)
-  } catch (err) {
-    console.error('Server error:', err)
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal Server Error' }, { status: 500 })
+  } catch (error) {
+    console.error('[GET /api/products] error:', error)
+    return NextResponse.json({ error: classifyError(error) }, { status: 500 })
   }
 }
 
@@ -126,7 +127,14 @@ export async function POST(req: NextRequest) {
     })
 
     return NextResponse.json({ product: { ...result.product, image_url: image_url ?? null }, stock: result.stock }, { status: 201 })
-  } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Invalid JSON' }, { status: 400 })
+  } catch (error) {
+    console.error('[POST /api/products] error:', error)
+    // A malformed request body (req.json() failing) is genuinely a client
+    // error; anything past that point (DB failures inside the transaction,
+    // etc.) is not — those get the correct 500 instead of being mislabeled.
+    if (error instanceof SyntaxError) {
+      return NextResponse.json({ error: 'Invalid request — please check the form and try again.' }, { status: 400 })
+    }
+    return NextResponse.json({ error: classifyError(error) }, { status: 500 })
   }
 }

@@ -48,7 +48,8 @@ export async function GET(request: NextRequest) {
     const sku = `${prefix}-${String(nextValue).padStart(4, "0")}`;
 
     return NextResponse.json({ sku });
-  } catch {
+  } catch (error) {
+    console.error('[GET /api/products/next-sku] falling back to null:', error);
     return NextResponse.json({ sku: null });
   }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { isApiError } from '@/lib/api/errors'
+import { classifyError } from '@/lib/api/classifyError'
 
 export type ApiFailure = {
   success: false
@@ -37,8 +38,12 @@ export function fromError(error: unknown) {
     return fail(error.status, error.code, error.message, error.details)
   }
 
-  const message = error instanceof Error ? error.message : 'Internal Server Error'
-  return fail(500, 'INTERNAL_SERVER_ERROR', message)
+  // Unexpected errors (DB driver failures, third-party SDK errors, etc.)
+  // never forward their raw message to the client — only a safe, classified
+  // one. Full detail (stack trace, driver error code) goes to the server
+  // log, which is where a developer would actually look for it.
+  console.error('[fromError] Unexpected error:', error)
+  return fail(500, 'INTERNAL_SERVER_ERROR', classifyError(error))
 }
 
 export function badRequest(message: string, details?: unknown) {

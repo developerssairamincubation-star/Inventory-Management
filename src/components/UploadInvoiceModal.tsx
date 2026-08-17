@@ -163,14 +163,19 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
 
   // ── Fetch next invoice number + categories on mount ──────────────────────
   useEffect(() => {
+    // Both are non-critical background prefetches (invoice-number
+    // suggestion, category dropdown options) — a failure here doesn't block
+    // filling out the form manually, so it's logged for developers rather
+    // than interrupting the user with a toast for something they can work
+    // around (type the number, leave category unset).
     authFetch("/api/invoices/next-number")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => { if (d?.invoice_no) setAutoInvoiceNo(d.invoice_no); })
-      .catch(() => {});
+      .catch((err) => console.error("[UploadInvoiceModal] next-number prefetch failed:", err));
     authFetch("/api/categories")
       .then((r) => r.ok ? r.json() : [])
       .then((d) => setCategories(Array.isArray(d) ? d : []))
-      .catch(() => {});
+      .catch((err) => console.error("[UploadInvoiceModal] categories prefetch failed:", err));
   }, []);
 
   // ── File handling ─────────────────────────────────────────────────────────
@@ -189,8 +194,12 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
         fd.append("pdf", file);
         const res = await authFetch("/api/invoices/parse-pdf", { method: "POST", body: fd });
         if (!res.ok) {
-          const e = await res.json();
-          setParseError(e.error || "Failed to parse PDF");
+          // The API route (src/app/api/invoices/parse-pdf/route.ts) already
+          // returns a safe, invoice-specific message here — never the AI
+          // provider's own error text — so it's fine to show directly.
+          const e = await res.json().catch(() => ({}));
+          console.error("[UploadInvoiceModal] parse-pdf failed:", e);
+          setParseError(e.error || "We couldn't read this invoice. Please check the file and try again, or enter the details manually.");
           return;
         }
         const data = await res.json();
@@ -204,8 +213,9 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
         if (data.products?.length > 0) {
           setRows(data.products.map((p: ParsedProduct) => createRow(p, existingProducts)));
         }
-      } catch (err: any) {
-        setParseError(err.message || "Unexpected error");
+      } catch (err) {
+        console.error("[UploadInvoiceModal] parse-pdf request failed:", err);
+        setParseError(err instanceof Error ? err.message : "We couldn't read this invoice. Please check the file and try again, or enter the details manually.");
       } finally {
         setIsParsing(false);
       }
@@ -332,9 +342,22 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
         return;
       }
 
+      // Upload the source PDF alongside the parsed data — best-effort, same
+      // as the product image upload above: a storage hiccup here shouldn't
+      // block saving the invoice's actual data.
+      let invoice_file_url: string | undefined;
+      if (pdfFile) {
+        try {
+          invoice_file_url = await uploadFile(pdfFile, "invoices", authFetch);
+        } catch (uploadErr) {
+          console.error("Invoice PDF upload error:", uploadErr);
+          showToast("Invoice saved, but the PDF attachment failed to upload.", "warning");
+        }
+      }
+
       const invNo = invoiceNumber.trim() || autoInvoiceNo;
       const total_amount = invoiceTotal === "" ? itemsSubtotal : invoiceTotal;
-      const res = await authFetch("/api/invoices", { method: "POST", body: JSON.stringify({ invoice_number: invNo, supplier_name: supplierName, received_date: deliveryDate, total_amount, items }) });
+      const res = await authFetch("/api/invoices", { method: "POST", body: JSON.stringify({ invoice_number: invNo, supplier_name: supplierName, received_date: deliveryDate, total_amount, items, ...(invoice_file_url ? { invoice_file_url } : {}) }) });
       if (!res.ok) {
         const e = await res.json();
         throw new Error(e.error || "Failed to create invoice");
@@ -342,8 +365,12 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
       showToast("Invoice created successfully! Stock was updated for linked products.", "success");
       onSuccess();
       onClose();
-    } catch (err: any) {
-      showToast(`Error: ${err.message}`, "error");
+    } catch (err) {
+      // Messages reaching here already come from the backend's safe,
+      // classified error text (see src/lib/api/classifyError.ts) or from a
+      // thrown validation Error above — never raw driver/SDK text.
+      console.error("[UploadInvoiceModal] submit failed:", err);
+      showToast(err instanceof Error ? `Error: ${err.message}` : "Something went wrong. Please try again.", "error");
     } finally {
       setIsSubmitting(false);
     }

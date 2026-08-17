@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useState } from "react";
 import { authFetch } from "@/contexts/UserContext";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { useToast } from "@/components/ui/Toast";
 import { usePagination } from "@/hooks/usePagination";
 import Pagination from "@/components/Pagination";
@@ -144,9 +145,13 @@ export default function ReturnablePage() {
       if (res.ok) {
         const data = await res.json();
         setRecords(data.records || []);
+      } else {
+        console.error("Failed to fetch lending records:", res.status);
+        showToast("Couldn't load returnable records. Please refresh and try again.", "error");
       }
     } catch (error) {
       console.error("Error fetching lending records:", error);
+      showToast("Couldn't load returnable records. Please check your connection and try again.", "error");
     } finally {
       setLoading(false);
     }
@@ -183,7 +188,7 @@ export default function ReturnablePage() {
       if (!res.ok) {
         setRecords(prevRecords);
         const data = await res.json();
-        showToast(data.error || "Failed to mark items as damaged", "error");
+        showToast(extractErrorMessage(data, "Failed to mark items as damaged"), "error");
       }
     } catch (error) {
       setRecords(prevRecords);
@@ -224,7 +229,7 @@ export default function ReturnablePage() {
       if (!res.ok) {
         setRecords(prevRecords);
         const data = await res.json();
-        showToast(data.error || "Failed to mark items as lost", "error");
+        showToast(extractErrorMessage(data, "Failed to mark items as lost"), "error");
       }
     } catch (error) {
       setRecords(prevRecords);
@@ -283,11 +288,13 @@ export default function ReturnablePage() {
       });
       if (!res.ok) {
         setRecords(prevRecords);
-        console.error("Failed to update return date");
+        console.error("Failed to update return date:", res.status);
+        showToast("Couldn't record the return. Please try again.", "error");
       }
     } catch (error) {
       setRecords(prevRecords);
       console.error("Error updating return date:", error);
+      showToast("Couldn't record the return. Please check your connection and try again.", "error");
     }
   };
 

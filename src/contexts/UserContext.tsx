@@ -83,12 +83,32 @@ export async function authFetch(url: string, init: RequestInit = {}): Promise<Re
     if (csrf) headers.set("X-CSRF-Token", csrf);
   }
 
-  const doFetch = () => fetch(url, { ...init, headers, credentials: "include" });
+  const doFetch = async () => {
+    try {
+      return await fetch(url, { ...init, headers, credentials: "include" });
+    } catch (err) {
+      // A thrown fetch (offline, DNS failure, aborted) previously propagated
+      // uncaught out of every one of authFetch's ~40 call sites as whatever
+      // cryptic message the browser gives ("Failed to fetch", etc.) — wrap
+      // it in a message a caller can actually show a user.
+      console.error(`[authFetch] network error for ${url}:`, err);
+      throw new Error("Network error — please check your connection and try again.");
+    }
+  };
 
   let res = await doFetch();
 
   if (res.status === 401 && url !== "/api/auth/refresh") {
-    const refreshRes = await fetch("/api/auth/refresh", { method: "POST", credentials: "include" });
+    let refreshRes: Response;
+    try {
+      refreshRes = await fetch("/api/auth/refresh", { method: "POST", credentials: "include" });
+    } catch (err) {
+      // Couldn't even attempt the refresh — fall back to the original 401
+      // rather than throwing a differently-shaped error from this one path;
+      // callers already handle a non-ok response.
+      console.error("[authFetch] network error during token refresh:", err);
+      return res;
+    }
     if (refreshRes.ok) {
       res = await doFetch();
     }

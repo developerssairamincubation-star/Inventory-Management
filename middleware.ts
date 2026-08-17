@@ -21,8 +21,8 @@ async function hasValidAccessToken(req: NextRequest): Promise<boolean> {
   }
 }
 
-const PUBLIC_PAGE_PATHS = ['/login', '/reset-password']
-const PUBLIC_API_PATHS = ['/api/auth/login', '/api/auth/refresh', '/api/auth/forgot-password', '/api/auth/reset-password']
+const PUBLIC_PAGE_PATHS = ['/login']
+const PUBLIC_API_PATHS = ['/api/auth/login', '/api/auth/refresh']
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl

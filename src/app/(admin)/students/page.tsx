@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { authFetch } from "@/contexts/UserContext";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { useToast } from "@/components/ui/Toast";
 import { Plus, Pencil, Search, Users, Upload } from "lucide-react";
 import UploadStudentsCsvModal from "@/components/UploadStudentsCsvModal";
 import { usePagination } from "@/hooks/usePagination";
@@ -64,6 +66,7 @@ export default function StudentsPage() {
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [decoding, setDecoding] = useState(false);
   const [decodeInfo, setDecodeInfo] = useState<{ departmentName: string | null; error: string | null } | null>(null);
+  const { showToast } = useToast();
 
   const loadStudents = useCallback(async (q?: string) => {
     setFetching(true);
@@ -71,17 +74,27 @@ export default function StudentsPage() {
       const url = q ? `/api/students?search=${encodeURIComponent(q)}` : "/api/students";
       const res = await authFetch(url);
       const data = await res.json();
-      setStudents(data || []);
-    } catch {
-      setError("Failed to load students");
+      if (!res.ok) {
+        throw new Error(extractErrorMessage(data, "Failed to load students"));
+      }
+      setStudents(Array.isArray(data) ? data : []);
+    } catch (err) {
+      // This page's `error` state is only ever rendered inside the Add/Edit
+      // modals, which aren't open during the initial list load — a toast is
+      // the only way this failure is actually visible to the user.
+      console.error("Failed to load students:", err);
+      showToast(err instanceof Error ? err.message : "Failed to load students", "error");
     } finally {
       setFetching(false);
     }
-  }, []);
+  }, [showToast]);
 
   useEffect(() => {
     loadStudents();
-    authFetch("/api/departments").then(r => r.json()).then(d => setDepartments(d || []));
+    authFetch("/api/departments")
+      .then(r => r.ok ? r.json() : [])
+      .then(d => setDepartments(Array.isArray(d) ? d : []))
+      .catch((err) => console.error("Failed to fetch departments:", err));
   }, [loadStudents]);
 
   useEffect(() => {
@@ -106,7 +119,7 @@ export default function StudentsPage() {
         body: JSON.stringify(form),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create student");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to create student"));
       setShowAdd(false);
       setForm(EMPTY_FORM);
       await loadStudents(search || undefined);
@@ -128,7 +141,7 @@ export default function StudentsPage() {
         body: JSON.stringify(form),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update student");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to update student"));
       setEditStudent(null);
       await loadStudents(search || undefined);
     } catch (err: any) {
@@ -177,7 +190,7 @@ export default function StudentsPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setDecodeInfo({ departmentName: null, error: data.error || "Unrecognized student ID format" });
+        setDecodeInfo({ departmentName: null, error: extractErrorMessage(data, "Unrecognized student ID format") });
         return;
       }
       if (data.error) {

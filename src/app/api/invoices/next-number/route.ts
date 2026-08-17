@@ -31,7 +31,8 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({ invoice_no: nextInvoiceNo });
-  } catch {
+  } catch (error) {
+    console.error('[GET /api/invoices/next-number] falling back to INV001:', error);
     return NextResponse.json({ invoice_no: "INV001" });
   }
 }

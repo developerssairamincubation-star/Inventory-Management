@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useUser } from "@/contexts/UserContext";
 import { authFetch } from "@/contexts/UserContext";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, UserCheck, UserX, Shield, User, Building2, Trash2, MapPin, Tag } from "lucide-react";
 
@@ -124,7 +125,7 @@ export default function UserManagementPage() {
     try {
       const res = await authFetch("/api/departments");
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load departments");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to load departments"));
       const rows: Department[] = Array.isArray(data) ? data : [];
       setDepartments(rows);
     } catch (err: any) {
@@ -140,7 +141,7 @@ export default function UserManagementPage() {
     try {
       const res = await authFetch("/api/coe-domains");
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load COE domains");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to load COE domains"));
       setDomains(Array.isArray(data) ? data : []);
     } catch (err: any) {
       setDomainError(err.message || "Failed to load COE domains");
@@ -155,7 +156,7 @@ export default function UserManagementPage() {
     try {
       const res = await authFetch("/api/categories");
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load categories");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to load categories"));
       setCategoriesList(Array.isArray(data) ? data : []);
     } catch (err: any) {
       setCatError(err.message || "Failed to load categories");
@@ -193,7 +194,7 @@ export default function UserManagementPage() {
         body: JSON.stringify({ category_name, code: catEditCode.trim().toUpperCase() || undefined }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update category");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to update category"));
       handleCancelEditCategory();
       await loadCategories();
     } catch (err: any) {
@@ -218,7 +219,7 @@ export default function UserManagementPage() {
         body: JSON.stringify({ category_name, code: newCategoryCode.trim().toUpperCase() || undefined }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to add category");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to add category"));
       setNewCategoryName("");
       setNewCategoryCode("");
       await loadCategories();
@@ -239,7 +240,7 @@ export default function UserManagementPage() {
         body: JSON.stringify(form),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create user");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to create user"));
       setShowAdd(false);
       setForm({ full_name: "", email: "", password: "", role: "user", domain_id: "" });
       await loadUsers();
@@ -261,7 +262,7 @@ export default function UserManagementPage() {
         body: JSON.stringify(editForm),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update user");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to update user"));
       setEditUser(null);
       await loadUsers();
     } catch (err: any) {
@@ -301,7 +302,7 @@ export default function UserManagementPage() {
         body: JSON.stringify({ department_name, code: deptEditCode.trim().toUpperCase() }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update department");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to update department"));
       handleCancelEditDepartment();
       await loadDepartments();
     } catch (err: any) {
@@ -322,7 +323,7 @@ export default function UserManagementPage() {
         method: "DELETE",
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to delete department");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to delete department"));
 
       if (deptEditId === dept.department_id) {
         handleCancelEditDepartment();
@@ -350,7 +351,7 @@ export default function UserManagementPage() {
         body: JSON.stringify({ department_name, code: newDeptCode.trim().toUpperCase() || undefined }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to add department");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to add department"));
       setNewDeptName("");
       setNewDeptCode("");
       await loadDepartments();
@@ -392,7 +393,7 @@ export default function UserManagementPage() {
         body: JSON.stringify({ domain_name, room_name }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update COE domain");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to update COE domain"));
       handleCancelEditDomain();
       await loadDomains();
     } catch (err: any) {
@@ -413,7 +414,7 @@ export default function UserManagementPage() {
         method: "DELETE",
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to delete COE domain");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to delete COE domain"));
 
       if (domainEditId === domain.domain_id) {
         handleCancelEditDomain();
@@ -442,7 +443,7 @@ export default function UserManagementPage() {
         body: JSON.stringify({ domain_name, room_name }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to add COE domain");
+      if (!res.ok) throw new Error(extractErrorMessage(data, "Failed to add COE domain"));
       setNewDomainName("");
       setNewRoomName("");
       await loadDomains();

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { purchase_invoice, purchase_invoice_item, stocks, users, coe_domains } from "@/db/schema";
+import { purchase_invoice, purchase_invoice_item, invoice_documents, stocks, users, coe_domains } from "@/db/schema";
 import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
+import { classifyError } from "@/lib/api/classifyError";
 
 type NormalisedItem = {
   product_id: string | null;
@@ -68,7 +69,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ invoices });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Internal Server Error' }, { status: 500 });
+    console.error('[/api/invoices] error:', error);
+    return NextResponse.json({ error: classifyError(error) }, { status: 500 });
   }
 }
 
@@ -78,7 +80,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { invoice_number, supplier_name, received_date, items, total_amount: providedTotal } = body;
+    const { invoice_number, supplier_name, received_date, items, total_amount: providedTotal, invoice_file_url } = body;
 
     if (!invoice_number || !supplier_name || !received_date || !items || items.length === 0) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -123,6 +125,17 @@ export async function POST(request: NextRequest) {
         })),
       )
 
+      // The uploaded invoice PDF (already uploaded to Cloudinary client-side
+      // before this request — see UploadInvoiceModal's executeSubmit) — the
+      // source document, not just the parsed line items above.
+      if (typeof invoice_file_url === 'string' && invoice_file_url) {
+        await tx.insert(invoice_documents).values({
+          invoice_id: invoiceRow.invoice_id,
+          file_url: invoice_file_url,
+          uploaded_by_user_id: user.user_id,
+        })
+      }
+
       // Aggregated in memory (not per-item queries) so a multi-line invoice
       // costs one round trip here regardless of item count — with the DB on
       // Neon rather than same-host Postgres, each extra round trip is real,
@@ -159,6 +172,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ message: "Invoice created successfully", invoice });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Internal Server Error' }, { status: 500 });
+    console.error('[/api/invoices] error:', error);
+    return NextResponse.json({ error: classifyError(error) }, { status: 500 });
   }
 }

@@ -6,6 +6,8 @@ import ImageCropModal from '@/components/ImageCropModal'
 import BarcodeLabel from '@/components/BarcodeLabel'
 import { authFetch } from '@/contexts/UserContext'
 import { uploadFile } from '@/lib/uploadClient'
+import { useToast } from '@/components/ui/Toast'
+import { extractErrorMessage } from '@/lib/extractErrorMessage'
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from 'lucide-react'
 
 interface ProductDetail {
@@ -224,6 +226,7 @@ function EditModal({
   const [stockQuantity, setStockQuantity] = useState<number | ''>(product.stocks?.quantity ?? '')
   const [location, setLocation] = useState(product.stocks?.location ?? '')
   const [saving, setSaving] = useState(false)
+  const { showToast } = useToast()
 
   // Categories
   const [categories, setCategories] = useState<{category_id: string; category_name: string}[]>([])
@@ -233,7 +236,10 @@ function EditModal({
   const [addCatLoading, setAddCatLoading] = useState(false)
 
   useEffect(() => {
-    authFetch('/api/categories').then(r => r.ok ? r.json() : []).then(d => setCategories(Array.isArray(d) ? d : []))
+    authFetch('/api/categories')
+      .then(r => r.ok ? r.json() : [])
+      .then(d => setCategories(Array.isArray(d) ? d : []))
+      .catch((err) => console.error('Failed to fetch categories:', err))
   }, [])
 
   const handleCreateCat = async () => {
@@ -252,8 +258,15 @@ function EditModal({
         setNewCatName('')
         setNewCatCode('')
         setShowAddCatModal(false)
+      } else {
+        const body = await res.json().catch(() => ({}))
+        console.error('Failed to create category:', body)
+        showToast(extractErrorMessage(body, "Couldn't create the category. Please try again."), 'error')
       }
-    } catch { /* ignore */ } finally {
+    } catch (err) {
+      console.error('Failed to create category:', err)
+      showToast("Couldn't create the category. Please check your connection and try again.", 'error')
+    } finally {
       setAddCatLoading(false)
     }
   }
@@ -290,7 +303,10 @@ function EditModal({
           ...(image_url !== undefined ? { image_url } : {}),
         }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(extractErrorMessage(body, 'Failed to update product'))
+      }
       const updated = await res.json()
       const originalStock = product.stocks?.quantity ?? 0
       const originalLocation = product.stocks?.location ?? ''
@@ -298,11 +314,18 @@ function EditModal({
       if (stockQuantity !== '' && Number(stockQuantity) !== originalStock) stockPatch.newStock = Number(stockQuantity)
       if (location.trim() !== originalLocation) stockPatch.location = location.trim() || null
       if (Object.keys(stockPatch).length > 0) {
-        await authFetch(`/api/products/${product.product_id}/update-stock`, {
+        const stockRes = await authFetch(`/api/products/${product.product_id}/update-stock`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(stockPatch),
         })
+        if (!stockRes.ok) {
+          // The product's own name/description/etc. already saved above —
+          // only the stock/location half failed, so this warns rather than
+          // throwing (which would misleadingly suggest nothing was saved).
+          console.error('Failed to update stock/location:', stockRes.status)
+          showToast('Product details saved, but the stock/location change failed. Please try again.', 'warning')
+        }
       }
       // Include category_name from categories array
       const selectedCategory = categories.find(c => c.category_id === (categoryId || updated.category_id))
@@ -318,6 +341,7 @@ function EditModal({
       })
     } catch (err) {
       console.error('Failed to update product:', err)
+      showToast(err instanceof Error ? err.message : 'Failed to update product', 'error')
     } finally {
       setSaving(false)
     }
@@ -474,6 +498,7 @@ function EditModal({
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
+  const { showToast } = useToast()
 
   const [product, setProduct] = useState<ProductDetail | null>(null)
   const [lendingSummary, setLendingSummary] = useState<LendingSummary>({ totalLent: 0, returned: 0 })
@@ -565,10 +590,14 @@ export default function ProductDetailPage() {
     setDeleting(true)
     try {
       const res = await authFetch(`/api/products/${id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(extractErrorMessage(body, 'Failed to delete product'))
+      }
       router.push('/products')
     } catch (err) {
       console.error('Delete failed:', err)
+      showToast(err instanceof Error ? err.message : 'Failed to delete product', 'error')
       setDeleting(false)
       setDeleteConfirm(false)
     }
@@ -650,9 +679,13 @@ export default function ProductDetailPage() {
       if (res.ok) {
         setSelectedImage(image_url)
         setProduct(prev => prev ? { ...prev, image_url } : prev)
+      } else {
+        console.error('Failed to save product image:', res.status)
+        showToast("Couldn't save the image. Please try again.", 'error')
       }
     } catch (err) {
       console.error('Error uploading product image:', err)
+      showToast("Couldn't upload the image. Please check your connection and try again.", 'error')
     }
   }
 

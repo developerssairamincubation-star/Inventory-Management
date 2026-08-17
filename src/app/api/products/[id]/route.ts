@@ -14,6 +14,7 @@ import {
 } from '@/db/schema'
 import { deleteImage, getPublicIdFromUrl } from '@/lib/cloudinary'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
+import { classifyError } from '@/lib/api/classifyError'
 
 export const dynamic = 'force-dynamic'
 
@@ -201,9 +202,9 @@ export async function GET(
     }
 
     return NextResponse.json({ product: enrichedProduct, lendingSummary, borrowingHistory })
-  } catch (err) {
-    console.error('Error fetching product detail:', err)
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal Server Error' }, { status: 500 })
+  } catch (error) {
+    console.error('[GET /api/products/[id]] error:', error)
+    return NextResponse.json({ error: classifyError(error) }, { status: 500 })
   }
 }
 
@@ -257,8 +258,9 @@ export async function PUT(
     }
 
     return NextResponse.json({ ...updated, image_url: returnedImageUrl })
-  } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal Server Error' }, { status: 500 })
+  } catch (error) {
+    console.error('[PUT /api/products/[id]] error:', error)
+    return NextResponse.json({ error: classifyError(error) }, { status: 500 })
   }
 }
 
@@ -313,7 +315,8 @@ export async function DELETE(
     }
 
     return NextResponse.json({ success: true })
-  } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal Server Error' }, { status: 500 })
+  } catch (error) {
+    console.error('[DELETE /api/products/[id]] error:', error)
+    return NextResponse.json({ error: classifyError(error) }, { status: 500 })
   }
 }

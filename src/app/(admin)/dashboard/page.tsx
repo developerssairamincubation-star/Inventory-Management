@@ -192,6 +192,19 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* A failed non-critical query (overdue/top-lent/analytics) otherwise
+          renders indistinguishably from "no data yet" — this makes the
+          difference visible instead of silently hiding it. */}
+      {(overdueQuery.isError || topLentQuery.isError || analyticsQuery.isError) && (
+        <div style={{ fontSize: 11, color: 'var(--danger)', padding: '8px 12px', border: '1px solid var(--danger)', background: '#fef2f2' }}>
+          Couldn&apos;t load: {[
+            overdueQuery.isError && 'overdue alerts',
+            topLentQuery.isError && 'top lent products',
+            analyticsQuery.isError && 'analytics charts',
+          ].filter(Boolean).join(', ')}. Try refreshing the page.
+        </div>
+      )}
+
       {/* ── Stat strip ── */}
       <div
         style={{

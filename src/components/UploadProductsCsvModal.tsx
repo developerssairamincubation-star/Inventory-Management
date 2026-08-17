@@ -120,9 +120,14 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
           return obj;
         }).filter(r => Object.values(r).some(v => v.trim() !== ""));
         setRows(dataRows);
-      } catch (err: any) {
-        setError(err?.message || "Failed to parse CSV");
+      } catch (err) {
+        console.error('[UploadProductsCsvModal] CSV parse failed:', err);
+        setError("Couldn't read this CSV file. Please check its format and try again.");
       }
+    };
+    reader.onerror = () => {
+      console.error('[UploadProductsCsvModal] file read failed:', reader.error);
+      setError("Couldn't read this file. Please try again.");
     };
     reader.readAsText(f);
   };
@@ -208,8 +213,9 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
       }
       onApply(items);
       onClose();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to apply CSV data');
+    } catch (err) {
+      console.error('[UploadProductsCsvModal] apply failed:', err);
+      setError('Failed to apply CSV data. Please check the file and try again.');
     } finally {
       setSaving(false);
     }

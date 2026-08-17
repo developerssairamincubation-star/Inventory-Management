@@ -71,7 +71,8 @@ export async function POST(
       newLostQuantity,
       orderStatus: newLentQuantity === 0 ? "LOST" : "PARTIALLY_LOST",
     });
-  } catch {
+  } catch (error) {
+    console.error('[POST /api/lending/[id]/lost] error:', error);
     return NextResponse.json({ error: "Failed to mark items as lost" }, { status: 500 });
   }
 }

@@ -29,6 +29,8 @@ export default function ImageCropModal({ imageSrc, onCrop, onClose, aspect = 1 }
   const imgRef = useRef<HTMLImageElement>(null)
   const [crop, setCrop] = useState<CropBox>({ x: 0, y: 0, width: 0, height: 0 })
   const [imgLoaded, setImgLoaded] = useState(false)
+  const [processing, setProcessing] = useState(false)
+  const [cropError, setCropError] = useState<string | null>(null)
 
   // Drag / resize interaction
   const [dragging, setDragging] = useState(false)
@@ -140,61 +142,77 @@ export default function ImageCropModal({ imageSrc, onCrop, onClose, aspect = 1 }
   const handleApplyCrop = async () => {
     const img = imgRef.current
     if (!img || !imgLoaded) return
-    const scaleX = img.naturalWidth / img.offsetWidth
-    const scaleY = img.naturalHeight / img.offsetHeight
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.round(crop.width * scaleX)
-    canvas.height = Math.round(crop.height * scaleY)
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    setProcessing(true)
+    setCropError(null)
+    try {
+      const scaleX = img.naturalWidth / img.offsetWidth
+      const scaleY = img.naturalHeight / img.offsetHeight
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(crop.width * scaleX)
+      canvas.height = Math.round(crop.height * scaleY)
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('Canvas is not supported in this browser.')
 
-    // Load a fresh copy of the image with crossOrigin to avoid tainted-canvas
-    // when imageSrc is a remote (S3) URL
-    const drawSource = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const fresh = new window.Image()
-      fresh.crossOrigin = 'anonymous'
-      fresh.onload = () => resolve(fresh)
-      fresh.onerror = () => {
-        // Fallback: try without crossOrigin (works for data: URLs)
-        const fallback = new window.Image()
-        fallback.onload = () => resolve(fallback)
-        fallback.onerror = reject
-        fallback.src = imageSrc
-      }
-      // Add cache-buster only for remote URLs so the browser re-fetches
-      // with CORS headers instead of serving a non-CORS cached response
-      const src = imageSrc.startsWith('data:')
-        ? imageSrc
-        : imageSrc + (imageSrc.includes('?') ? '&' : '?') + '_cb=' + Date.now()
-      fresh.src = src
-    })
+      // Load a fresh copy of the image with crossOrigin to avoid tainted-canvas
+      // when imageSrc is a remote (S3) URL
+      const drawSource = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const fresh = new window.Image()
+        fresh.crossOrigin = 'anonymous'
+        fresh.onload = () => resolve(fresh)
+        fresh.onerror = () => {
+          // Fallback: try without crossOrigin (works for data: URLs)
+          const fallback = new window.Image()
+          fallback.onload = () => resolve(fallback)
+          fallback.onerror = reject
+          fallback.src = imageSrc
+        }
+        // Add cache-buster only for remote URLs so the browser re-fetches
+        // with CORS headers instead of serving a non-CORS cached response
+        const src = imageSrc.startsWith('data:')
+          ? imageSrc
+          : imageSrc + (imageSrc.includes('?') ? '&' : '?') + '_cb=' + Date.now()
+        fresh.src = src
+      })
 
-    ctx.drawImage(
-      drawSource,
-      crop.x * scaleX,
-      crop.y * scaleY,
-      crop.width * scaleX,
-      crop.height * scaleY,
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    )
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
-    const res = await fetch(dataUrl)
-    const blob = await res.blob()
-    const file = new File([blob], 'cropped.jpg', { type: 'image/jpeg' })
-    onCrop(dataUrl, file)
+      ctx.drawImage(
+        drawSource,
+        crop.x * scaleX,
+        crop.y * scaleY,
+        crop.width * scaleX,
+        crop.height * scaleY,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      )
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+      const res = await fetch(dataUrl)
+      const blob = await res.blob()
+      const file = new File([blob], 'cropped.jpg', { type: 'image/jpeg' })
+      onCrop(dataUrl, file)
+    } catch (err) {
+      console.error('[ImageCropModal] crop failed:', err)
+      setCropError("Couldn't crop this image. Please try again, or use \"Use Original\" instead.")
+      setProcessing(false)
+    }
   }
 
   // Cropping is optional — the user can save the image exactly as selected,
   // no crop step required.
   const handleUseOriginal = async () => {
-    const res = await fetch(imageSrc)
-    const blob = await res.blob()
-    const ext = (blob.type.split('/')[1] || 'jpg').split('+')[0]
-    const file = new File([blob], `original.${ext}`, { type: blob.type || 'image/jpeg' })
-    onCrop(imageSrc, file)
+    setProcessing(true)
+    setCropError(null)
+    try {
+      const res = await fetch(imageSrc)
+      const blob = await res.blob()
+      const ext = (blob.type.split('/')[1] || 'jpg').split('+')[0]
+      const file = new File([blob], `original.${ext}`, { type: blob.type || 'image/jpeg' })
+      onCrop(imageSrc, file)
+    } catch (err) {
+      console.error('[ImageCropModal] use-original failed:', err)
+      setCropError("Couldn't load this image. Please try again.")
+      setProcessing(false)
+    }
   }
 
   return (
@@ -296,6 +314,9 @@ export default function ImageCropModal({ imageSrc, onCrop, onClose, aspect = 1 }
         </div>
 
         {/* Actions */}
+        {cropError && (
+          <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 12 }}>⚠ {cropError}</div>
+        )}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
           <button
             onClick={onClose}
@@ -305,18 +326,18 @@ export default function ImageCropModal({ imageSrc, onCrop, onClose, aspect = 1 }
           </button>
           <button
             onClick={handleUseOriginal}
-            disabled={!imgLoaded}
+            disabled={!imgLoaded || processing}
             title="Save the image exactly as selected, without cropping"
-            style={{ padding: '5px 16px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: imgLoaded ? 'pointer' : 'default', opacity: imgLoaded ? 1 : 0.5 }}
+            style={{ padding: '5px 16px', fontSize: 12, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: imgLoaded && !processing ? 'pointer' : 'default', opacity: imgLoaded && !processing ? 1 : 0.5 }}
           >
             Use Original
           </button>
           <button
             onClick={handleApplyCrop}
-            disabled={!imgLoaded}
-            style={{ padding: '5px 16px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: imgLoaded ? 'pointer' : 'default', opacity: imgLoaded ? 1 : 0.5 }}
+            disabled={!imgLoaded || processing}
+            style={{ padding: '5px 16px', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 'none', cursor: imgLoaded && !processing ? 'pointer' : 'default', opacity: imgLoaded && !processing ? 1 : 0.5 }}
           >
-            Apply Crop
+            {processing ? 'Processing…' : 'Apply Crop'}
           </button>
         </div>
       </div>

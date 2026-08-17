@@ -19,13 +19,12 @@ jobs:
       #
       # NOTE: this env var set changed with the Cloudinary object-storage
       # migration (MinIO is gone, replaced by a hosted Cloudinary account
-      # shared with local dev — see src/lib/cloudinary.ts). Before this
-      # workflow can succeed, the repo's GitHub Secrets need: POSTGRES_USER,
-      # POSTGRES_PASSWORD, POSTGRES_DB, CLOUDINARY_CLOUD_NAME,
-      # CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET, JWT_ACCESS_SECRET,
-      # JWT_REFRESH_PEPPER — plus whatever real SMTP credentials this
-      # environment should send password-reset email through (Mailpit is
-      # local-dev-only, not wired into this deploy target).
+      # shared with local dev — see src/lib/cloudinary.ts) and the removal of
+      # the password-reset-by-email feature (mailer.ts / Mailpit / SMTP_* are
+      # all gone). Before this workflow can succeed, the repo's GitHub
+      # Secrets need: POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB,
+      # CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET,
+      # JWT_ACCESS_SECRET, JWT_REFRESH_PEPPER.
       - name: Write .env file on Node 3
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -44,9 +43,6 @@ jobs:
             CLOUDINARY_UPLOAD_FOLDER=dit
             JWT_ACCESS_SECRET=${{ secrets.JWT_ACCESS_SECRET }}
             JWT_REFRESH_PEPPER=${{ secrets.JWT_REFRESH_PEPPER }}
-            SMTP_HOST=${{ secrets.SMTP_HOST }}
-            SMTP_PORT=${{ secrets.SMTP_PORT }}
-            SMTP_FROM=${{ secrets.SMTP_FROM }}
             EOF
 
       # Step 3: Securely copy all project files over your local switch to Node 3

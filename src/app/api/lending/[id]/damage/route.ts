@@ -72,7 +72,8 @@ export async function POST(
       newDamagedQuantity,
       orderStatus: newLentQuantity === 0 ? "DAMAGED" : "PARTIALLY_DAMAGED",
     });
-  } catch {
+  } catch (error) {
+    console.error('[POST /api/lending/[id]/damage] error:', error);
     return NextResponse.json({ error: "Failed to mark items as damaged" }, { status: 500 });
   }
 }

@@ -118,12 +118,15 @@ export default function ProductsPage() {
         setProducts(data || []);
       } else {
         console.error("Failed to fetch products", await res.text());
+        showToast("Couldn't load products. Please refresh and try again.", "error");
       }
     } catch (error) {
       console.error("Failed to fetch products", error);
+      showToast("Couldn't load products. Please check your connection and try again.", "error");
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -134,8 +137,12 @@ export default function ProductsPage() {
         if (res.ok) {
           const data = await res.json();
           if (mounted) setCategories(data || []);
+        } else {
+          console.error('Failed to fetch categories:', res.status);
         }
-      } catch { /* ignore */ }
+      } catch (error) {
+        console.error('Failed to fetch categories:', error);
+      }
     }
     fetchProducts();
     fetchCategories();
@@ -335,9 +342,13 @@ export default function ProductsPage() {
       if (res.ok) {
         const updated = await res.json();
         setProducts((prev) => prev.map((p) => (p.product_id || p.id) === productId ? { ...p, ...updated } : p));
+      } else {
+        console.error('Failed to save product image:', res.status);
+        showToast("Couldn't save the image. Please try again.", 'error');
       }
     } catch (err) {
       console.error('Error uploading product image:', err);
+      showToast("Couldn't upload the image. Please check your connection and try again.", 'error');
     }
   };
 

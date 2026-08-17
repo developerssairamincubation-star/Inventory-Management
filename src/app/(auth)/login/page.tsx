@@ -15,7 +15,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [pressed, setPressed] = useState(false); //added state for button press
   const [showPassword, setShowPassword] = useState(false);
-  const [sendingReset, setSendingReset] = useState(false);
   const emailRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -52,33 +51,6 @@ export default function LoginPage() {
       router.push("/dashboard");
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "Login failed. Please try again.", "error");
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail) {
-      showToast("Please enter your email first.", "error");
-      emailRef.current?.focus();
-      return;
-    }
-
-    setSendingReset(true);
-    try {
-      const res = await fetch("/api/auth/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmedEmail }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error?.message || "Failed to send reset email.");
-      }
-      showToast("Password reset email sent. Please check your inbox.", "success");
-    } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Failed to send reset email.", "error");
-    } finally {
-      setSendingReset(false);
     }
   };
 
@@ -153,17 +125,6 @@ export default function LoginPage() {
               tabIndex={-1}
             >
               {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          </div>
-
-          <div className="flex justify-end -mt-[38px] mb-[36px]">
-            <button
-              type="button"
-              onClick={handleForgotPassword}
-              disabled={sendingReset}
-              className="text-[13px] text-[#3759C1] hover:underline disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {sendingReset ? "Sending..." : "Forgot password?"}
             </button>
           </div>
 

@@ -12,17 +12,16 @@
   - Local PostgreSQL, schema versioned by Flyway (`db/migrations/`), accessed via Drizzle ORM (`src/db/schema/*.ts`, `src/db/client.ts`).
   - JWT (httpOnly cookies) for auth/session, bcrypt-hashed passwords (`src/lib/authMiddleware.ts`, `src/lib/jwt.ts`, `src/lib/passwords.ts`, `src/lib/sessions.ts`).
   - Cloudinary for asset storage via signed direct-to-Cloudinary uploads (`src/lib/cloudinary.ts`, `src/app/api/upload/presign/route.ts`) — one account shared by local dev and every hosted environment, scoped by `CLOUDINARY_UPLOAD_FOLDER`.
-  - Local Mailpit (SMTP) for password-reset email in dev (`src/lib/mailer.ts`).
+  - No self-service password reset — forgotten passwords are reset by a super_admin via Admin Settings.
 - **Routing**: `middleware.ts` does edge-level auth gating (redirects unauthenticated page requests before client JS runs); `ProtectedRoute` is a client-side backstop; admin pages under `(admin)`, dashboard pages under `/dashboard`, auth pages under `(auth)`.
 
 ## 3) Runtime Environments and Configuration
 - Node.js 20+ recommended (align with Next.js 16 and React 19).
-- Local dev infra: `docker compose up -d postgres flyway flyway-seed mailpit` (see `docker-compose.yml`, `db/README.md`), then `npm run dev`. Object storage is the real Cloudinary account (`CLOUDINARY_*` in `.env`), not a local container.
+- Local dev infra: `docker compose up -d postgres flyway flyway-seed` (see `docker-compose.yml`, `db/README.md`), then `npm run dev`. Object storage is the real Cloudinary account (`CLOUDINARY_*` in `.env`), not a local container.
 - Required environment variables (see `.env.example`):
   - Postgres: `DATABASE_URL`, `DATABASE_TEST_URL`, `POSTGRES_*`, `FLYWAY_*`.
   - Cloudinary: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `CLOUDINARY_UPLOAD_FOLDER`.
   - Auth: `JWT_ACCESS_SECRET`, `JWT_REFRESH_PEPPER`.
-  - Mail: `SMTP_HOST`, `SMTP_PORT`, optional `SMTP_FROM`.
 - Build: `npm run build`; start: `npm run start`.
 - Images: `next.config.ts` allows remote images from `res.cloudinary.com`.
 
@@ -45,7 +44,7 @@
 
 ## 6) Non-Functional Requirements
 - **Performance**: Dashboard/API endpoints should respond <500ms for typical queries; paginate long lists; debounce search in UI.
-- **Reliability**: Handle Postgres/Cloudinary/SMTP failures gracefully with user-facing errors and retries where safe (idempotent writes for stock updates); multi-table writes use real DB transactions (`db.transaction`) instead of manual rollback.
+- **Reliability**: Handle Postgres/Cloudinary failures gracefully with user-facing errors and retries where safe (idempotent writes for stock updates); multi-table writes use real DB transactions (`db.transaction`) instead of manual rollback.
 - **Availability**: Target 99.5% for admin UI.
 - **Usability**: Consistent layout; grid/list toggle for products; loading and saving states in UI.
 - **Maintainability**: Strict TypeScript enabled; keep API route logic thin and centralized in `src/lib/api/*` helpers where possible.
@@ -54,7 +53,6 @@
 - **PostgreSQL**: primary database; schema is Flyway-managed (`db/migrations/`), never hand-edited in the running DB.
 - **JWT auth**: bcrypt-hashed passwords, httpOnly-cookie tokens; server verifies signature+expiry (edge) and DB state (`is_active`, role) on every API request.
 - **Cloudinary**: asset storage via signed direct upload (credentials never sent to browser — only a per-upload signature).
-- **Mailpit/SMTP**: password-reset email delivery.
 
 ## 8) Deployment Considerations
 - Use production-only env file or secret store. Never bundle `JWT_ACCESS_SECRET`/`JWT_REFRESH_PEPPER`/DB or Cloudinary credentials into the client.
@@ -70,4 +68,4 @@
 ## 10) Risks and Open Items
 - Row-level ownership filtering is application-enforced only (no Postgres RLS) — every new route touching `products`/`lending_order`/`purchase_invoice` must remember the ownership filter.
 - Input validation not yet confirmed on all endpoints; add schema validation (e.g., zod) per route.
-- Local dev SMTP (Mailpit) is not wired for any real deployment target — a real SMTP provider must be configured before password-reset email works outside local dev.
+- No self-service password reset exists — an account with a forgotten password must be reset by a super_admin via Admin Settings.

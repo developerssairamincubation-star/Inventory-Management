@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSignedUpload } from '@/lib/cloudinary'
+import { classifyError } from '@/lib/api/classifyError'
 
 export const dynamic = 'force-dynamic'
 
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']
+// application/pdf: invoice source documents (src/components/UploadInvoiceModal.tsx)
+// — Cloudinary's image/upload endpoint accepts PDFs directly, no separate
+// resource type needed (see src/lib/cloudinary.ts's createSignedUpload).
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif', 'application/pdf']
 
 /**
  * POST /api/upload/presign
@@ -27,8 +31,8 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json(createSignedUpload(folder))
-  } catch (err) {
-    console.error('[/api/upload/presign] Error generating signed upload:', err)
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed to sign upload' }, { status: 500 })
+  } catch (error) {
+    console.error('[/api/upload/presign] Error generating signed upload:', error)
+    return NextResponse.json({ error: classifyError(error) }, { status: 500 })
   }
 }

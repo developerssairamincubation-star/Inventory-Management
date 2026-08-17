@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     const rows = await db.select().from(category).orderBy(asc(category.category_name))
     return ok(rows)
   } catch (error) {
-    console.warn('Category list warning:', error instanceof Error ? error.message : error)
+    console.error('[GET /api/categories] falling back to empty list:', error)
     return ok([])
   }
 }

@@ -39,8 +39,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Start Postgres, Mailpit
-        run: docker compose up -d postgres mailpit
+      - name: Start Postgres
+        run: docker compose up -d postgres
 
       - name: Wait for Postgres to be healthy
         run: |

@@ -1,6 +1,8 @@
-// Mirrors db/migrations/V7__billing_tables.sql (invoice_documents). Not yet
-// queried by any route (kept for parity with the original schema). Field
-// names are snake_case to match DB columns 1:1 — see departments.ts for why.
+// Mirrors db/migrations/V7__billing_tables.sql (invoice_documents). Stores
+// the uploaded invoice PDF's Cloudinary URL — written by POST /api/invoices,
+// read by GET /api/invoices/[id], cleaned up by DELETE /api/invoices/[id].
+// Field names are snake_case to match DB columns 1:1 — see departments.ts
+// for why.
 import { pgTable, uuid, text, timestamp } from "drizzle-orm/pg-core";
 import { purchase_invoice } from "./purchaseInvoice";
 import { users } from "./users";

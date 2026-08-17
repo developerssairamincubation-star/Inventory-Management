@@ -24,13 +24,22 @@ async function getUserFromAccessToken(token: string): Promise<AuthUser | null> {
   const claims = await verifyAccessToken(token)
   if (!claims) return null
 
-  const [row] = await db
-    .select({ user_id: users.user_id, email: users.email, full_name: users.full_name, role: users.role, is_active: users.is_active, domain_id: users.domain_id })
-    .from(users)
-    .where(eq(users.user_id, claims.sub))
+  try {
+    const [row] = await db
+      .select({ user_id: users.user_id, email: users.email, full_name: users.full_name, role: users.role, is_active: users.is_active, domain_id: users.domain_id })
+      .from(users)
+      .where(eq(users.user_id, claims.sub))
 
-  if (!row || !row.is_active) return null
-  return row as AuthUser
+    if (!row || !row.is_active) return null
+    return row as AuthUser
+  } catch (error) {
+    // getAuthUser() is called by nearly every route *before* that route's
+    // own try/catch — a DB failure here must never throw uncaught, or it'd
+    // bypass every route's error handling entirely. Treating it as "could
+    // not authenticate" (401) is safe; the real cause is still logged.
+    console.error('[getAuthUser] DB lookup failed:', error)
+    return null
+  }
 }
 
 function extractAccessToken(req: NextRequest): string | null {

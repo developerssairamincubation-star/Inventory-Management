@@ -3,6 +3,7 @@ import { and, eq, inArray, lt } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { lending_order, lending_item, products, students } from '@/db/schema'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
+import { classifyError } from '@/lib/api/classifyError'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,7 +66,8 @@ export async function GET(req: NextRequest) {
     })
 
     return NextResponse.json(overdueAlerts)
-  } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal Server Error' }, { status: 500 })
+  } catch (error) {
+    console.error('[GET /api/dashboard/overdue] error:', error)
+    return NextResponse.json({ error: classifyError(error) }, { status: 500 })
   }
 }

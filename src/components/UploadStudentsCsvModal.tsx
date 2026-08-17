@@ -3,6 +3,7 @@
 import { useState } from "react";
 import * as XLSX from "xlsx";
 import { authFetch } from "@/contexts/UserContext";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { decodeStudentIdCode, normalizeStudentIdCode } from "@/lib/studentIdCode";
 
 type DepartmentOption = { department_id: string; department_name: string; code: string | null };
@@ -121,8 +122,13 @@ export default function UploadStudentsCsvModal({ onClose, onDone, departments }:
           const grid = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, raw: false, defval: "" });
           processGrid(grid);
         } catch (err) {
-          setError(err instanceof Error ? err.message : "Failed to parse Excel file");
+          console.error('[UploadStudentsCsvModal] Excel parse failed:', err);
+          setError("Couldn't read this Excel file. Please check its format and try again.");
         }
+      };
+      reader.onerror = () => {
+        console.error('[UploadStudentsCsvModal] file read failed:', reader.error);
+        setError("Couldn't read this file. Please try again.");
       };
       reader.readAsArrayBuffer(f);
     } else {
@@ -132,8 +138,13 @@ export default function UploadStudentsCsvModal({ onClose, onDone, departments }:
           const grid = parseCSV(String(reader.result || ""));
           processGrid(grid);
         } catch (err) {
-          setError(err instanceof Error ? err.message : "Failed to parse CSV");
+          console.error('[UploadStudentsCsvModal] CSV parse failed:', err);
+          setError("Couldn't read this CSV file. Please check its format and try again.");
         }
+      };
+      reader.onerror = () => {
+        console.error('[UploadStudentsCsvModal] file read failed:', reader.error);
+        setError("Couldn't read this file. Please try again.");
       };
       reader.readAsText(f);
     }
@@ -209,7 +220,7 @@ export default function UploadStudentsCsvModal({ onClose, onDone, departments }:
           });
           const data = await res.json();
           if (!res.ok) {
-            failed.push({ row: i + 1, message: data.error || "Failed to create student" });
+            failed.push({ row: i + 1, message: extractErrorMessage(data, "Failed to create student") });
           } else {
             ok++;
           }

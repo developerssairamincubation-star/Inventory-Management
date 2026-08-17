@@ -21,7 +21,8 @@ export async function GET(
     }
 
     return NextResponse.json(row);
-  } catch {
+  } catch (error) {
+    console.error('[GET /api/stocks/[id]] error:', error);
     return NextResponse.json({ error: "Failed to fetch stock" }, { status: 500 });
   }
 }

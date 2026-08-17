@@ -32,15 +32,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(parsed);
   } catch (error) {
     if (error instanceof GeminiNotConfiguredError) {
-      return NextResponse.json({ error: error.message }, { status: 501 });
+      // error.message names the AI provider and its env var — useful in the
+      // server log, never in a client-visible response.
+      console.error("[parse-pdf] not configured:", error.message);
+      return NextResponse.json({ error: "Invoice scanning isn't available right now. Please enter the invoice details manually." }, { status: 501 });
     }
     if (error instanceof GeminiParseError) {
       console.error("[parse-pdf] Gemini parse error:", error);
-      return NextResponse.json({ error: "Could not parse invoice" }, { status: 502 });
+      return NextResponse.json({ error: "We couldn't read this invoice. Please check the file and try again, or enter the details manually." }, { status: 502 });
     }
+    // Any other failure (e.g. a raw error from the underlying AI SDK) is
+    // logged in full here and never forwarded to the client verbatim.
     console.error("[parse-pdf] error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to parse PDF" },
+      { error: "We couldn't read this invoice. Please check the file and try again, or enter the details manually." },
       { status: 500 }
     );
   }

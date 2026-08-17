@@ -9,8 +9,13 @@ import { POST } from "./route";
 
 describe("POST /api/upload/presign", () => {
   it("returns 400 for an unsupported mime type", async () => {
-    const res = await POST(new NextRequest("http://localhost/api/upload/presign", { method: "POST", body: JSON.stringify({ mimeType: "application/pdf" }) }));
+    const res = await POST(new NextRequest("http://localhost/api/upload/presign", { method: "POST", body: JSON.stringify({ mimeType: "video/mp4" }) }));
     expect(res.status).toBe(400);
+  });
+
+  it("allows application/pdf (invoice document uploads)", async () => {
+    const res = await POST(new NextRequest("http://localhost/api/upload/presign", { method: "POST", body: JSON.stringify({ mimeType: "application/pdf", folder: "invoices" }) }));
+    expect(res.status).toBe(200);
   });
 
   it("returns a signature matching independently-recomputed Cloudinary signing math", async () => {

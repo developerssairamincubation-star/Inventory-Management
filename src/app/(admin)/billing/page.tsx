@@ -46,6 +46,7 @@ type InvoiceDetail = {
   received_date: string;
   created_at: string;
   total_amount: number;
+  file_url: string | null;
   items: Array<{
     product_name: string;
     quantity: number;
@@ -91,9 +92,13 @@ export default function BillingPage() {
       if (res.ok) {
         const data = await res.json();
         setInvoices(data.invoices || []);
+      } else {
+        console.error("Failed to fetch invoices:", res.status);
+        showToast("Couldn't load invoices. Please refresh and try again.", "error");
       }
     } catch (error) {
       console.error("Error fetching invoices:", error);
+      showToast("Couldn't load invoices. Please check your connection and try again.", "error");
     } finally {
       setLoading(false);
     }
@@ -106,6 +111,8 @@ export default function BillingPage() {
         const data = await res.json();
         // API returns array directly, not wrapped in {products: [...]}
         setProducts(Array.isArray(data) ? data : []);
+      } else {
+        console.error("Failed to fetch products:", res.status);
       }
     } catch (error) {
       console.error("Error fetching products:", error);
@@ -357,61 +364,87 @@ export default function BillingPage() {
       {/* Preview Invoice Modal */}
       {isPreviewOpen && selectedInvoice && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', padding: 16 }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: 680, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: 1080, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Invoice — {selectedInvoice.invoice_number}</div>
               <button onClick={() => { setIsPreviewOpen(false); setSelectedInvoice(null); }} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>×</button>
             </div>
-            <div style={{ overflowY: 'auto', flex: 1, padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* Meta */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                {[
-                  { label: 'Invoice Number', value: selectedInvoice.invoice_number },
-                  { label: 'Supplier',       value: selectedInvoice.supplier_name },
-                  { label: 'Created',        value: formatDate(selectedInvoice.created_at) },
-                  { label: 'Delivered',      value: formatDate(selectedInvoice.received_date) },
-                ].map((m) => (
-                  <div key={m.label}>
-                    <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>{m.label}</div>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg)' }}>{m.value}</div>
+            <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              {/* Original document */}
+              <div style={{ width: '42%', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                {selectedInvoice.file_url ? (
+                  <>
+                    <object data={selectedInvoice.file_url} type="application/pdf" style={{ flex: 1, width: '100%', minHeight: 0 }}>
+                      <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>
+                        Cannot display PDF inline.{' '}
+                        <a href={selectedInvoice.file_url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>Open in new tab</a>
+                      </div>
+                    </object>
+                    <div style={{ padding: '8px 14px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+                      <a href={selectedInvoice.file_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--accent)' }}>Open original in new tab ↗</a>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, textAlign: 'center' }}>
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                      No invoice document attached.<br />This invoice predates the document-upload feature, or was created without a PDF.
+                    </div>
                   </div>
-                ))}
+                )}
               </div>
-              {/* Items table */}
-              <div style={{ border: '1px solid var(--border)', overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: 'var(--surface)' }}>
-                      <th style={th}>#</th>
-                      <th style={th}>Product</th>
-                      <th style={{ ...th, textAlign: 'right' }}>Qty</th>
-                      <th style={{ ...th, textAlign: 'right' }}>Unit Cost</th>
-                      <th style={{ ...th, textAlign: 'right' }}>Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedInvoice.items.map((item, idx) => (
-                      <tr key={idx}>
-                        <td style={td}>{idx + 1}</td>
-                        <td style={{ ...td, fontWeight: 500 }}>{item.product_name}</td>
-                        <td style={{ ...td, textAlign: 'right' }}>{item.quantity}</td>
-                        <td style={{ ...td, textAlign: 'right' }}>₹{item.unit_cost.toFixed(2)}</td>
-                        <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>₹{item.total_cost.toFixed(2)}</td>
+
+              {/* Parsed data */}
+              <div style={{ overflowY: 'auto', flex: 1, padding: 20, display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+                {/* Meta */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  {[
+                    { label: 'Invoice Number', value: selectedInvoice.invoice_number },
+                    { label: 'Supplier',       value: selectedInvoice.supplier_name },
+                    { label: 'Created',        value: formatDate(selectedInvoice.created_at) },
+                    { label: 'Delivered',      value: formatDate(selectedInvoice.received_date) },
+                  ].map((m) => (
+                    <div key={m.label}>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>{m.label}</div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg)' }}>{m.value}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Items table */}
+                <div style={{ border: '1px solid var(--border)', overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--surface)' }}>
+                        <th style={th}>#</th>
+                        <th style={th}>Product</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Qty</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Unit Cost</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Total</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {/* Total */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-                <span style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Amount</span>
-                <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--fg)' }}>₹{selectedInvoice.total_amount.toFixed(2)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button onClick={() => { setIsPreviewOpen(false); setSelectedInvoice(null); }}
-                  style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: 'var(--fg)', color: '#fff', border: 'none', cursor: 'pointer' }}>
-                  Close
-                </button>
+                    </thead>
+                    <tbody>
+                      {selectedInvoice.items.map((item, idx) => (
+                        <tr key={idx}>
+                          <td style={td}>{idx + 1}</td>
+                          <td style={{ ...td, fontWeight: 500 }}>{item.product_name}</td>
+                          <td style={{ ...td, textAlign: 'right' }}>{item.quantity}</td>
+                          <td style={{ ...td, textAlign: 'right' }}>₹{item.unit_cost.toFixed(2)}</td>
+                          <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>₹{item.total_cost.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {/* Total */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                  <span style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Amount</span>
+                  <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--fg)' }}>₹{selectedInvoice.total_amount.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button onClick={() => { setIsPreviewOpen(false); setSelectedInvoice(null); }}
+                    style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, background: 'var(--fg)', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
           </div>

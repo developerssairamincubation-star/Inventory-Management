@@ -3,7 +3,6 @@ export * from "./coeDomains";
 export * from "./departments";
 export * from "./users";
 export * from "./sessions";
-export * from "./passwordResetTokens";
 export * from "./students";
 export * from "./category";
 export * from "./products";

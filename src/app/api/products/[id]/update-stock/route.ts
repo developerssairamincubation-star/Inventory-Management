@@ -63,7 +63,8 @@ export async function PATCH(
       .where(eq(products.product_id, id))
 
     return NextResponse.json({ success: true, product: updatedProduct })
-  } catch {
+  } catch (error) {
+    console.error('[PATCH /api/products/[id]/update-stock] error:', error)
     return NextResponse.json({ error: 'Failed to update stock' }, { status: 500 })
   }
 }

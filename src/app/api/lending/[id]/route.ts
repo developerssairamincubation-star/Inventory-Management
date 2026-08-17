@@ -34,7 +34,8 @@ export async function DELETE(
     })
 
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (error) {
+    console.error('[DELETE /api/lending/[id]] error:', error);
     return NextResponse.json({ error: "Failed to delete lending record" }, { status: 500 });
   }
 }
@@ -119,7 +120,8 @@ export async function PUT(
     }
 
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (error) {
+    console.error('[PUT /api/lending/[id]] error:', error);
     return NextResponse.json({ error: "Failed to update lending record" }, { status: 500 });
   }
 }

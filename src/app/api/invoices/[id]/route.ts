@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { purchase_invoice, purchase_invoice_item, products, stocks } from "@/db/schema";
+import { purchase_invoice, purchase_invoice_item, invoice_documents, products, stocks } from "@/db/schema";
 import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
+import { deleteImage, getPublicIdFromUrl } from "@/lib/cloudinary";
+import { classifyError } from "@/lib/api/classifyError";
 
 export async function GET(
   request: NextRequest,
@@ -36,6 +38,15 @@ export async function GET(
       .leftJoin(products, eq(products.product_id, purchase_invoice_item.product_id))
       .where(eq(purchase_invoice_item.invoice_id, invoiceId))
 
+    // Only one document is ever uploaded per invoice today (see
+    // UploadInvoiceModal), but the schema allows more — take the latest.
+    const [document] = await db
+      .select({ file_url: invoice_documents.file_url })
+      .from(invoice_documents)
+      .where(eq(invoice_documents.invoice_id, invoiceId))
+      .orderBy(desc(invoice_documents.created_at))
+      .limit(1)
+
     return NextResponse.json({
       invoice_id: invoice.invoice_id,
       invoice_number: invoice.invoice_number,
@@ -45,6 +56,7 @@ export async function GET(
       // numeric columns come back as strings from Drizzle over JSON — coerce
       // to match the frontend's `number` type (see src/app/api/invoices/route.ts).
       total_amount: Number(invoice.total_amount) || 0,
+      file_url: document?.file_url ?? null,
       items: items.map((item) => ({
         product_name: item.products?.product_name || item.product_name || "Unknown Product",
         quantity: item.quantity,
@@ -53,7 +65,8 @@ export async function GET(
       })),
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Internal Server Error' }, { status: 500 });
+    console.error('[/api/invoices/[id]] error:', error);
+    return NextResponse.json({ error: classifyError(error) }, { status: 500 });
   }
 }
 
@@ -76,6 +89,8 @@ export async function DELETE(
       return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     }
 
+    const documents = await db.select({ file_url: invoice_documents.file_url }).from(invoice_documents).where(eq(invoice_documents.invoice_id, invoiceId))
+
     await db.transaction(async (tx) => {
       const items = await tx.select({ product_id: purchase_invoice_item.product_id, quantity: purchase_invoice_item.quantity }).from(purchase_invoice_item).where(eq(purchase_invoice_item.invoice_id, invoiceId))
 
@@ -84,12 +99,27 @@ export async function DELETE(
         await tx.update(stocks).set({ quantity: sql`GREATEST(0, ${stocks.quantity} - ${item.quantity})` }).where(eq(stocks.product_id, item.product_id))
       }
 
+      // invoice_documents rows cascade automatically (ON DELETE CASCADE),
+      // but that only removes the DB row — the Cloudinary file itself needs
+      // an explicit delete below, same as product image cleanup.
       await tx.delete(purchase_invoice_item).where(eq(purchase_invoice_item.invoice_id, invoiceId))
       await tx.delete(purchase_invoice).where(eq(purchase_invoice.invoice_id, invoiceId))
     })
 
+    for (const doc of documents) {
+      const publicId = getPublicIdFromUrl(doc.file_url)
+      if (publicId) {
+        try {
+          await deleteImage(publicId)
+        } catch (err) {
+          console.error('Failed to delete invoice document from storage:', err)
+        }
+      }
+    }
+
     return NextResponse.json({ message: "Invoice deleted successfully" });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Internal Server Error' }, { status: 500 });
+    console.error('[/api/invoices/[id]] error:', error);
+    return NextResponse.json({ error: classifyError(error) }, { status: 500 });
   }
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { authFetch } from "@/contexts/UserContext";
+import { useToast } from "@/components/ui/Toast";
 import { usePagination } from "@/hooks/usePagination";
 import Pagination from "@/components/Pagination";
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
@@ -77,6 +78,7 @@ export default function ConsumablePage() {
   const [dateTo, setDateTo] = useState("");
   const [sortCol, setSortCol] = useState<SortCol>(null);
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const { showToast } = useToast();
 
   useEffect(() => {
     (async () => {
@@ -86,13 +88,18 @@ export default function ConsumablePage() {
           const data = await res.json();
           const all: ConsumableRecord[] = data.records || [];
           setRecords(all.filter((r) => r.item_type === "CONSUMABLE"));
+        } else {
+          console.error("Failed to fetch lending records:", res.status);
+          showToast("Couldn't load consumable records. Please refresh and try again.", "error");
         }
       } catch (error) {
         console.error("Error fetching lending records:", error);
+        showToast("Couldn't load consumable records. Please check your connection and try again.", "error");
       } finally {
         setLoading(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const uniqueDepartments = Array.from(
