@@ -25,10 +25,12 @@ type Product = {
   product_id: string;
   product_name: string;
   unit_cost: number;
+  stocks?: { quantity: number; location: string | null } | null;
 };
 
 type Invoice = {
   invoice_id: string;
+  invoice_code: string;
   invoice_number: string;
   supplier_name: string;
   received_date: string;
@@ -41,6 +43,7 @@ type Invoice = {
 
 type InvoiceDetail = {
   invoice_id: string;
+  invoice_code: string;
   invoice_number: string;
   supplier_name: string;
   received_date: string;
@@ -284,6 +287,7 @@ export default function BillingPage() {
           <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
             <tr style={{ background: 'var(--surface)' }}>
               <th style={th}>S.No</th>
+              <th style={th}>Invoice ID</th>
               <th onClick={() => handleSortB('invoice_number')} style={{ ...th, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Invoice No <SortIconB col="invoice_number" /></span></th>
               <th style={th}>Supplier</th>
               <th onClick={() => handleSortB('received_date')} style={{ ...th, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>Received Date <SortIconB col="received_date" /></span></th>
@@ -296,13 +300,13 @@ export default function BillingPage() {
           </thead>
           <tbody>
             {filteredInvoices.length === 0 ? (
-              <tr><td colSpan={isAdmin ? 9 : 7} style={{ ...td, textAlign: 'center', color: 'var(--muted)', padding: '24px 10px' }}>No invoices found</td></tr>
+              <tr><td colSpan={isAdmin ? 10 : 8} style={{ ...td, textAlign: 'center', color: 'var(--muted)', padding: '24px 10px' }}>No invoices found</td></tr>
             ) : (
               padRows.map((invoice, localIdx) => {
                 if (!invoice) {
                   return (
                     <tr key={`empty-${localIdx}`}>
-                      <td style={{ ...td, border: 'none' }} colSpan={isAdmin ? 9 : 7}>&nbsp;</td>
+                      <td style={{ ...td, border: 'none' }} colSpan={isAdmin ? 10 : 8}>&nbsp;</td>
                     </tr>
                   );
                 }
@@ -310,6 +314,7 @@ export default function BillingPage() {
                 return (
                   <tr key={invoice.invoice_id}>
                     <td style={{ ...td, color: 'var(--muted)' }}>{idx + 1}</td>
+                    <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>{invoice.invoice_code}</td>
                     <td style={{ ...td, fontWeight: 600 }}>{invoice.invoice_number}</td>
                     <td style={td}>{invoice.supplier_name}</td>
                     <td style={td}>{formatDate(invoice.received_date)}</td>
@@ -355,7 +360,7 @@ export default function BillingPage() {
       {/* Upload Invoice Modal */}
       {isUploadModalOpen && (
         <UploadInvoiceModal
-          existingProducts={products}
+          existingProducts={products.map((p) => ({ ...p, location: p.stocks?.location ?? null }))}
           onClose={() => setIsUploadModalOpen(false)}
           onSuccess={() => { fetchInvoices(); }}
         />
@@ -366,7 +371,7 @@ export default function BillingPage() {
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', padding: 16 }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: 1080, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Invoice — {selectedInvoice.invoice_number}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>Invoice — {selectedInvoice.invoice_code}</div>
               <button onClick={() => { setIsPreviewOpen(false); setSelectedInvoice(null); }} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--muted)', cursor: 'pointer' }}>×</button>
             </div>
             <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -398,6 +403,7 @@ export default function BillingPage() {
                 {/* Meta */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   {[
+                    { label: 'Invoice ID',     value: selectedInvoice.invoice_code },
                     { label: 'Invoice Number', value: selectedInvoice.invoice_number },
                     { label: 'Supplier',       value: selectedInvoice.supplier_name },
                     { label: 'Created',        value: formatDate(selectedInvoice.created_at) },

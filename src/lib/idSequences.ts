@@ -4,17 +4,17 @@
 // statement's duration, serializing concurrent callers — no separate
 // SELECT ... FOR UPDATE needed.
 //
-// Invoice numbers are NOT allocated here: the app only ever *previews* the
-// next invoice number (GET /api/invoices/next-number, a pure read with no
-// mutation) and lets the client submit whatever invoice_number it wants on
-// create — there's no DB uniqueness constraint on it either. Turning that
-// preview into a consuming allocation would change behavior, so
-// next-number/route.ts keeps its original plain-SELECT-and-compute logic.
+// invoice_number (the free-text, possibly-supplier-printed field) still
+// works the way described above: GET /api/invoices/next-number only ever
+// *previews* a suggestion, and the client can submit whatever it wants on
+// create, with no DB uniqueness constraint. invoice_code (added later,
+// V27) is a separate, always-server-generated field that *is* allocated
+// through this same atomic mechanism — see POST /api/invoices.
 import { sql, eq } from "drizzle-orm";
 import type { DbOrTx } from "@/db/client";
 import { id_sequences, products } from "@/db/schema";
 
-export type SequenceKey = "product_code";
+export type SequenceKey = "product_code" | "invoice_code";
 
 export async function allocateNextCode(db: DbOrTx, key: SequenceKey): Promise<string> {
   const [row] = await db

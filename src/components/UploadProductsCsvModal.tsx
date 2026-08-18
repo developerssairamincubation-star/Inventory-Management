@@ -109,8 +109,11 @@ export default function UploadProductsCsvModal({ onClose, onApply, categories }:
           else if (/(desc)/.test(n)) suggested[idx] = "description";
           else if (/(qty|quantity|stock)/.test(n)) suggested[idx] = "quantity";
           else if (/(cost|price|unit)/.test(n)) suggested[idx] = "cost";
-          else if (/(cat|category)/.test(n)) suggested[idx] = "category";
+          // Checked before the category pattern below: "location" contains
+          // "cat" as a substring (lo-CAT-ion), which the bare "cat" shorthand
+          // in that pattern would otherwise false-match first.
           else if (/(location|rack|shelf|bin)/.test(n)) suggested[idx] = "location";
+          else if (/(cat|category)/.test(n)) suggested[idx] = "category";
           else suggested[idx] = "ignore";
         });
         setMapping(suggested);

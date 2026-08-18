@@ -23,6 +23,7 @@ type ExistingProduct = {
   unit_cost: number;
   sku_code?: string;
   product_code?: string;
+  location?: string | null;
 };
 
 type ItemAction = "add_stock" | "new_product" | "invoice_only";
@@ -102,7 +103,10 @@ function createRow(base: Partial<ParsedProduct>, existingProducts: ExistingProdu
     description: "",
     imageFile: null,
     imagePreview: null,
-    location: "",
+    // Pre-fill from the matched product's current rack/location — a
+    // restock of a product that's already been racked shouldn't require
+    // retyping where it lives every time.
+    location: match?.location ?? "",
   };
 }
 
@@ -258,7 +262,13 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
       if (i !== idx) return r;
       if (action === "add_stock" && !r.linkedProductId) {
         const match = findMatch(r.product_name, existingProducts);
-        return { ...r, action, linkedProductId: match?.product_id ?? null, linkQuery: match ? "" : r.product_name };
+        return {
+          ...r,
+          action,
+          linkedProductId: match?.product_id ?? null,
+          linkQuery: match ? "" : r.product_name,
+          location: match?.location ?? r.location,
+        };
       }
       return { ...r, action };
     }));
@@ -600,7 +610,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
                                             <button
                                               key={p.product_id}
                                               type="button"
-                                              onClick={() => updateRow(idx, { linkedProductId: p.product_id, linkQuery: "" })}
+                                              onClick={() => updateRow(idx, { linkedProductId: p.product_id, linkQuery: "", location: p.location ?? row.location })}
                                               style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", fontSize: 11, background: "#fff", border: "none", borderBottom: "1px solid var(--border)", cursor: "pointer" }}
                                             >
                                               {p.product_name}

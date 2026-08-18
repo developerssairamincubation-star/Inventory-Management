@@ -49,6 +49,7 @@ export async function GET(
 
     return NextResponse.json({
       invoice_id: invoice.invoice_id,
+      invoice_code: invoice.invoice_code,
       invoice_number: invoice.invoice_number,
       supplier_name: invoice.supplier_name,
       received_date: invoice.received_date,

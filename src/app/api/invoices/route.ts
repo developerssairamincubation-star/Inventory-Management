@@ -4,6 +4,7 @@ import { db } from "@/db/client";
 import { purchase_invoice, purchase_invoice_item, invoice_documents, stocks, users, coe_domains } from "@/db/schema";
 import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 import { classifyError } from "@/lib/api/classifyError";
+import { allocateNextCode } from "@/lib/idSequences";
 
 type NormalisedItem = {
   product_id: string | null;
@@ -54,6 +55,7 @@ export async function GET(request: NextRequest) {
 
     const invoices = invoicesData.map((invoice) => ({
       invoice_id: invoice.invoice_id,
+      invoice_code: invoice.invoice_code,
       invoice_number: invoice.invoice_number,
       supplier_name: invoice.supplier_name,
       received_date: invoice.received_date,
@@ -109,9 +111,11 @@ export async function POST(request: NextRequest) {
       : computedTotal
 
     const invoice = await db.transaction(async (tx) => {
+      const invoice_code = await allocateNextCode(tx, 'invoice_code')
+
       const [invoiceRow] = await tx
         .insert(purchase_invoice)
-        .values({ invoice_number, supplier_name, received_date, total_amount: String(total_amount), user_id: user.user_id })
+        .values({ invoice_code, invoice_number, supplier_name, received_date, total_amount: String(total_amount), user_id: user.user_id })
         .returning()
 
       await tx.insert(purchase_invoice_item).values(
