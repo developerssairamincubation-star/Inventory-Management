@@ -39,6 +39,9 @@ yarn-error.log*
 .env*
 !.env.example
 
+# local AI/dev handoff notes — contains live credentials, never commit
+AI_SESSION_HANDOFF.md
+
 # vercel
 .vercel
 
