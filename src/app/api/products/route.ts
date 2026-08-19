@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
         category_name: category.category_name,
         stocks: { quantity: stocks.quantity, location: stocks.location },
         owner_name: users.full_name,
+        domain_id: coe_domains.domain_id,
         domain_name: coe_domains.domain_name,
       })
       .from(products)

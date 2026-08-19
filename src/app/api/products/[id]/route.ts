@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray, or } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import { db } from '@/db/client'
 import {
   products,
@@ -11,6 +12,9 @@ import {
   purchase_invoice_item,
   students,
   departments,
+  users,
+  coe_domains,
+  stock_transfers,
 } from '@/db/schema'
 import { deleteImage, getPublicIdFromUrl } from '@/lib/cloudinary'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
@@ -75,7 +79,48 @@ export async function GET(
       categoryName = catRow?.category_name ?? null
     }
 
-    const enrichedProduct = { ...product, image_url: image?.image_url ?? null, stocks: stockData, category_name: categoryName }
+    // Which COE domain this product currently belongs to — derived from its
+    // owner, same as every other domain-scoped view in this app. The
+    // Transfer modal uses this to exclude the product's own domain from the
+    // destination list.
+    let domainId: string | null = null
+    let domainName: string | null = null
+    if (product.user_id) {
+      const [ownerRow] = await db
+        .select({ domain_id: coe_domains.domain_id, domain_name: coe_domains.domain_name })
+        .from(users)
+        .leftJoin(coe_domains, eq(coe_domains.domain_id, users.domain_id))
+        .where(eq(users.user_id, product.user_id))
+      domainId = ownerRow?.domain_id ?? null
+      domainName = ownerRow?.domain_name ?? null
+    }
+
+    const enrichedProduct = { ...product, image_url: image?.image_url ?? null, stocks: stockData, category_name: categoryName, domain_id: domainId, domain_name: domainName }
+
+    // Transfer history: this product shows up as either side of a transfer
+    // — as the source (its own row, quantity decremented or ownership
+    // moved) or as the destination (a brand-new row created by a partial
+    // transfer into this domain). source/destination are the same table
+    // joined twice, hence the aliasing.
+    const sourceDomainAlias = alias(coe_domains, 'source_domain')
+    const destDomainAlias = alias(coe_domains, 'dest_domain')
+    const transferRows = await db
+      .select({
+        transfer_id: stock_transfers.transfer_id,
+        quantity: stock_transfers.quantity,
+        mode: stock_transfers.mode,
+        created_at: stock_transfers.created_at,
+        source_domain_name: sourceDomainAlias.domain_name,
+        destination_domain_name: destDomainAlias.domain_name,
+        transferred_by_name: users.full_name,
+      })
+      .from(stock_transfers)
+      .leftJoin(sourceDomainAlias, eq(sourceDomainAlias.domain_id, stock_transfers.source_domain_id))
+      .leftJoin(destDomainAlias, eq(destDomainAlias.domain_id, stock_transfers.destination_domain_id))
+      .leftJoin(users, eq(users.user_id, stock_transfers.transferred_by_user_id))
+      .where(or(eq(stock_transfers.source_product_id, id), eq(stock_transfers.destination_product_id, id)))
+      .orderBy(desc(stock_transfers.created_at))
+    const transferHistory = transferRows
 
     const lendingItems = await db
       .select({
@@ -201,7 +246,7 @@ export async function GET(
       }
     }
 
-    return NextResponse.json({ product: enrichedProduct, lendingSummary, borrowingHistory })
+    return NextResponse.json({ product: enrichedProduct, lendingSummary, borrowingHistory, transferHistory })
   } catch (error) {
     console.error('[GET /api/products/[id]] error:', error)
     return NextResponse.json({ error: classifyError(error) }, { status: 500 })

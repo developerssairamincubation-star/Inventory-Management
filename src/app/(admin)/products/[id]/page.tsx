@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import ImageCropModal from '@/components/ImageCropModal'
 import BarcodeLabel from '@/components/BarcodeLabel'
+import TransferStockModal from '@/components/TransferStockModal'
 import { authFetch } from '@/contexts/UserContext'
 import { uploadFile } from '@/lib/uploadClient'
 import { useToast } from '@/components/ui/Toast'
@@ -21,12 +22,24 @@ interface ProductDetail {
   created_at: string
   category_id: string | null
   category_name: string | null
+  domain_id: string | null
+  domain_name: string | null
   stocks: {
     quantity: number
     damaged_quantity: number
     lost_quantity: number
     location: string | null
   } | null
+}
+
+interface TransferRecord {
+  transfer_id: string
+  quantity: number
+  mode: 'full' | 'partial'
+  created_at: string
+  source_domain_name: string | null
+  destination_domain_name: string | null
+  transferred_by_name: string | null
 }
 
 interface LendingSummary {
@@ -503,6 +516,7 @@ export default function ProductDetailPage() {
   const [product, setProduct] = useState<ProductDetail | null>(null)
   const [lendingSummary, setLendingSummary] = useState<LendingSummary>({ totalLent: 0, returned: 0 })
   const [borrowingHistory, setBorrowingHistory] = useState<BorrowRecord[]>([])
+  const [transferHistory, setTransferHistory] = useState<TransferRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -511,6 +525,7 @@ export default function ProductDetailPage() {
   // UI state
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
+  const [transferOpen, setTransferOpen] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [printingBarcode, setPrintingBarcode] = useState(false)
@@ -563,6 +578,7 @@ export default function ProductDetailPage() {
       setProduct(data.product)
       setLendingSummary(data.lendingSummary)
       setBorrowingHistory(data.borrowingHistory || [])
+      setTransferHistory(data.transferHistory || [])
       setSelectedImage(data.product.image_url || null)
     } catch (err: any) {
       setError(err.message)
@@ -583,6 +599,27 @@ export default function ProductDetailPage() {
       console.error('Failed to fetch lending summary:', err)
     } finally {
       setSummaryLoading(false)
+    }
+  }
+
+  const handleTransferred = async () => {
+    setTransferOpen(false)
+    // A full transfer of a product a non-admin owns moves it out of their
+    // own visibility (products are scoped by owning user) — refetching then
+    // 404s, so send them back to the list instead of showing an error.
+    const res = await authFetch(`/api/products/${id}?period=${lendingPeriod}`)
+    if (res.status === 404) {
+      showToast('Stock transferred — this item now belongs to another domain.', 'success')
+      router.push('/products')
+      return
+    }
+    if (res.ok) {
+      const data = await res.json()
+      setProduct(data.product)
+      setLendingSummary(data.lendingSummary)
+      setBorrowingHistory(data.borrowingHistory || [])
+      setTransferHistory(data.transferHistory || [])
+      setSelectedImage(data.product.image_url || null)
     }
   }
 
@@ -717,6 +754,10 @@ export default function ProductDetailPage() {
             style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: 'pointer' }}>
             Edit Product
           </button>
+          <button onClick={() => setTransferOpen(true)} disabled={(product.stocks?.quantity ?? 0) <= 0}
+            style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, border: '1px solid var(--border)', background: '#fff', color: 'var(--fg)', cursor: (product.stocks?.quantity ?? 0) <= 0 ? 'not-allowed' : 'pointer', opacity: (product.stocks?.quantity ?? 0) <= 0 ? 0.5 : 1 }}>
+            Transfer
+          </button>
           <button onClick={() => setDeleteConfirm(true)}
             style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600, border: 'none', background: '#dc2626', color: '#fff', cursor: 'pointer' }}>
             Delete
@@ -831,6 +872,30 @@ export default function ProductDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Transfer History — only shown once this product has actually moved
+          between domains, so most products (never transferred) don't carry
+          an empty section. */}
+      {transferHistory.length > 0 && (
+        <div style={{ background: '#fff', border: '1px solid var(--border)' }}>
+          <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>
+            Transfer History
+          </div>
+          <div style={{ maxHeight: 160, overflowY: 'auto' }}>
+            {transferHistory.map((t) => (
+              <div key={t.transfer_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', borderBottom: '1px solid var(--border)', fontSize: 11 }}>
+                <div style={{ color: 'var(--fg)' }}>
+                  <strong>{t.quantity}</strong> unit(s): {t.source_domain_name ?? '—'} → {t.destination_domain_name ?? '—'}
+                  <span style={{ color: 'var(--muted)', marginLeft: 8 }}>({t.mode})</span>
+                </div>
+                <div style={{ color: 'var(--muted)', whiteSpace: 'nowrap', marginLeft: 12 }}>
+                  {formatDate(t.created_at)}{t.transferred_by_name ? ` · by ${t.transferred_by_name}` : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Borrowing History */}
       <div style={{ background: '#fff', border: '1px solid var(--border)', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -971,6 +1036,21 @@ export default function ProductDetailPage() {
             if (updated.image_url !== undefined) setSelectedImage(updated.image_url)
             setEditOpen(false)
           }}
+        />
+      )}
+
+      {/* Transfer Modal */}
+      {transferOpen && product && (
+        <TransferStockModal
+          product={{
+            product_id: product.product_id,
+            product_name: product.product_name,
+            quantity: product.stocks?.quantity ?? 0,
+            domain_id: product.domain_id,
+            domain_name: product.domain_name,
+          }}
+          onClose={() => setTransferOpen(false)}
+          onTransferred={handleTransferred}
         />
       )}
 

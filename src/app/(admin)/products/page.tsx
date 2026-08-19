@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ImageCropModal from "@/components/ImageCropModal";
 import UploadProductsCsvModal from "@/components/UploadProductsCsvModal";
+import TransferStockModal from "@/components/TransferStockModal";
 import Pagination from "@/components/Pagination";
 import { usePagination } from "@/hooks/usePagination";
 import { useToast } from "@/components/ui/Toast";
@@ -75,6 +76,10 @@ export default function ProductsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [transferProduct, setTransferProduct] = useState<{
+    product_id?: string; id?: string; product_name?: string; name?: string;
+    stocks?: { quantity?: number }; domain_id?: string | null; domain_name?: string | null;
+  } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [sortField, setSortField] = useState<'price' | 'stock' | ''>('');
@@ -419,6 +424,13 @@ export default function ProductsPage() {
             + Add
           </button>
           <button
+            onClick={(e) => { e.stopPropagation(); setTransferProduct(normalized); }}
+            disabled={currentStock <= 0}
+            style={{ flex: 1, padding: '7px 0', fontSize: 11, color: 'var(--fg)', background: 'none', border: 'none', borderRight: '1px solid var(--border)', cursor: currentStock <= 0 ? 'not-allowed' : 'pointer', fontWeight: 600, opacity: currentStock <= 0 ? 0.5 : 1 }}
+          >
+            Transfer
+          </button>
+          <button
             onClick={(e) => { e.stopPropagation(); handleDeleteProduct(normalized); }}
             disabled={deletingId === productId}
             style={{ flex: 1, padding: '7px 0', fontSize: 11, color: 'var(--danger, #dc2626)', background: 'none', border: 'none', cursor: deletingId === productId ? 'not-allowed' : 'pointer', opacity: deletingId === productId ? 0.6 : 1 }}
@@ -566,58 +578,12 @@ export default function ProductsPage() {
                   // what happened, which is what an uncaught throw here used
                   // to do (the whole loop would stop silently).
                   try {
-                    const matched = findExistingMatch(item.productName || "");
-                    const matchedId = matched?.product_id ?? matched?.id ?? null;
-
-                    // Update existing product if match found
-                    if (matchedId) {
-                      const updateBody: any = {};
-                      if (item.productName) updateBody.product_name = item.productName;
-                      if (item.description) updateBody.description = item.description;
-                      if (item.category_id) updateBody.category_id = item.category_id;
-
-                      if (Object.keys(updateBody).length > 0) {
-                        const updRes = await authFetch(`/api/products/${matchedId}`, {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify(updateBody),
-                        });
-                        if (updRes.ok) {
-                          const updated = await updRes.json();
-                          setProducts((p) => p.map((prod) => {
-                            const pid = prod.product_id || prod.id;
-                            return pid === matchedId ? { ...prod, ...updated } : prod;
-                          }));
-                        } else {
-                          const errData = await updRes.json().catch(() => null);
-                          throw new Error(errData?.error || `Failed to update "${item.productName}"`);
-                        }
-                      }
-
-                      const additionalStock = item.quantity === '' ? undefined : Number(item.quantity);
-                      const unitCost = item.cost === '' ? undefined : Number(item.cost);
-                      const itemLocation = item.location.trim() ? item.location.trim() : undefined;
-                      if (additionalStock !== undefined || unitCost !== undefined || itemLocation !== undefined) {
-                        const stockRes = await authFetch(`/api/products/${matchedId}/update-stock`, {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ additionalStock, unitCost, ...(itemLocation !== undefined ? { location: itemLocation } : {}) }),
-                        });
-                        if (stockRes.ok) {
-                          const result = await stockRes.json();
-                          setProducts((p) => p.map((prod) => {
-                            const pid = prod.product_id || prod.id;
-                            return pid === matchedId ? { ...prod, ...result.product } : prod;
-                          }));
-                        } else {
-                          const errData = await stockRes.json().catch(() => null);
-                          throw new Error(errData?.error || `Failed to update stock for "${item.productName}"`);
-                        }
-                      }
-                      succeededIds.push(item.id);
-                      continue;
-                    }
-
+                    // This form only ever creates new products — even if the
+                    // name matches an existing one (see the "Found in
+                    // inventory" hint below), it's just a heads-up, not a
+                    // merge. Restocking an existing product happens from
+                    // that product's own detail page or the Invoice upload
+                    // flow, not from here.
                     let image_url: string | undefined = undefined;
 
                     // Upload image if exists
@@ -1071,7 +1037,7 @@ export default function ProductsPage() {
                   {isAdmin && <th style={{ ...th, width: 130 }}>Owner</th>}
                   {isAdmin && <th style={{ ...th, width: 130 }}>Domain</th>}
                   <th onClick={() => handleProductSort('price')} style={{ ...th, width: 90, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>Price<ProductSortIcon field="price" /></span></th>
-                  <th style={{ ...th, width: 200 }}>Actions</th>
+                  <th style={{ ...th, width: 260 }}>Actions</th>
                 </tr>
               </thead>
               <tbody >
@@ -1148,6 +1114,13 @@ export default function ProductsPage() {
                       <td style={td}>
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button onClick={(e) => { e.stopPropagation(); handleAddClick(); }} style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600 }}>+ Add</button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setTransferProduct(normalized); }}
+                            disabled={stock <= 0}
+                            style={{ padding: '3px 10px', fontSize: 11, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--fg)', cursor: stock <= 0 ? 'not-allowed' : 'pointer', fontWeight: 600, opacity: stock <= 0 ? 0.5 : 1 }}
+                          >
+                            Transfer
+                          </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDeleteProduct(normalized); }}
                             disabled={deletingId === rowProductId}
@@ -1280,58 +1253,10 @@ export default function ProductsPage() {
                             setSaving(true);
                             
                             try {
-                              const matched = findExistingMatch(item.productName || "");
-                              const matchedId = matched?.product_id ?? matched?.id ?? null;
-                              if (matchedId) {
-                                const updateBody: any = {};
-                                if (item.productName) updateBody.product_name = item.productName;
-                                if (item.description) updateBody.description = item.description;
-                                if (item.category_id) updateBody.category_id = item.category_id;
-
-                                if (Object.keys(updateBody).length > 0) {
-                                  const updRes = await authFetch(`/api/products/${matchedId}`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify(updateBody),
-                                  });
-                                  if (updRes.ok) {
-                                    const updated = await updRes.json();
-                                    setProducts((p) => p.map((prod) => {
-                                      const pid = prod.product_id || prod.id;
-                                      return pid === matchedId ? { ...prod, ...updated } : prod;
-                                    }));
-                                  } else {
-                                    const errData = await updRes.json().catch(() => null);
-                                    throw new Error(errData?.error || `Failed to update "${item.productName}"`);
-                                  }
-                                }
-
-                                const additionalStock = item.quantity === '' ? undefined : Number(item.quantity);
-                                const unitCost = item.cost === '' ? undefined : Number(item.cost);
-                                const itemLocation = item.location.trim() ? item.location.trim() : undefined;
-                                if (additionalStock !== undefined || unitCost !== undefined || itemLocation !== undefined) {
-                                  const stockRes = await authFetch(`/api/products/${matchedId}/update-stock`, {
-                                    method: 'PATCH',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ additionalStock, unitCost, ...(itemLocation !== undefined ? { location: itemLocation } : {}) }),
-                                  });
-                                  if (stockRes.ok) {
-                                    const result = await stockRes.json();
-                                    setProducts((p) => p.map((prod) => {
-                                      const pid = prod.product_id || prod.id;
-                                      return pid === matchedId ? { ...prod, ...result.product } : prod;
-                                    }));
-                                  } else {
-                                    const errData = await stockRes.json().catch(() => null);
-                                    throw new Error(errData?.error || `Failed to update stock for "${item.productName}"`);
-                                  }
-                                }
-
-                                showToast(`"${item.productName}" saved`, 'success');
-                                removeInlineItem(item.id);
-                                return;
-                              }
-
+                              // This form only ever creates new products —
+                              // even if the name matches an existing one
+                              // (see the "Found in inventory" hint below),
+                              // it's just a heads-up, not a merge.
                               let image_url: string | undefined = undefined;
                               
                               if (item.imageFile) {
@@ -1464,6 +1389,19 @@ export default function ProductsPage() {
             />
           )}
         </div>
+      )}
+      {transferProduct && (transferProduct.product_id ?? transferProduct.id) && (
+        <TransferStockModal
+          product={{
+            product_id: (transferProduct.product_id ?? transferProduct.id) as string,
+            product_name: transferProduct.product_name || transferProduct.name || 'this product',
+            quantity: transferProduct.stocks?.quantity ?? 0,
+            domain_id: transferProduct.domain_id ?? null,
+            domain_name: transferProduct.domain_name ?? null,
+          }}
+          onClose={() => setTransferProduct(null)}
+          onTransferred={() => { setTransferProduct(null); fetchProducts(); }}
+        />
       )}
     </div>
   );

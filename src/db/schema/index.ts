@@ -14,5 +14,6 @@ export * from "./purchaseInvoice";
 export * from "./purchaseInvoiceItem";
 export * from "./invoiceDocuments";
 export * from "./notifications";
+export * from "./stockTransfers";
 export * from "./idSequences";
 export * from "./views";
