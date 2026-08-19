@@ -6,6 +6,7 @@ import { allocateNextCode, allocateNextSkuCode } from '@/lib/idSequences'
 import { suggestCategoryCode } from '@/lib/categoryCode'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 import { classifyError } from '@/lib/api/classifyError'
+import { reportError } from '@/lib/api/reportError'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,6 +58,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(rows)
   } catch (error) {
     console.error('[GET /api/products] error:', error)
+    reportError(error, { source: '[GET /api/products] error' })
     return NextResponse.json({ error: classifyError(error) }, { status: 500 })
   }
 }
@@ -130,6 +132,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ product: { ...result.product, image_url: image_url ?? null }, stock: result.stock }, { status: 201 })
   } catch (error) {
     console.error('[POST /api/products] error:', error)
+    reportError(error, { source: '[POST /api/products] error' })
     // A malformed request body (req.json() failing) is genuinely a client
     // error; anything past that point (DB failures inside the transaction,
     // etc.) is not — those get the correct 500 instead of being mislabeled.

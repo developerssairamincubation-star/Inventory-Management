@@ -7,6 +7,20 @@ import * as Sentry from "@sentry/nextjs";
 
 Sentry.init({
   dsn: "https://3d8bd1b17d2552d1417d0d69ec435c78@o4511939419308032.ingest.de.sentry.io/4511939455615056",
+  // Only report from deployed builds. `next dev` runs with
+  // NODE_ENV=development, so local errors stay in the terminal instead of
+  // polluting the production issue stream and burning event quota. The SDK
+  // still initialises when disabled — it just drops every event — so nothing
+  // else in the app needs to branch on this.
+  enabled: process.env.NODE_ENV === "production",
+  // Unlike the server and client SDKs — which already fall back to
+  // `vercel-<VERCEL_ENV>` then NODE_ENV on their own — the edge SDK resolves
+  // only `SENTRY_ENVIRONMENT`, so middleware events would otherwise arrive
+  // unlabelled and get lumped in with production. This mirrors the chain the
+  // other two runtimes apply automatically.
+  environment:
+    process.env.SENTRY_ENVIRONMENT ||
+    (process.env.VERCEL_ENV ? `vercel-${process.env.VERCEL_ENV}` : process.env.NODE_ENV),
 
   // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
   tracesSampleRate: 1,

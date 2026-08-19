@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { isApiError } from '@/lib/api/errors'
 import { classifyError } from '@/lib/api/classifyError'
+import { reportError } from '@/lib/api/reportError'
 
 export type ApiFailure = {
   success: false
@@ -43,6 +44,7 @@ export function fromError(error: unknown) {
   // one. Full detail (stack trace, driver error code) goes to the server
   // log, which is where a developer would actually look for it.
   console.error('[fromError] Unexpected error:', error)
+  reportError(error, { source: 'fromError' })
   return fail(500, 'INTERNAL_SERVER_ERROR', classifyError(error))
 }
 

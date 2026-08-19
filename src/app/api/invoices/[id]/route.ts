@@ -5,6 +5,7 @@ import { purchase_invoice, purchase_invoice_item, invoice_documents, products, s
 import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 import { deleteImage, getPublicIdFromUrl } from "@/lib/cloudinary";
 import { classifyError } from "@/lib/api/classifyError";
+import { reportError } from "@/lib/api/reportError";
 
 export async function GET(
   request: NextRequest,
@@ -67,6 +68,7 @@ export async function GET(
     });
   } catch (error) {
     console.error('[/api/invoices/[id]] error:', error);
+    reportError(error, { source: '[/api/invoices/[id]] error' });
     return NextResponse.json({ error: classifyError(error) }, { status: 500 });
   }
 }
@@ -114,6 +116,7 @@ export async function DELETE(
           await deleteImage(publicId)
         } catch (err) {
           console.error('Failed to delete invoice document from storage:', err)
+          reportError(err, { source: 'Failed to delete invoice document from storage' })
         }
       }
     }
@@ -121,6 +124,7 @@ export async function DELETE(
     return NextResponse.json({ message: "Invoice deleted successfully" });
   } catch (error) {
     console.error('[/api/invoices/[id]] error:', error);
+    reportError(error, { source: '[/api/invoices/[id]] error' });
     return NextResponse.json({ error: classifyError(error) }, { status: 500 });
   }
 }

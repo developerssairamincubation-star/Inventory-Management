@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSignedUpload } from '@/lib/cloudinary'
 import { classifyError } from '@/lib/api/classifyError'
+import { reportError } from '@/lib/api/reportError'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,6 +34,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(createSignedUpload(folder))
   } catch (error) {
     console.error('[/api/upload/presign] Error generating signed upload:', error)
+    reportError(error, { source: '[/api/upload/presign] Error generating signed upload' })
     return NextResponse.json({ error: classifyError(error) }, { status: 500 })
   }
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import * as Sentry from "@sentry/nextjs";
 import { useEffect } from "react";
 
 // Catches errors thrown anywhere below the root layout (page/component
@@ -8,8 +9,12 @@ import { useEffect } from "react";
 // already in the server log via Next.js's own error reporting for
 // server-side failures — this also logs client-side for browser devtools.
 export default function ErrorBoundary({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  // Errors caught by a boundary never reach window.onerror, so the Sentry
+  // client SDK can't pick them up on its own — they have to be reported here
+  // explicitly, or every page/component render crash goes unrecorded.
   useEffect(() => {
     console.error("[error boundary]", error);
+    Sentry.captureException(error);
   }, [error]);
 
   return (

@@ -4,6 +4,7 @@ import { db } from "@/db/client";
 import { purchase_invoice, purchase_invoice_item, invoice_documents, stocks, users, coe_domains } from "@/db/schema";
 import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 import { classifyError } from "@/lib/api/classifyError";
+import { reportError } from "@/lib/api/reportError";
 import { allocateNextCode } from "@/lib/idSequences";
 
 type NormalisedItem = {
@@ -72,6 +73,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ invoices });
   } catch (error) {
     console.error('[/api/invoices] error:', error);
+    reportError(error, { source: '[/api/invoices] error' });
     return NextResponse.json({ error: classifyError(error) }, { status: 500 });
   }
 }
@@ -177,6 +179,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: "Invoice created successfully", invoice });
   } catch (error) {
     console.error('[/api/invoices] error:', error);
+    reportError(error, { source: '[/api/invoices] error' });
     return NextResponse.json({ error: classifyError(error) }, { status: 500 });
   }
 }

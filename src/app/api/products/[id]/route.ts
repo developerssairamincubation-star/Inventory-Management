@@ -19,6 +19,7 @@ import {
 import { deleteImage, getPublicIdFromUrl } from '@/lib/cloudinary'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 import { classifyError } from '@/lib/api/classifyError'
+import { reportError } from '@/lib/api/reportError'
 
 export const dynamic = 'force-dynamic'
 
@@ -249,6 +250,7 @@ export async function GET(
     return NextResponse.json({ product: enrichedProduct, lendingSummary, borrowingHistory, transferHistory })
   } catch (error) {
     console.error('[GET /api/products/[id]] error:', error)
+    reportError(error, { source: '[GET /api/products/[id]] error' })
     return NextResponse.json({ error: classifyError(error) }, { status: 500 })
   }
 }
@@ -305,6 +307,7 @@ export async function PUT(
     return NextResponse.json({ ...updated, image_url: returnedImageUrl })
   } catch (error) {
     console.error('[PUT /api/products/[id]] error:', error)
+    reportError(error, { source: '[PUT /api/products/[id]] error' })
     return NextResponse.json({ error: classifyError(error) }, { status: 500 })
   }
 }
@@ -355,6 +358,7 @@ export async function DELETE(
           await deleteImage(publicId)
         } catch (err) {
           console.error('Failed to delete product image from storage:', err)
+          reportError(err, { source: 'Failed to delete product image from storage' })
         }
       }
     }
@@ -362,6 +366,7 @@ export async function DELETE(
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('[DELETE /api/products/[id]] error:', error)
+    reportError(error, { source: '[DELETE /api/products/[id]] error' })
     return NextResponse.json({ error: classifyError(error) }, { status: 500 })
   }
 }

@@ -4,6 +4,7 @@ import { db } from '@/db/client'
 import { lending_order, lending_item, products } from '@/db/schema'
 import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 import { classifyError } from '@/lib/api/classifyError'
+import { reportError } from '@/lib/api/reportError'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,6 +74,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(sorted)
   } catch (error) {
     console.error('[GET /api/dashboard/top-lent] error:', error)
+    reportError(error, { source: '[GET /api/dashboard/top-lent] error' })
     return NextResponse.json({ error: classifyError(error) }, { status: 500 })
   }
 }
