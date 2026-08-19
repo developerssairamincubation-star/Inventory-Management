@@ -16,8 +16,12 @@ Sentry.init({
   // Add optional integrations for additional features
   integrations: [Sentry.replayIntegration()],
 
-  // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
-  tracesSampleRate: 1,
+  // Traces are performance records of every request, sampled independently of
+  // errors — errors are always sent at 100% regardless of this value. Sampling
+  // 10% is plenty to spot slow endpoints while leaving quota headroom, so a
+  // burst of routine traffic can't exhaust the plan and start dropping the
+  // error events that actually matter.
+  tracesSampleRate: 0.1,
   // Enable logs to be sent to Sentry
   enableLogs: true,
 
