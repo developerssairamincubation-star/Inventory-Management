@@ -4,15 +4,22 @@ import { eq, like } from "drizzle-orm";
 import { db } from "@/db/client";
 import { category, id_sequences } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
@@ -32,18 +39,18 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("GET /api/products/next-sku", () => {
   it("returns 401 when unauthenticated", async () => {
-    mockGetAuthUser.mockResolvedValue(null);
+    actingAs(null);
     const res = await GET(new NextRequest("http://localhost/api/products/next-sku"));
     expect(res.status).toBe(401);
   });
 
   it("previews GEN-0001 with no category and no existing sequence row", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     // Only safe to assert the prefix here — the uncategorized sequence is
     // shared across the whole test suite, so its current value is not
     // predictable in isolation.
@@ -54,7 +61,7 @@ describe("GET /api/products/next-sku", () => {
   });
 
   it("is a pure preview: calling it repeatedly does not change the value", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [cat] = await db.insert(category).values({ category_name: "QaNextSkuCategory Pure", code: "QNS" }).returning();
 
     const first = (await (await GET(new NextRequest(`http://localhost/api/products/next-sku?category_id=${cat.category_id}`))).json()) as { sku: string };
@@ -64,7 +71,7 @@ describe("GET /api/products/next-sku", () => {
   });
 
   it("previews the next value from an existing sequence row without consuming it", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [cat] = await db.insert(category).values({ category_name: "QaNextSkuCategory Existing", code: "QNE" }).returning();
     await db.insert(id_sequences).values({ sequence_key: `sku:${cat.category_id}`, current_value: 4, prefix: "QNE", pad_width: 4 });
 
@@ -80,7 +87,7 @@ describe("GET /api/products/next-sku", () => {
     // Two categories without a code must never both preview "GEN" — that
     // literal is reserved for genuinely uncategorized products, and two
     // categories sharing it would generate colliding SKUs (see suggestCategoryCode).
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [cat] = await db.insert(category).values({ category_name: "QaNextSkuCategory NoCode" }).returning();
 
     const res = await GET(new NextRequest(`http://localhost/api/products/next-sku?category_id=${cat.category_id}`));

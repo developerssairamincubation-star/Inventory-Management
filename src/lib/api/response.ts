@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { isApiError } from '@/lib/api/errors'
 import { classifyError } from '@/lib/api/classifyError'
 import { reportError } from '@/lib/api/reportError'
+import { logger } from '@/lib/logger'
 
 export type ApiFailure = {
   success: false
@@ -34,17 +35,27 @@ export function fail(status: number, code: string, message: string, details?: un
   )
 }
 
-export function fromError(error: unknown) {
+/** Context threaded from the route so a log line, a Sentry event, and the client's failed response share one id. */
+export type ErrorContext = {
+  requestId?: string | null
+  userId?: string | null
+  route?: string | null
+}
+
+export function fromError(error: unknown, context: ErrorContext = {}) {
   if (isApiError(error)) {
+    // Expected, deliberate failures (400s, 404s, auth rejections) are normal
+    // control flow — logged at debug, never reported as defects.
+    logger.debug('Request rejected', { ...context, code: error.code, status: error.status })
     return fail(error.status, error.code, error.message, error.details)
   }
 
-  // Unexpected errors (DB driver failures, third-party SDK errors, etc.)
-  // never forward their raw message to the client — only a safe, classified
-  // one. Full detail (stack trace, driver error code) goes to the server
-  // log, which is where a developer would actually look for it.
-  console.error('[fromError] Unexpected error:', error)
-  reportError(error, { source: 'fromError' })
+  // Unexpected errors (DB driver failures, third-party SDK errors) never
+  // forward their raw message to the client — only a safe, classified one.
+  // Full detail goes to the structured log and to Sentry, correlated by
+  // requestId.
+  logger.error('Unhandled route error', context, error)
+  reportError(error, context)
   return fail(500, 'INTERNAL_SERVER_ERROR', classifyError(error))
 }
 
@@ -54,4 +65,24 @@ export function badRequest(message: string, details?: unknown) {
 
 export function notFound(message: string, details?: unknown) {
   return fail(404, 'NOT_FOUND', message, details)
+}
+
+export function forbidden(message = 'You do not have permission to do that') {
+  return fail(403, 'FORBIDDEN', message)
+}
+
+export function conflict(message: string, details?: unknown) {
+  return fail(409, 'CONFLICT', message, details)
+}
+
+/**
+ * For a dependency we could not reach. Distinct from a 500 so the client can
+ * retry rather than treating it as a defect — and so a database outage never
+ * again surfaces as an empty list or a forced sign-out.
+ */
+export function serviceUnavailable(message = "We're having trouble reaching the database right now. Please try again shortly.") {
+  return NextResponse.json<ApiFailure>(
+    { success: false, error: { code: 'SERVICE_UNAVAILABLE', message } },
+    { status: 503, headers: { 'Retry-After': '5' } }
+  )
 }

@@ -8,7 +8,12 @@ import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import * as XLSX from "xlsx";
+// @e965/xlsx, not `xlsx`. SheetJS stopped publishing to npm, so the `xlsx`
+// package there is frozen at 0.18.5 with an unpatchable prototype-pollution
+// advisory and a ReDoS — and this parses operator-supplied spreadsheets.
+// @e965/xlsx is the maintained mirror of the same library; the API is
+// identical.
+import * as XLSX from "@e965/xlsx";
 import Pagination from "@/components/Pagination";
 import { usePagination } from "@/hooks/usePagination";
 import { groupByStudentAndDate, computeItemCounts } from "@/lib/groupLendingRecords";

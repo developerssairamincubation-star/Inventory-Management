@@ -4,15 +4,22 @@ import { like } from "drizzle-orm";
 import { db } from "@/db/client";
 import { category } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET, POST } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
@@ -31,18 +38,18 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("GET /api/categories", () => {
   it("returns 401 when unauthenticated", async () => {
-    mockGetAuthUser.mockResolvedValue(null);
+    actingAs(null);
     const res = await GET(new NextRequest("http://localhost/api/categories"));
     expect(res.status).toBe(401);
   });
 
   it("returns categories ordered by name", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser({ role: "super_admin" }));
     await db.insert(category).values({ category_name: "Test Category Z" });
     await db.insert(category).values({ category_name: "Test Category A" });
 
@@ -55,8 +62,12 @@ describe("GET /api/categories", () => {
 });
 
 describe("POST /api/categories", () => {
+  // Categories are global reference data whose `code` seeds SKU generation
+  // for every product in them, so writes are super_admin-only — matching
+  // departments and coe_domains. Any signed-in user could previously rename
+  // or re-code any category.
   it("returns 401 when unauthenticated", async () => {
-    mockGetAuthUser.mockResolvedValue(null);
+    actingAs(null);
     const res = await POST(
       new NextRequest("http://localhost/api/categories", { method: "POST", body: JSON.stringify({ category_name: "x" }) }),
     );
@@ -64,13 +75,13 @@ describe("POST /api/categories", () => {
   });
 
   it("returns 400 when category_name is missing", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser({ role: "super_admin" }));
     const res = await POST(new NextRequest("http://localhost/api/categories", { method: "POST", body: JSON.stringify({}) }));
     expect(res.status).toBe(400);
   });
 
   it("creates a category", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser({ role: "super_admin" }));
     const res = await POST(
       new NextRequest("http://localhost/api/categories", {
         method: "POST",
@@ -83,7 +94,7 @@ describe("POST /api/categories", () => {
   });
 
   it("auto-suggests a code from the category name when none is given", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser({ role: "super_admin" }));
     const res = await POST(
       new NextRequest("http://localhost/api/categories", {
         method: "POST",
@@ -96,7 +107,7 @@ describe("POST /api/categories", () => {
   });
 
   it("accepts and uppercases an explicit code", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser({ role: "super_admin" }));
     const res = await POST(
       new NextRequest("http://localhost/api/categories", {
         method: "POST",
@@ -109,7 +120,7 @@ describe("POST /api/categories", () => {
   });
 
   it("rejects a duplicate explicit code", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser({ role: "super_admin" }));
     await POST(
       new NextRequest("http://localhost/api/categories", {
         method: "POST",
@@ -123,5 +134,16 @@ describe("POST /api/categories", () => {
       }),
     );
     expect(res.status).toBe(409);
+  });
+
+  it("refuses a regular user", async () => {
+    actingAs(authedUser({ role: "user" }));
+    const res = await POST(
+      new NextRequest("http://localhost/api/categories", {
+        method: "POST",
+        body: JSON.stringify({ category_name: "Should Not Exist" }),
+      }),
+    );
+    expect(res.status).toBe(403);
   });
 });

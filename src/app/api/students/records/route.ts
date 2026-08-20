@@ -1,10 +1,11 @@
+import { requireUser, lendingScope } from '@/lib/authz'
+import { requestIdFrom } from '@/lib/logger'
 import { NextRequest } from "next/server";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { lending_order, lending_item, students, departments, products } from "@/db/schema";
 import { getPeriod, getStartDateByPeriod } from '@/lib/api/request'
 import { fromError, ok } from '@/lib/api/response'
-import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 
 type LendingItemRow = {
   lend_order_id: string
@@ -17,8 +18,9 @@ type LendingItemRow = {
 }
 
 export async function GET(request: NextRequest) {
-  const user = await getAuthUser(request)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(request)
+  if (!auth.ok) return auth.response
+  const { user, scope } = auth
 
   try {
     const period = getPeriod(request.nextUrl.searchParams)
@@ -34,10 +36,13 @@ export async function GET(request: NextRequest) {
         borrower_student_id: lending_order.borrower_student_id,
       })
       .from(lending_order)
+      // This was hard-coded to issued_by_user_id with no super_admin branch,
+      // unlike every other reporting endpoint — so a super_admin saw only
+      // their own records here and an empty page read as missing data.
       .where(
         and(
           eq(lending_order.borrower_type, 'STUDENT'),
-          eq(lending_order.issued_by_user_id, user.user_id),
+          lendingScope(scope),
           gte(lending_order.created_at, startDate),
         ),
       )
@@ -131,6 +136,6 @@ export async function GET(request: NextRequest) {
       stats: { totalBorrowed, returned: returnedStudents.size, pending: pendingStudents.size },
     })
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(request), userId: user.user_id, route: 'GET /api/students/records' })
   }
 }

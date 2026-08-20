@@ -4,13 +4,21 @@ import { db } from '@/db/client'
 import { coe_domains } from '@/db/schema'
 import { ApiError } from '@/lib/api/errors'
 import { created, fromError, ok } from '@/lib/api/response'
-import { forbiddenResponse, getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
+import { z } from 'zod'
+import { requireUser } from '@/lib/authz'
+import { parseBody } from '@/lib/validation'
+import { requestIdFrom } from '@/lib/logger'
+
+const domainSchema = z.object({
+  domain_name: z.string().trim().min(1).max(150),
+  room_name: z.string().trim().min(1).max(150),
+})
 
 // GET is open to any authenticated user — the lending page's domain/room
 // picker (for a super_admin issuing on behalf of a COE) needs this list too.
 export async function GET(req: NextRequest) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(req)
+  if (!auth.ok) return auth.response
 
   try {
     const rows = await db
@@ -20,23 +28,16 @@ export async function GET(req: NextRequest) {
 
     return ok(rows)
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(req), route: 'GET /api/coe-domains' })
   }
 }
 
 export async function POST(req: NextRequest) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
-  if (user.role !== 'super_admin') return forbiddenResponse()
+  const auth = await requireUser(req, { role: 'super_admin' })
+  if (!auth.ok) return auth.response
 
   try {
-    const body = await req.json()
-    const domain_name = (body?.domain_name ?? '').trim()
-    const room_name = (body?.room_name ?? '').trim()
-
-    if (!domain_name || !room_name) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'domain_name and room_name are required')
-    }
+    const { domain_name, room_name } = await parseBody(req, domainSchema)
 
     const [existing] = await db
       .select({ domain_id: coe_domains.domain_id })
@@ -51,6 +52,6 @@ export async function POST(req: NextRequest) {
 
     return created(row)
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(req), route: 'POST /api/coe-domains' })
   }
 }

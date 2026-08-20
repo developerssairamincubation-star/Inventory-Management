@@ -4,15 +4,22 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users, products, category, stocks, purchase_invoice, purchase_invoice_item } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET, DELETE } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 let OWNER_ID: string;
 let PRODUCT_ID: string;
 
@@ -46,7 +53,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
   await db.insert(stocks).values({ product_id: PRODUCT_ID, quantity: 10 }).onConflictDoUpdate({ target: stocks.product_id, set: { quantity: 10 } });
 });
 
@@ -61,13 +68,13 @@ afterAll(async () => {
 
 describe("GET /api/invoices/[id]", () => {
   it("returns 404 for an invoice owned by someone else", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await GET(new NextRequest("http://localhost/api/invoices/x"), { params: Promise.resolve({ id: "00000000-0000-0000-0000-000000000000" }) });
     expect(res.status).toBe(404);
   });
 
   it("returns the invoice with its items, falling back to product_name when unlinked", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const invoice = await makeInvoice(3);
 
     const res = await GET(new NextRequest(`http://localhost/api/invoices/${invoice.invoice_id}`), { params: Promise.resolve({ id: invoice.invoice_id }) });
@@ -80,7 +87,7 @@ describe("GET /api/invoices/[id]", () => {
 
 describe("DELETE /api/invoices/[id]", () => {
   it("deletes the invoice and restores stock", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const invoice = await makeInvoice(4);
 
     const res = await DELETE(new NextRequest(`http://localhost/api/invoices/${invoice.invoice_id}`, { method: "DELETE" }), {

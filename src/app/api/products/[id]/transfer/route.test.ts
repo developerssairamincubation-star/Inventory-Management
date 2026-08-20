@@ -4,15 +4,22 @@ import { eq, inArray, like } from "drizzle-orm";
 import { db } from "@/db/client";
 import { products, stocks, users, coe_domains, stock_transfers } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { POST } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 
 let SOURCE_USER_ID: string;
 let SOURCE_DOMAIN_ID: string;
@@ -72,12 +79,12 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("POST /api/products/[id]/transfer", () => {
   it("returns 401 when unauthenticated", async () => {
-    mockGetAuthUser.mockResolvedValue(null);
+    actingAs(null);
     const res = await POST(
       new NextRequest("http://localhost/api/products/x/transfer", { method: "POST", body: JSON.stringify({}) }),
       { params: Promise.resolve({ id: "x" }) },
@@ -86,7 +93,7 @@ describe("POST /api/products/[id]/transfer", () => {
   });
 
   it("full transfer (quantity == all available stock) reassigns the product to the destination domain's user", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Transfer Route Full", 8);
 
     const res = await POST(
@@ -112,7 +119,7 @@ describe("POST /api/products/[id]/transfer", () => {
   });
 
   it("partial transfer creates a new product for the destination domain and decrements the source", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Transfer Route Partial", 10);
 
     const res = await POST(
@@ -143,7 +150,7 @@ describe("POST /api/products/[id]/transfer", () => {
   });
 
   it("rejects transferring more than the available quantity", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Transfer Route OverQty", 5);
 
     const res = await POST(
@@ -154,7 +161,7 @@ describe("POST /api/products/[id]/transfer", () => {
   });
 
   it("rejects transferring to the product's own current domain", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Transfer Route SameDomain", 5);
 
     const res = await POST(
@@ -165,7 +172,7 @@ describe("POST /api/products/[id]/transfer", () => {
   });
 
   it("rejects a target domain with no active assigned user", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Transfer Route NoUser", 5);
 
     const res = await POST(
@@ -175,17 +182,28 @@ describe("POST /api/products/[id]/transfer", () => {
     expect(res.status).toBe(400);
   });
 
-  it("a regular user cannot transfer someone else's product, but a super_admin can", async () => {
+  it("scopes transfers to the COE: a colleague may, an outsider may not, a super_admin always may", async () => {
     const product = await makeProduct("Transfer Route OtherOwner", 5);
 
-    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "user" }));
+    // Someone in a *different* COE cannot see the product at all. This used
+    // to be asserted of any other user, back when scoping was per-creator;
+    // the boundary is the COE now, so the outsider is the real negative case.
+    actingAs(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "user", domain_id: EMPTY_DOMAIN_ID }));
     const deniedRes = await POST(
       new NextRequest(`http://localhost/api/products/${product.product_id}/transfer`, { method: "POST", body: JSON.stringify({ target_domain_id: DEST_DOMAIN_ID, quantity: 1 }) }),
       { params: Promise.resolve({ id: product.product_id }) },
     );
     expect(deniedRes.status).toBe(404);
 
-    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: ADMIN_USER_ID, role: "super_admin", domain_id: null }));
+    // A colleague in the same COE can — they staff the same room.
+    actingAs(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "user", domain_id: SOURCE_DOMAIN_ID }));
+    const colleagueRes = await POST(
+      new NextRequest(`http://localhost/api/products/${product.product_id}/transfer`, { method: "POST", body: JSON.stringify({ target_domain_id: DEST_DOMAIN_ID, quantity: 1 }) }),
+      { params: Promise.resolve({ id: product.product_id }) },
+    );
+    expect(colleagueRes.status).toBe(200);
+
+    actingAs(authedUser({ user_id: ADMIN_USER_ID, role: "super_admin", domain_id: null }));
     const adminRes = await POST(
       new NextRequest(`http://localhost/api/products/${product.product_id}/transfer`, { method: "POST", body: JSON.stringify({ target_domain_id: DEST_DOMAIN_ID, quantity: 1 }) }),
       { params: Promise.resolve({ id: product.product_id }) },

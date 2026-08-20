@@ -4,16 +4,23 @@ import { eq, inArray, like } from "drizzle-orm";
 import { db } from "@/db/client";
 import { products, stocks, category, users, lending_order, lending_item, students, departments } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 vi.mock("@/lib/cloudinary", () => ({ deleteImage: vi.fn(), getPublicIdFromUrl: vi.fn(() => null) }));
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET, PUT, DELETE } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 let OWNER_ID: string;
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
@@ -60,12 +67,12 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("GET /api/products/[id]", () => {
   it("returns 404 for a product owned by someone else", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await GET(new NextRequest("http://localhost/api/products/x"), {
       params: Promise.resolve({ id: "00000000-0000-0000-0000-000000000000" }),
     });
@@ -73,7 +80,7 @@ describe("GET /api/products/[id]", () => {
   });
 
   it("returns the product enriched with stocks/category_name and empty lending history", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [cat] = await db.insert(category).values({ category_name: "Products Id Category" }).returning();
     const product = await makeProduct("Products Id Widget", cat.category_id);
 
@@ -88,7 +95,7 @@ describe("GET /api/products/[id]", () => {
   });
 
   it("includes borrowing history joined with student/department/mentor names", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Products Id Borrowed");
     const [dept] = await db.insert(departments).values({ department_name: "Products Id Dept" }).returning();
     const [student] = await db.insert(students).values({ name: "Products Id Student", department_id: dept.department_id }).returning();
@@ -110,7 +117,7 @@ describe("GET /api/products/[id]", () => {
 
 describe("PUT /api/products/[id]", () => {
   it("partially updates a product and reports the current image_url", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Products Id Before Update");
 
     const res = await PUT(
@@ -126,7 +133,7 @@ describe("PUT /api/products/[id]", () => {
 
 describe("DELETE /api/products/[id]", () => {
   it("cascades: deletes lending_item/lending_order/stocks/product_image/products", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Products Id ToDelete");
 
     const res = await DELETE(new NextRequest(`http://localhost/api/products/${product.product_id}`, { method: "DELETE" }), {
@@ -139,16 +146,16 @@ describe("DELETE /api/products/[id]", () => {
   });
 
   it("a regular user cannot delete someone else's product, but a super_admin can", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Products Id Other Owners");
 
-    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "user" }));
+    actingAs(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "user" }));
     const deniedRes = await DELETE(new NextRequest(`http://localhost/api/products/${product.product_id}`, { method: "DELETE" }), {
       params: Promise.resolve({ id: product.product_id }),
     });
     expect(deniedRes.status).toBe(404);
 
-    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "11111111-1111-1111-1111-111111111111", role: "super_admin" }));
+    actingAs(authedUser({ user_id: "11111111-1111-1111-1111-111111111111", role: "super_admin" }));
     const adminRes = await DELETE(new NextRequest(`http://localhost/api/products/${product.product_id}`, { method: "DELETE" }), {
       params: Promise.resolve({ id: product.product_id }),
     });

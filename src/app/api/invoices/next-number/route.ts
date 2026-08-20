@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { purchase_invoice } from "@/db/schema";
-import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
+import { requireUser } from '@/lib/authz'
 
 export async function GET(request: NextRequest) {
-  const user = await getAuthUser(request)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(request)
+  if (!auth.ok) return auth.response
+  const { user } = auth
 
   try {
     // Invoice numbers are per-user sequences — this is a pure preview (no

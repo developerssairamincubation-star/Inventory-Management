@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
 const mockGenerateContent = vi.fn();
@@ -13,10 +13,17 @@ vi.mock("@google/genai", () => ({
   },
 }));
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { POST } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
@@ -32,7 +39,11 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
 
 function pdfFormData(): FormData {
   const form = new FormData();
-  const file = new File([new Uint8Array([1, 2, 3])], "invoice.pdf", { type: "application/pdf" });
+  // A real PDF header (%PDF-1.7). file.type is client-declared and trivially
+  // spoofed, so the route checks the actual leading bytes before spending a
+  // Gemini call on the upload — the old [1,2,3] fixture is now rejected, as
+  // any non-PDF should be.
+  const file = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a])], "invoice.pdf", { type: "application/pdf" });
   form.append("pdf", file);
   return form;
 }
@@ -40,7 +51,7 @@ function pdfFormData(): FormData {
 const ORIGINAL_KEY = process.env.GEMINI_API_KEY;
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
   mockGenerateContent.mockReset();
 });
 
@@ -51,26 +62,26 @@ afterEach(() => {
 
 describe("POST /api/invoices/parse-pdf", () => {
   it("returns 401 when unauthenticated", async () => {
-    mockGetAuthUser.mockResolvedValue(null);
+    actingAs(null);
     const res = await POST(new NextRequest("http://localhost/api/invoices/parse-pdf", { method: "POST", body: pdfFormData() }));
     expect(res.status).toBe(401);
   });
 
   it("returns 400 when no file is provided", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(new NextRequest("http://localhost/api/invoices/parse-pdf", { method: "POST", body: new FormData() }));
     expect(res.status).toBe(400);
   });
 
   it("returns 501 when GEMINI_API_KEY is unset", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     delete process.env.GEMINI_API_KEY;
     const res = await POST(new NextRequest("http://localhost/api/invoices/parse-pdf", { method: "POST", body: pdfFormData() }));
     expect(res.status).toBe(501);
   });
 
   it("returns 502 when Gemini returns malformed JSON", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     process.env.GEMINI_API_KEY = "test-key";
     mockGenerateContent.mockResolvedValue({ text: "not valid json" });
     const res = await POST(new NextRequest("http://localhost/api/invoices/parse-pdf", { method: "POST", body: pdfFormData() }));
@@ -78,7 +89,7 @@ describe("POST /api/invoices/parse-pdf", () => {
   });
 
   it("returns the parsed invoice on success", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     process.env.GEMINI_API_KEY = "test-key";
     const shape = {
       supplier_name: "Acme Supplies",

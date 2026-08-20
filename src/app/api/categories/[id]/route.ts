@@ -1,43 +1,45 @@
 import { NextRequest } from 'next/server'
 import { eq } from 'drizzle-orm'
+import { z } from 'zod'
 import { db } from '@/db/client'
 import { category } from '@/db/schema'
 import { ApiError } from '@/lib/api/errors'
 import { fromError, ok } from '@/lib/api/response'
-import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
+import { requireUser } from '@/lib/authz'
+import { parseBody, parseUuidParam } from '@/lib/validation'
+import { requestIdFrom } from '@/lib/logger'
 
 const CATEGORY_CODE_PATTERN = /^[A-Z]{2,4}$/
 
-// Lets categories created before the auto-SKU feature shipped (code is
-// nullable, see db/migrations/V17) get a code backfilled — used by the
-// Admin Settings Categories section as well as any inline edit flow.
+const updateCategorySchema = z
+  .object({
+    category_name: z.string().trim().min(1).max(200).optional(),
+    code: z.string().trim().toUpperCase().regex(CATEGORY_CODE_PATTERN, 'code must be 2-4 letters').optional(),
+  })
+  .refine((b) => b.category_name !== undefined || b.code !== undefined, { message: 'Nothing to update' })
+
+// super_admin only — see the note in ../route.ts. A category's code seeds SKU
+// generation for every product in it, across every COE.
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(req, { role: 'super_admin' })
+  if (!auth.ok) return auth.response
 
   try {
-    const { id } = await params
-    const body = await req.json()
+    const { id: rawId } = await params
+    const id = parseUuidParam(rawId)
+    const body = await parseBody(req, updateCategorySchema)
 
     const updateData: { category_name?: string; code?: string } = {}
-    if (body.category_name !== undefined) {
-      const category_name = String(body.category_name).trim()
-      if (!category_name) throw new ApiError(400, 'VALIDATION_ERROR', 'category_name cannot be empty')
-      updateData.category_name = category_name
-    }
+    if (body.category_name !== undefined) updateData.category_name = body.category_name
     if (body.code !== undefined) {
-      const code = String(body.code).trim().toUpperCase()
-      if (!CATEGORY_CODE_PATTERN.test(code)) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'code must be 2-4 letters')
-      }
-      const [existing] = await db.select({ category_id: category.category_id }).from(category).where(eq(category.code, code))
+      const [existing] = await db.select({ category_id: category.category_id }).from(category).where(eq(category.code, body.code))
       if (existing && existing.category_id !== id) {
         throw new ApiError(409, 'CONFLICT', 'A category with this code already exists')
       }
-      updateData.code = code
+      updateData.code = body.code
     }
 
     const [row] = await db.update(category).set(updateData).where(eq(category.category_id, id)).returning()
@@ -45,6 +47,6 @@ export async function PUT(
 
     return ok(row)
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(req), userId: auth.user.user_id, route: 'PUT /api/categories/[id]' })
   }
 }

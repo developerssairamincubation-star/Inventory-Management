@@ -4,15 +4,22 @@ import { eq, inArray, like } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users, category, products, students, departments, lending_order, lending_item } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 let OWNER_ID: string;
 let DEPT_ID: string;
 let BORROWER_ID: string;
@@ -51,19 +58,19 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("GET /api/dashboard/top-lent", () => {
   it("returns [] when the owner has no recent orders", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await GET(new NextRequest("http://localhost/api/dashboard/top-lent"));
     const body = (await res.json()) as unknown[];
     expect(body).toEqual([]);
   });
 
   it("aggregates original_quantity per product across orders, sorted descending", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [cat] = await db.insert(category).values({ category_name: "Dash Top Lent Category" }).returning();
     const [popular] = await db.insert(products).values({ product_name: "Dash Top Lent Popular", unit_cost: "1", category_id: cat.category_id }).returning();
     const [rare] = await db.insert(products).values({ product_name: "Dash Top Lent Rare", unit_cost: "1", category_id: cat.category_id }).returning();

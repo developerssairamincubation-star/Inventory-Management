@@ -4,15 +4,22 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { products, stocks, product_image, category, users } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET, POST } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 let OWNER_ID: string;
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
@@ -48,18 +55,18 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("GET /api/products", () => {
   it("returns 401 when unauthenticated", async () => {
-    mockGetAuthUser.mockResolvedValue(null);
+    actingAs(null);
     const res = await GET(new NextRequest("http://localhost/api/products"));
     expect(res.status).toBe(401);
   });
 
   it("only returns products owned by the authenticated user, with flattened image_url/category_name", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [cat] = await db.insert(category).values({ category_name: "Products Route Category" }).returning();
     const [product] = await db
       .insert(products)
@@ -80,14 +87,14 @@ describe("GET /api/products", () => {
   });
 
   it("a super_admin sees products from every user, with owner_name, and a regular user still only sees their own", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [product] = await db
       .insert(products)
       .values({ product_name: "Products Route Admin-Visible Widget", unit_cost: "3", user_id: OWNER_ID })
       .returning();
     await db.insert(stocks).values({ product_id: product.product_id, quantity: 2, location: "R2" });
 
-    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "super_admin" }));
+    actingAs(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "super_admin" }));
     const adminRes = await GET(new NextRequest("http://localhost/api/products"));
     const adminBody = (await adminRes.json()) as Array<{ product_name: string; owner_name: string | null; stocks: { location: string | null } }>;
     const seen = adminBody.find((p) => p.product_name === "Products Route Admin-Visible Widget");
@@ -95,7 +102,7 @@ describe("GET /api/products", () => {
     expect(seen?.owner_name).toBe("Products Owner");
     expect(seen?.stocks?.location).toBe("R2");
 
-    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "11111111-1111-1111-1111-111111111111", role: "user" }));
+    actingAs(authedUser({ user_id: "11111111-1111-1111-1111-111111111111", role: "user" }));
     const otherUserRes = await GET(new NextRequest("http://localhost/api/products"));
     const otherUserBody = (await otherUserRes.json()) as Array<{ product_name: string }>;
     expect(otherUserBody.find((p) => p.product_name === "Products Route Admin-Visible Widget")).toBeUndefined();
@@ -104,13 +111,13 @@ describe("GET /api/products", () => {
 
 describe("POST /api/products", () => {
   it("returns 400 when required fields are missing", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(new NextRequest("http://localhost/api/products", { method: "POST", body: JSON.stringify({}) }));
     expect(res.status).toBe(400);
   });
 
   it("creates a product+stock atomically with a sequential STIC product_code", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(
       new NextRequest("http://localhost/api/products", {
         method: "POST",
@@ -124,7 +131,7 @@ describe("POST /api/products", () => {
   });
 
   it("persists an optional location onto the created stock row", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(
       new NextRequest("http://localhost/api/products", {
         method: "POST",
@@ -141,7 +148,7 @@ describe("POST /api/products", () => {
     // fall back to the literal "GEN" — that's also the uncategorized-product
     // prefix, so two such categories would generate colliding SKUs for
     // different products (this happened before this fix).
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [catA] = await db.insert(category).values({ category_name: "Products Route NoCode Alpha" }).returning();
     const [catB] = await db.insert(category).values({ category_name: "Products Route NoCode Beta" }).returning();
 
@@ -170,7 +177,7 @@ describe("POST /api/products", () => {
   });
 
   it("never allocates the same product_code twice under concurrent creation", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const responses = await Promise.all(
       Array.from({ length: 5 }, (_, i) =>
         POST(

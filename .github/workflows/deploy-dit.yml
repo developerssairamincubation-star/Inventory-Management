@@ -6,7 +6,14 @@ on:
     branches: [ "development" ]
 
 jobs:
+  # A push to `development` used to deploy unconditionally — test.yml ran only
+  # on pull requests and this job declared no dependency on it, so a red suite
+  # did not stop a release. It does now.
+  test:
+    uses: ./.github/workflows/test.yml
+
   deploy:
+    needs: test
     # Tell GitHub to use the local runner sitting on Node 5
     runs-on: self-hosted
 
@@ -37,12 +44,28 @@ jobs:
             POSTGRES_DB=${{ secrets.POSTGRES_DB }}
             POSTGRES_USER=${{ secrets.POSTGRES_USER }}
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            # The app reads DATABASE_URL, not the POSTGRES_* triple — it was
+            # missing entirely, so every query on DIT ran against an undefined
+            # connection string.
+            DATABASE_URL=postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@postgres:5432/${{ secrets.POSTGRES_DB }}
+            FLYWAY_URL=jdbc:postgresql://postgres:5432/${{ secrets.POSTGRES_DB }}
+            FLYWAY_USER=${{ secrets.POSTGRES_USER }}
+            FLYWAY_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
             CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}
             CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}
             CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}
             CLOUDINARY_UPLOAD_FOLDER=dit
             JWT_ACCESS_SECRET=${{ secrets.JWT_ACCESS_SECRET }}
-            JWT_REFRESH_PEPPER=${{ secrets.JWT_REFRESH_PEPPER }}
+            # Invoice scanning returns a clear 501 when this is unset rather
+            # than failing at request time.
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            # Without an auth token no source maps are uploaded, so every DIT
+            # stack trace in Sentry points at minified bundle output.
+            SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
+            SENTRY_ENVIRONMENT=dit
+            # Shared rate-limit counters across instances. Optional: without
+            # it the limiter falls back to a per-process store.
+            REDIS_URL=${{ secrets.REDIS_URL }}
             EOF
 
       # Step 3: Securely copy all project files over your local switch to Node 3
@@ -64,5 +87,32 @@ jobs:
           username: ${{ secrets.DIT_SSH_USER }}
           key: ${{ secrets.DIT_SSH_KEY }}
           script: |
+            set -euo pipefail
             cd /opt/inventory-management-dit
+
+            # Verify the migration history before applying anything. `validate`
+            # fails on a checksum change or a missing migration, which is far
+            # cheaper to discover here than half-way through `migrate`.
+            docker compose run --rm flyway validate
+            docker compose run --rm flyway migrate
+
+            # Keep the previous image tagged so a bad release can be rolled
+            # back with `docker tag ... :rollback ... :current && compose up -d`
+            # instead of a rebuild from an older commit.
+            docker image tag inventory-management-app:current inventory-management-app:rollback || true
+
             docker compose -f docker-compose.yml up -d --build --remove-orphans
+
+            # Confirm the new container is actually serving before declaring
+            # success — the deploy used to end at `up -d`, which only means
+            # the container started, not that it works.
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:4000/api/health; then
+                echo "Deploy healthy"
+                exit 0
+              fi
+              sleep 5
+            done
+            echo "Health check never passed — investigate before trusting this deploy" >&2
+            docker compose logs --tail=100
+            exit 1

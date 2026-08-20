@@ -4,15 +4,22 @@ import { like } from "drizzle-orm";
 import { db } from "@/db/client";
 import { students, departments } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { PUT } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
@@ -32,12 +39,12 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("PUT /api/students/[id]", () => {
   it("returns 401 when unauthenticated", async () => {
-    mockGetAuthUser.mockResolvedValue(null);
+    actingAs(null);
     const res = await PUT(new NextRequest("http://localhost/api/students/x", { method: "PUT", body: "{}" }), {
       params: Promise.resolve({ id: "00000000-0000-0000-0000-000000000000" }),
     });
@@ -45,7 +52,7 @@ describe("PUT /api/students/[id]", () => {
   });
 
   it("updates only the provided fields and returns 404 for an unknown id", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await PUT(
       new NextRequest("http://localhost/api/students/x", { method: "PUT", body: JSON.stringify({ name: "y" }) }),
       { params: Promise.resolve({ id: "00000000-0000-0000-0000-000000000000" }) },
@@ -54,7 +61,7 @@ describe("PUT /api/students/[id]", () => {
   });
 
   it("partially updates a student", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentItem A" }).returning();
     const [student] = await db
       .insert(students)
@@ -75,7 +82,7 @@ describe("PUT /api/students/[id]", () => {
   });
 
   it("returns 400 for a malformed student_id_code", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentItem Malformed" }).returning();
     const [student] = await db
       .insert(students)
@@ -93,7 +100,7 @@ describe("PUT /api/students/[id]", () => {
   });
 
   it("resolves department_id from a decodable student_id_code", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentItem Decode", code: "ME" }).returning();
     const [otherDept] = await db.insert(departments).values({ department_name: "QaDeptForStudentItem DecodeOther" }).returning();
     const [student] = await db
@@ -115,7 +122,7 @@ describe("PUT /api/students/[id]", () => {
   });
 
   it("returns 409 when the student_id_code is already taken by another student", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentItem Conflict", code: "IT" }).returning();
     await db.insert(students).values({ name: "QaStudentItem ConflictTaken", department_id: dept.department_id, student_id_code: "sit20it222" });
     const [student] = await db

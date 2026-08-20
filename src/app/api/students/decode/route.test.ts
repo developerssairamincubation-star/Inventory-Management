@@ -4,15 +4,22 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { departments, students } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { POST } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 let DEPT_ID: string;
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
@@ -38,24 +45,24 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("POST /api/students/decode", () => {
   it("returns 401 when unauthenticated", async () => {
-    mockGetAuthUser.mockResolvedValue(null);
+    actingAs(null);
     const res = await POST(new NextRequest("http://localhost/api/students/decode", { method: "POST", body: JSON.stringify({ student_id_code: "sit24dr001" }) }));
     expect(res.status).toBe(401);
   });
 
   it("returns 400 for a malformed code", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(new NextRequest("http://localhost/api/students/decode", { method: "POST", body: JSON.stringify({ student_id_code: "bogus" }) }));
     expect(res.status).toBe(400);
   });
 
   it("decodes a valid code with a known department, existing:false for a new ID", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(new NextRequest("http://localhost/api/students/decode", { method: "POST", body: JSON.stringify({ student_id_code: "sit24dr001" }) }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { department_id: string; department_name: string; existing: boolean; college_name: string };
@@ -66,7 +73,7 @@ describe("POST /api/students/decode", () => {
   });
 
   it("decodes a valid code with an unknown department code, department_id null", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(new NextRequest("http://localhost/api/students/decode", { method: "POST", body: JSON.stringify({ student_id_code: "sit24zz001" }) }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { department_id: string | null };
@@ -74,7 +81,7 @@ describe("POST /api/students/decode", () => {
   });
 
   it("decodes a lateral-entry code (L after the college code) and reports is_lateral_entry", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(new NextRequest("http://localhost/api/students/decode", { method: "POST", body: JSON.stringify({ student_id_code: "sitl24dr001" }) }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { department_id: string; is_lateral_entry: boolean };
@@ -83,7 +90,7 @@ describe("POST /api/students/decode", () => {
   });
 
   it("reports existing:true and the stored name for a known student ID", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     await db.insert(students).values({ student_id_code: "sit24dr002", name: "Decode Route Student", department_id: DEPT_ID });
 
     const res = await POST(new NextRequest("http://localhost/api/students/decode", { method: "POST", body: JSON.stringify({ student_id_code: "sit24dr002" }) }));

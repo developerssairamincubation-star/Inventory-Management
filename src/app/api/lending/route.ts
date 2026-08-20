@@ -1,21 +1,32 @@
 import { NextRequest } from "next/server";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "@/db/client";
-import { lending_order, lending_item, students, departments, products, stocks, coe_domains } from "@/db/schema";
+import { lending_order, lending_item, students, departments, products, coe_domains } from "@/db/schema";
 import { getPeriod, getStartDateByPeriod } from '@/lib/api/request'
 import { ApiError } from '@/lib/api/errors'
 import { fromError, ok, created } from '@/lib/api/response'
-import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
+import { requireUser, lendingScope, productScope } from '@/lib/authz'
 import { decodeStudentIdCode, normalizeStudentIdCode } from '@/lib/studentIdCode'
+import { adjustStock, actorFrom } from '@/lib/stock'
+import { lendingItemType, positiveQuantity, pastOrPresentDate, isoDateOnly, uuid } from '@/lib/validation'
+import { parseBody } from '@/lib/validation'
+import { requestIdFrom } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
-  const user = await getAuthUser(request)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(request)
+  if (!auth.ok) return auth.response
+  const { scope } = auth
 
   try {
     const period = getPeriod(request.nextUrl.searchParams)
     const startDate = getStartDateByPeriod(period)
-    const isAdmin = user.role === 'super_admin'
+
+    // Scoped to the caller's COE domain (lending_order carries domain_id
+    // directly), or everything for a super_admin. This used to be scoped by
+    // issued_by_user_id, so two people staffing the same room could not see
+    // each other's loans.
+    const visible = lendingScope(scope)
 
     const lendingOrders = await db
       .select({
@@ -28,11 +39,7 @@ export async function GET(request: NextRequest) {
         domain_id: lending_order.domain_id,
       })
       .from(lending_order)
-      .where(
-        isAdmin
-          ? gte(lending_order.created_at, startDate)
-          : and(eq(lending_order.issued_by_user_id, user.user_id), gte(lending_order.created_at, startDate))
-      )
+      .where(visible ? and(visible, gte(lending_order.created_at, startDate)) : gte(lending_order.created_at, startDate))
       .orderBy(desc(lending_order.created_at))
 
     const orderIds = lendingOrders.map((o) => o.lending_order_id)
@@ -128,40 +135,44 @@ export async function GET(request: NextRequest) {
 
     return ok({ records, stats: { totalLent: uniqueProducts, totalQuantity, returned, pending } })
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(request), userId: auth.user.user_id, route: 'GET /api/lending' })
   }
 }
 
-type LendingItemInput = { product_id: string; quantity: number; item_type: 'RETURNABLE' | 'CONSUMABLE' }
+// Every field the client may set, with a real bound on each. `quantity` in
+// particular used to arrive completely unchecked and flow straight into
+// `Math.max(0, stock - quantity)` — a negative value turned that subtraction
+// into an addition, so posting quantity: -5000 added 5000 units to stock.
+const createLendingSchema = z.object({
+  lending_items: z
+    .array(
+      z.object({
+        product_id: uuid,
+        quantity: positiveQuantity,
+        item_type: lendingItemType,
+      }),
+    )
+    .min(1, 'At least one item is required')
+    .max(100, 'Too many items in one lending order'),
+  student_id_code: z.string().trim().min(1).max(20),
+  student_name: z.string().trim().max(200).optional(),
+  // Was `new Date(lending_date)` on raw input: an unparseable string became
+  // an Invalid Date that failed at insert as an opaque 500, and a valid one
+  // could backdate or post-date a record out of every reporting window.
+  lending_date: pastOrPresentDate.optional(),
+  due_date: isoDateOnly.optional(),
+  domain_id: uuid.optional(),
+})
 
 export async function POST(request: NextRequest) {
-  const user = await getAuthUser(request)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(request)
+  if (!auth.ok) return auth.response
+  const { user, scope } = auth
+  const actor = actorFrom(user, requestIdFrom(request))
 
   try {
-    const body = await request.json()
-    const {
-      lending_items,
-      student_id_code,
-      student_name,
-      lending_date,
-      due_date,
-      domain_id: bodyDomainId,
-    } = body as {
-      lending_items: LendingItemInput[]
-      student_id_code: string
-      student_name?: string
-      lending_date?: string
-      due_date?: string
-      domain_id?: string
-    }
-
-    if (!student_id_code || typeof student_id_code !== 'string') {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'student_id_code is required')
-    }
-    if (!Array.isArray(lending_items) || lending_items.length === 0) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'lending_items must be a non-empty array')
-    }
+    const body = await parseBody(request, createLendingSchema)
+    const { lending_items, student_id_code, student_name, lending_date, due_date } = body
 
     const decoded = decodeStudentIdCode(student_id_code)
     if (!decoded) {
@@ -169,13 +180,30 @@ export async function POST(request: NextRequest) {
     }
     const normalizedCode = normalizeStudentIdCode(student_id_code)
 
-    // Domain/room: auto from the issuing COE user, or the caller's explicit
-    // choice when the issuer has none (e.g. a super_admin issuing on behalf
-    // of a COE — see the lending form's admin domain picker).
-    const domainId = user.domain_id ?? bodyDomainId ?? null
+    // A user assigned to a COE always lends on behalf of that COE and cannot
+    // override it. Only a caller with no domain of their own (a super_admin
+    // issuing for a COE) may name one — previously any domainless user could
+    // attribute their lending to an arbitrary domain.
+    const domainId = user.domain_id ?? (user.role === 'super_admin' ? body.domain_id ?? null : null)
     if (!domainId) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'A domain/room must be specified')
     }
+
+    // Duplicate product lines would each deduct separately against a stale
+    // read. Collapse them up front so one product is one locked adjustment.
+    const mergedItems = new Map<string, { product_id: string; quantity: number; item_type: 'RETURNABLE' | 'CONSUMABLE' }>()
+    for (const item of lending_items) {
+      const existing = mergedItems.get(item.product_id)
+      if (existing) {
+        if (existing.item_type !== item.item_type) {
+          throw new ApiError(400, 'VALIDATION_ERROR', 'The same product cannot be both returnable and consumable in one order')
+        }
+        existing.quantity += item.quantity
+      } else {
+        mergedItems.set(item.product_id, { ...item })
+      }
+    }
+    const items = [...mergedItems.values()]
 
     const result = await db.transaction(async (tx) => {
       const [department] = await tx
@@ -213,27 +241,27 @@ export async function POST(request: NextRequest) {
         borrowerId = createdStudent.student_id
       }
 
-      // item_type (RETURNABLE/CONSUMABLE) is chosen per line item here at
-      // lending time — there's no per-product flag to validate it against
-      // (products.returnable/consumable were dropped in V24). Still confirm
-      // every product_id is real.
-      const productIds = lending_items.map((item) => item.product_id)
+      // Products must be inside the caller's scope, not merely exist. The old
+      // check confirmed only that each product_id was real, so a user in one
+      // COE could issue loans against another COE's inventory and decrement
+      // its stock.
+      const visibleProducts = productScope(scope)
+      const productIds = items.map((item) => item.product_id)
       const productRows = await tx
         .select({ product_id: products.product_id, product_name: products.product_name })
         .from(products)
-        .where(inArray(products.product_id, productIds))
+        .where(visibleProducts ? and(inArray(products.product_id, productIds), visibleProducts) : inArray(products.product_id, productIds))
       const productMap = new Map(productRows.map((p) => [p.product_id, p]))
 
-      for (const item of lending_items) {
+      for (const item of items) {
         if (!productMap.has(item.product_id)) {
-          throw new ApiError(400, 'VALIDATION_ERROR', `Unknown product_id: ${item.product_id}`)
+          throw new ApiError(404, 'NOT_FOUND', 'One or more products are not available in your inventory')
         }
       }
 
       // Order status: CONSUMABLE only if every item is consumable, else the
-      // normal PENDING lifecycle (mixed returnable+consumable orders are
-      // new territory — see MIGRATION notes on downstream aggregates).
-      const allConsumable = lending_items.every((item) => item.item_type === 'CONSUMABLE')
+      // normal PENDING lifecycle.
+      const allConsumable = items.every((item) => item.item_type === 'CONSUMABLE')
 
       const [order] = await tx
         .insert(lending_order)
@@ -248,7 +276,7 @@ export async function POST(request: NextRequest) {
         })
         .returning()
 
-      const itemsToInsert = lending_items.map((item) => ({
+      const itemsToInsert = items.map((item) => ({
         lend_order_id: order.lending_order_id,
         product_id: item.product_id,
         quantity: item.quantity,
@@ -259,20 +287,27 @@ export async function POST(request: NextRequest) {
         status: (item.item_type === 'CONSUMABLE' ? 'NON_RETURNABLE_GIVEN' : 'ISSUED') as 'NON_RETURNABLE_GIVEN' | 'ISSUED',
       }))
 
-      const items = await tx.insert(lending_item).values(itemsToInsert).returning()
+      const insertedItems = await tx.insert(lending_item).values(itemsToInsert).returning()
 
-      for (const item of lending_items) {
-        const [currentStock] = await tx.select({ quantity: stocks.quantity }).from(stocks).where(eq(stocks.product_id, item.product_id))
-        if (currentStock) {
-          await tx.update(stocks).set({ quantity: Math.max(0, (currentStock.quantity || 0) - item.quantity) }).where(eq(stocks.product_id, item.product_id))
-        }
+      // adjustStock locks each row, refuses to go below zero (rather than
+      // clamping and silently losing the discrepancy the way
+      // `Math.max(0, …)` did), and writes an audit entry.
+      for (const item of items) {
+        await adjustStock(tx, {
+          productId: item.product_id,
+          delta: -item.quantity,
+          reason: 'LEND_ISSUED',
+          actor,
+          referenceId: order.lending_order_id,
+          note: `Issued to ${normalizedCode}`,
+        })
       }
 
-      return { order, items }
+      return { order, items: insertedItems }
     })
 
     return created(result)
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(request), userId: user.user_id, route: 'POST /api/lending' })
   }
 }

@@ -4,19 +4,21 @@ import { db } from '@/db/client'
 import { departments } from '@/db/schema'
 import { ApiError } from '@/lib/api/errors'
 import { fromError, ok } from '@/lib/api/response'
-import { forbiddenResponse, getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
+import { requireUser } from '@/lib/authz'
+import { parseUuidParam } from '@/lib/validation'
+import { requestIdFrom } from '@/lib/logger'
 import { normalizeDepartmentCode } from '../route'
 
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
-  if (user.role !== 'super_admin') return forbiddenResponse()
+  const auth = await requireUser(req, { role: 'super_admin' })
+  if (!auth.ok) return auth.response
 
   try {
-    const { id } = await params
+    const { id: rawId } = await params
+    const id = parseUuidParam(rawId)
     const body = await req.json()
     const department_name = (body?.department_name ?? '').trim()
 
@@ -53,7 +55,7 @@ export async function PUT(
 
     return ok(row)
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(req), route: 'departments/[id]' })
   }
 }
 
@@ -61,12 +63,12 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
-  if (user.role !== 'super_admin') return forbiddenResponse()
+  const auth = await requireUser(req, { role: 'super_admin' })
+  if (!auth.ok) return auth.response
 
   try {
-    const { id } = await params
+    const { id: rawId } = await params
+    const id = parseUuidParam(rawId)
 
     const [row] = await db
       .delete(departments)
@@ -79,6 +81,6 @@ export async function DELETE(
 
     return ok({ success: true })
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(req), route: 'departments/[id]' })
   }
 }

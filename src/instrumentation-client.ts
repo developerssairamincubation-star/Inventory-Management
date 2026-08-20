@@ -14,7 +14,18 @@ Sentry.init({
   enabled: process.env.NODE_ENV === "production",
 
   // Add optional integrations for additional features
-  integrations: [Sentry.replayIntegration()],
+  // Session Replay records the DOM. Unmasked, an error on the students page
+  // uploaded a recording containing every student's name, email and phone
+  // number. maskAllText/blockAllMedia keep the interaction trace (what was
+  // clicked, in what order) while redacting the content itself, which is the
+  // part that actually helps debugging.
+  integrations: [
+    Sentry.replayIntegration({
+      maskAllText: true,
+      maskAllInputs: true,
+      blockAllMedia: true,
+    }),
+  ],
 
   // Traces are performance records of every request, sampled independently of
   // errors — errors are always sent at 100% regardless of this value. Sampling
@@ -33,11 +44,14 @@ Sentry.init({
   // Define how likely Replay events are sampled when an error occurs.
   replaysOnErrorSampleRate: 1.0,
 
+  // Student names, email addresses and phone numbers pass through this
+  // app, and both of these default to ON. userInfo attaches identifying
+  // request data to every event; httpBodies ships request payloads —
+  // including anything POSTed to /api/students — along with captured
+  // exceptions. Neither is worth sending to a third-party processor here.
   dataCollection: {
-    // To disable sending user data and HTTP bodies, uncomment the lines below. For more info visit:
-    // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#dataCollection
-    // userInfo: false,
-    // httpBodies: [],
+    userInfo: false,
+    httpBodies: [],
   },
 });
 

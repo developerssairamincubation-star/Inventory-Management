@@ -4,15 +4,22 @@ import { like, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users, coe_domains } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET, PUT } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
@@ -37,20 +44,20 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("GET /api/admin/users/[id]", () => {
   it("returns 404 for an unknown id", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
-    const res = await GET(new NextRequest("http://localhost/api/admin/users/x"), { params: Promise.resolve({ id: "00000000-0000-0000-0000-000000000000" }) });
+    actingAs(authedUser());
+    const res = await GET(new NextRequest("http://localhost/api/admin/users/x"), { params: Promise.resolve({ id: "dead0000-0000-4000-8000-000000000000" }) });
     expect(res.status).toBe(404);
   });
 });
 
 describe("PUT /api/admin/users/[id]", () => {
   it("partially updates full_name/is_active", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const target = await makeUser(`admin-users-id-${Date.now()}@example.com`);
 
     const res = await PUT(
@@ -64,7 +71,7 @@ describe("PUT /api/admin/users/[id]", () => {
   });
 
   it("assigns a COE domain, and rejects a domain_id that doesn't exist", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const target = await makeUser(`admin-users-id-domain-${Date.now()}@example.com`);
     const [domain] = await db.insert(coe_domains).values({ domain_name: "QaAdminUserIdDomain X", room_name: "QaAdminUserIdDomain Room X" }).returning();
 
@@ -84,7 +91,7 @@ describe("PUT /api/admin/users/[id]", () => {
   });
 
   it("refuses to demote the only super_admin", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const onlyAdmin = await makeUser(`admin-users-id-onlyadmin-${Date.now()}@example.com`, "super_admin");
 
     // The endpoint's "only super admin" check counts ALL super_admin rows

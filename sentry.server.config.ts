@@ -23,10 +23,13 @@ Sentry.init({
   // Enable logs to be sent to Sentry
   enableLogs: true,
 
+  // Student names, email addresses and phone numbers pass through this
+  // app, and both of these default to ON. userInfo attaches identifying
+  // request data to every event; httpBodies ships request payloads —
+  // including anything POSTed to /api/students — along with captured
+  // exceptions. Neither is worth sending to a third-party processor here.
   dataCollection: {
-    // To disable sending user data and HTTP bodies, uncomment the lines below. For more info visit:
-    // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#dataCollection
-    // userInfo: false,
-    // httpBodies: [],
+    userInfo: false,
+    httpBodies: [],
   },
 });

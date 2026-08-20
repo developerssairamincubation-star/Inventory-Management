@@ -1,10 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { requireUser, lendingScope } from '@/lib/authz'
+import { NextRequest } from 'next/server'
 import { and, eq, gte, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { lending_order, lending_item, products } from '@/db/schema'
-import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
-import { classifyError } from '@/lib/api/classifyError'
-import { reportError } from '@/lib/api/reportError'
+import { fromError, ok } from '@/lib/api/response'
+import { requestIdFrom } from '@/lib/logger'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,26 +21,22 @@ function getStartDate(period: string): Date {
 }
 
 export async function GET(req: NextRequest) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(req)
+  if (!auth.ok) return auth.response
+  const { user, scope } = auth
 
   try {
     const { searchParams } = new URL(req.url)
     const period = searchParams.get('period') || 'monthly'
     const startDate = getStartDate(period)
-    const isAdmin = user.role === 'super_admin'
 
     const orders = await db
       .select({ lending_order_id: lending_order.lending_order_id })
       .from(lending_order)
-      .where(
-        isAdmin
-          ? gte(lending_order.created_at, startDate)
-          : and(eq(lending_order.issued_by_user_id, user.user_id), gte(lending_order.created_at, startDate))
-      )
+      .where(and(lendingScope(scope), gte(lending_order.created_at, startDate)))
 
     const orderIds = orders.map((o) => o.lending_order_id)
-    if (orderIds.length === 0) return NextResponse.json([])
+    if (orderIds.length === 0) return ok([])
 
     const lendingItems = await db
       .select({
@@ -71,10 +67,8 @@ export async function GET(req: NextRequest) {
       .map(([product_id, data]) => ({ product_id, product_name: data.product_name, total_lent: data.total_lent }))
       .sort((a, b) => b.total_lent - a.total_lent)
 
-    return NextResponse.json(sorted)
+    return ok(sorted)
   } catch (error) {
-    console.error('[GET /api/dashboard/top-lent] error:', error)
-    reportError(error, { source: '[GET /api/dashboard/top-lent] error' })
-    return NextResponse.json({ error: classifyError(error) }, { status: 500 })
+    return fromError(error, { requestId: requestIdFrom(req), userId: user.user_id, route: 'GET /api/dashboard/top-lent' })
   }
 }

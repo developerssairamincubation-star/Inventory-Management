@@ -4,15 +4,22 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users, departments, products, category, stocks, students, lending_order, lending_item, coe_domains } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET, POST } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 let OWNER_ID: string;
 let DEPT_ID: string;
 let DOMAIN_ID: string;
@@ -32,17 +39,22 @@ function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
 }
 
 beforeAll(async () => {
-  const [owner] = await db.insert(users).values({ email: `lending-route-owner-${Date.now()}@example.com`, password_hash: "irrelevant", full_name: "Lending Owner" }).returning();
+  // The COE domain is the tenancy boundary, so the fixture has to model a
+  // real deployment: the domain exists, the owner belongs to it, and the
+  // products belong to the owner. Products used to be created with a null
+  // user_id, which no longer resolves to any domain and is now correctly
+  // invisible to everyone.
+  const [domain] = await db.insert(coe_domains).values({ domain_name: "Lending Route Domain", room_name: "Lending Route Room" }).returning();
+  DOMAIN_ID = domain.domain_id;
+  const [owner] = await db.insert(users).values({ email: `lending-route-owner-${Date.now()}@example.com`, password_hash: "irrelevant", full_name: "Lending Owner", domain_id: DOMAIN_ID }).returning();
   OWNER_ID = owner.user_id;
   const [dept] = await db.insert(departments).values({ department_name: "Lending Route Dept", code: "LR" }).returning();
   DEPT_ID = dept.department_id;
-  const [domain] = await db.insert(coe_domains).values({ domain_name: "Lending Route Domain", room_name: "Lending Route Room" }).returning();
-  DOMAIN_ID = domain.domain_id;
   const [cat] = await db.insert(category).values({ category_name: "Lending Route Category" }).returning();
-  const [product] = await db.insert(products).values({ product_name: "Lending Route Product", unit_cost: "1", category_id: cat.category_id }).returning();
+  const [product] = await db.insert(products).values({ product_name: "Lending Route Product", unit_cost: "1", category_id: cat.category_id, user_id: OWNER_ID }).returning();
   PRODUCT_ID = product.product_id;
   await db.insert(stocks).values({ product_id: PRODUCT_ID, quantity: 20 });
-  const [consumableProduct] = await db.insert(products).values({ product_name: "Lending Route Consumable", unit_cost: "1", category_id: cat.category_id }).returning();
+  const [consumableProduct] = await db.insert(products).values({ product_name: "Lending Route Consumable", unit_cost: "1", category_id: cat.category_id, user_id: OWNER_ID }).returning();
   CONSUMABLE_PRODUCT_ID = consumableProduct.product_id;
   await db.insert(stocks).values({ product_id: CONSUMABLE_PRODUCT_ID, quantity: 50 });
 });
@@ -62,23 +74,23 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("GET /api/lending", () => {
   it("returns 401 when unauthenticated", async () => {
-    mockGetAuthUser.mockResolvedValue(null);
+    actingAs(null);
     const res = await GET(new NextRequest("http://localhost/api/lending"));
     expect(res.status).toBe(401);
   });
 
-  it("super_admin sees lending records issued by every user, not just their own", async () => {
+  it("shows a COE's lending to everyone in that COE, hides it from other COEs, and shows everything to a super_admin", async () => {
     const [otherUser] = await db
       .insert(users)
       .values({ email: `lending-route-other-${Date.now()}@example.com`, password_hash: "irrelevant", full_name: "Other Issuer" })
       .returning();
 
-    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: otherUser.user_id }));
+    actingAs(authedUser({ user_id: otherUser.user_id }));
     const postRes = await POST(
       new NextRequest("http://localhost/api/lending", {
         method: "POST",
@@ -93,17 +105,34 @@ describe("GET /api/lending", () => {
     const { order } = (await postRes.json()) as { order: { lending_order_id: string } };
 
     try {
-      mockGetAuthUser.mockResolvedValue(authedUser({ role: "super_admin" }));
+      actingAs(authedUser({ role: "super_admin" }));
       const adminRes = await GET(new NextRequest("http://localhost/api/lending?period=yearly"));
       expect(adminRes.status).toBe(200);
       const adminBody = (await adminRes.json()) as { records: Array<{ id: string }> };
       expect(adminBody.records.some((r) => r.id === order.lending_order_id)).toBe(true);
 
-      // A regular user (not the one who issued this order) still shouldn't see it.
-      mockGetAuthUser.mockResolvedValue(authedUser());
-      const ownerRes = await GET(new NextRequest("http://localhost/api/lending?period=yearly"));
-      const ownerBody = (await ownerRes.json()) as { records: Array<{ id: string }> };
-      expect(ownerBody.records.some((r) => r.id === order.lending_order_id)).toBe(false);
+      // A colleague in the same COE sees it too. The COE is the tenancy
+      // boundary, so two people staffing the same room share its records —
+      // this assertion used to require the opposite, back when scoping was
+      // per-user and a colleague couldn't cover for you.
+      actingAs(authedUser());
+      const colleagueRes = await GET(new NextRequest("http://localhost/api/lending?period=yearly"));
+      const colleagueBody = (await colleagueRes.json()) as { records: Array<{ id: string }> };
+      expect(colleagueBody.records.some((r) => r.id === order.lending_order_id)).toBe(true);
+
+      // Someone in a different COE does not.
+      const [otherDomain] = await db
+        .insert(coe_domains)
+        .values({ domain_name: `Lending Other Domain ${Date.now()}`, room_name: `Lending Other Room ${Date.now()}` })
+        .returning();
+      try {
+        actingAs(authedUser({ domain_id: otherDomain.domain_id }));
+        const outsiderRes = await GET(new NextRequest("http://localhost/api/lending?period=yearly"));
+        const outsiderBody = (await outsiderRes.json()) as { records: Array<{ id: string }> };
+        expect(outsiderBody.records.some((r) => r.id === order.lending_order_id)).toBe(false);
+      } finally {
+        await db.delete(coe_domains).where(eq(coe_domains.domain_id, otherDomain.domain_id));
+      }
     } finally {
       await db.delete(lending_item).where(eq(lending_item.lend_order_id, order.lending_order_id));
       await db.delete(lending_order).where(eq(lending_order.lending_order_id, order.lending_order_id));
@@ -120,7 +149,7 @@ describe("GET /api/lending", () => {
 
 describe("POST /api/lending", () => {
   it("decodes the student ID, creates a new student, order, items, and decrements stock atomically", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
 
     const res = await POST(
       new NextRequest("http://localhost/api/lending", {
@@ -148,7 +177,7 @@ describe("POST /api/lending", () => {
   });
 
   it("reuses an existing borrower by student_id_code, only filling the name if it was blank", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [existing] = await db.insert(students).values({ student_id_code: "sit24lr002", name: "Original Name", department_id: DEPT_ID }).returning();
 
     await POST(
@@ -169,7 +198,7 @@ describe("POST /api/lending", () => {
   });
 
   it("fills a blank name on re-scan", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     await db.insert(students).values({ student_id_code: "sit24lr003", name: null, department_id: DEPT_ID });
 
     await POST(
@@ -188,7 +217,7 @@ describe("POST /api/lending", () => {
   });
 
   it("returns 400 for a malformed student ID", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(
       new NextRequest("http://localhost/api/lending", {
         method: "POST",
@@ -199,7 +228,7 @@ describe("POST /api/lending", () => {
   });
 
   it("returns 422 for a well-formed ID with an unknown department code", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(
       new NextRequest("http://localhost/api/lending", {
         method: "POST",
@@ -210,7 +239,7 @@ describe("POST /api/lending", () => {
   });
 
   it("marks the order CONSUMABLE only when every item is consumable", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(
       new NextRequest("http://localhost/api/lending", {
         method: "POST",
@@ -225,8 +254,12 @@ describe("POST /api/lending", () => {
     expect(body.order.status).toBe("CONSUMABLE");
   });
 
-  it("requires an explicit domain_id when the issuing user has none, and accepts it", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser({ domain_id: null }));
+  it("lets a super_admin name the domain to issue on behalf of, but never a regular user", async () => {
+    // A regular user with no COE of their own is an unconfigured account, not
+    // a wildcard. It used to be able to attribute its lending to any domain
+    // it named, which is exactly the privilege gap this closes — an admin has
+    // to assign it a domain first.
+    actingAs(authedUser({ domain_id: null }));
 
     const missing = await POST(
       new NextRequest("http://localhost/api/lending", {
@@ -236,6 +269,20 @@ describe("POST /api/lending", () => {
     );
     expect(missing.status).toBe(400);
 
+    const spoofed = await POST(
+      new NextRequest("http://localhost/api/lending", {
+        method: "POST",
+        body: JSON.stringify({
+          student_id_code: "sit24lr006",
+          lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
+          domain_id: DOMAIN_ID,
+        }),
+      }),
+    );
+    expect(spoofed.status).toBe(400);
+
+    // A super_admin legitimately issues on behalf of a COE.
+    actingAs(authedUser({ role: "super_admin", domain_id: null }));
     const withDomain = await POST(
       new NextRequest("http://localhost/api/lending", {
         method: "POST",

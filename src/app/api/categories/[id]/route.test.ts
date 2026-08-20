@@ -4,15 +4,22 @@ import { like } from "drizzle-orm";
 import { db } from "@/db/client";
 import { category } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { PUT } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
@@ -31,13 +38,17 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("PUT /api/categories/[id]", () => {
+  // Categories are global reference data whose `code` seeds SKU generation
+  // for every product in them, so writes are super_admin-only — matching
+  // departments and coe_domains. Any signed-in user could previously rename
+  // or re-code any category.
   it("backfills a code on a category that predates the feature", async () => {
     const [cat] = await db.insert(category).values({ category_name: "QaCategoryItem Backfill" }).returning();
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser({ role: "super_admin" }));
 
     const res = await PUT(
       new NextRequest(`http://localhost/api/categories/${cat.category_id}`, {
@@ -53,7 +64,7 @@ describe("PUT /api/categories/[id]", () => {
 
   it("rejects an invalid code", async () => {
     const [cat] = await db.insert(category).values({ category_name: "QaCategoryItem Invalid" }).returning();
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser({ role: "super_admin" }));
 
     const res = await PUT(
       new NextRequest(`http://localhost/api/categories/${cat.category_id}`, {

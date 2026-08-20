@@ -4,7 +4,7 @@ import { db } from '@/db/client'
 import { departments, students } from '@/db/schema'
 import { ApiError } from '@/lib/api/errors'
 import { fromError, ok } from '@/lib/api/response'
-import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
+import { requireUser } from '@/lib/authz'
 import { decodeStudentIdCode, normalizeStudentIdCode } from '@/lib/studentIdCode'
 
 // Read-only: decodes a scanned/typed student ID code and reports what's
@@ -12,8 +12,8 @@ import { decodeStudentIdCode, normalizeStudentIdCode } from '@/lib/studentIdCode
 // transactionally inside POST /api/lending, which is the only place a
 // student record actually gets created from this data.
 export async function POST(req: NextRequest) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(req)
+  if (!auth.ok) return auth.response
 
   try {
     const body = await req.json()
