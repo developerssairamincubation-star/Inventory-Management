@@ -71,17 +71,23 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
-  // Traces and bundles only the actually-used dependency subset into
-  // .next/standalone, instead of shipping the full node_modules — smaller
-  // production image, faster container cold start. See the Dockerfile's
-  // runner stage, which copies .next/standalone instead of node_modules.
-  // Vercel ignores this and does its own build tracing, so it's harmless
-  // there too — kept for the self-hosted Docker deploy path.
-  output: "standalone",
-  // Prevent Next.js from bundling pdf-parse (and its native deps like @napi-rs/canvas).
-  // When bundled, the CJS module structure breaks and require() returns a non-callable object.
-  // Marking it external forces Node.js to require() it directly at runtime.
-  serverExternalPackages: ["pdf-parse"],
+  // Standalone output is for the self-hosted Docker deploy only.
+  //
+  // It traces just the dependency subset the app actually uses into
+  // .next/standalone, along with a minimal server.js — a much smaller image
+  // than shipping all of node_modules. The Dockerfile's runner stage copies
+  // that directory.
+  //
+  // It must NOT be set when building on Vercel. Vercel runs its own file
+  // tracing and its onBuildComplete step reads .next/next-server.js.nft.json;
+  // with standalone enabled that build fails on Vercel with
+  // "ENOENT: no such file or directory, open '.next/next-server.js.nft.json'".
+  // The previous comment here assumed "Vercel ignores this, so it's harmless
+  // there too" — that assumption was wrong, and the build broke as soon as
+  // Next was upgraded.
+  //
+  // VERCEL=1 is set automatically in every Vercel build environment.
+  output: process.env.VERCEL ? undefined : "standalone",
   images: { remotePatterns },
 };
 

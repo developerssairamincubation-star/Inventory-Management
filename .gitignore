@@ -55,3 +55,6 @@ next-env.d.ts
 
 # Sentry Config File
 .env.sentry-build-plugin
+
+# Local database dumps taken before destructive operations — never commit.
+db/backups/
