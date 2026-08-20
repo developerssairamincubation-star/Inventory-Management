@@ -67,12 +67,14 @@ describe("POST /api/auth/login", () => {
     expect(claims?.role).toBe("user");
   });
 
-  it("rejects a disabled account", async () => {
+  // Deliberately the same 401 (and message) a wrong password gets. A distinct
+  // 403 ACCOUNT_DISABLED told an attacker the address was a real account.
+  it("rejects a disabled account with the same 401 as a wrong password", async () => {
     const disabledEmail = `login-disabled-${Date.now()}@example.com`;
     await db.insert(users).values({ email: disabledEmail, password_hash: await hashPassword(PASSWORD), full_name: "Disabled", role: "user", is_active: false });
 
     const res = await login(jsonRequest({ email: disabledEmail, password: PASSWORD }));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
 
     await db.delete(users).where(eq(users.email, disabledEmail));
   });

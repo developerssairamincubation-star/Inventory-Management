@@ -1,5 +1,9 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-package-lock.json
+#
+# package-lock.json is deliberately NOT ignored. It was, which meant CI's
+# `npm ci` depended on a file that any future update would have been silently
+# dropped from — and the Docker build could resolve different transitive
+# versions on every rebuild.
 .env.local
 # dependencies
 /node_modules

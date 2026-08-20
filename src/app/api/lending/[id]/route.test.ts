@@ -4,15 +4,22 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users, departments, products, category, stocks, students, lending_order, lending_item } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { PUT, DELETE } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 let OWNER_ID: string;
 let DEPT_ID: string;
 let PRODUCT_ID: string;
@@ -52,7 +59,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
   await db.insert(stocks).values({ product_id: PRODUCT_ID, quantity: 10 }).onConflictDoUpdate({ target: stocks.product_id, set: { quantity: 10, damaged_quantity: 0, lost_quantity: 0 } });
   await db.insert(stocks).values({ product_id: CONSUMABLE_PRODUCT_ID, quantity: 10 }).onConflictDoUpdate({ target: stocks.product_id, set: { quantity: 10, damaged_quantity: 0, lost_quantity: 0 } });
 });
@@ -73,7 +80,7 @@ afterAll(async () => {
 
 describe("PUT /api/lending/[id]", () => {
   it("updates order-level fields (due_date/status) without a mentor concept", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const order = await makeOrderWithItem(5);
 
     const res = await PUT(
@@ -87,7 +94,7 @@ describe("PUT /api/lending/[id]", () => {
   });
 
   it("fully returning an item sets status RETURNED and restores stock", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const order = await makeOrderWithItem(5);
 
     const res = await PUT(
@@ -107,7 +114,7 @@ describe("PUT /api/lending/[id]", () => {
   });
 
   it("partially returning an item sets status PARTIALLY_RETURNED", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const order = await makeOrderWithItem(5);
 
     await PUT(
@@ -120,7 +127,7 @@ describe("PUT /api/lending/[id]", () => {
   });
 
   it("rejects marking a consumable item as returned", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const order = await makeOrderWithItem(5, "CONSUMABLE", CONSUMABLE_PRODUCT_ID);
 
     const res = await PUT(
@@ -133,7 +140,7 @@ describe("PUT /api/lending/[id]", () => {
 
 describe("DELETE /api/lending/[id]", () => {
   it("returns 404 for an order owned by someone else", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await DELETE(new NextRequest("http://localhost/api/lending/x", { method: "DELETE" }), {
       params: Promise.resolve({ id: "00000000-0000-0000-0000-000000000000" }),
     });
@@ -141,7 +148,7 @@ describe("DELETE /api/lending/[id]", () => {
   });
 
   it("deletes the order+items and restores stock", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const order = await makeOrderWithItem(4);
 
     const res = await DELETE(new NextRequest(`http://localhost/api/lending/${order.lending_order_id}`, { method: "DELETE" }), {

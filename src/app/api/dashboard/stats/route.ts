@@ -1,22 +1,25 @@
+import { requireUser, lendingScope, productScope } from '@/lib/authz'
+import { requestIdFrom } from '@/lib/logger'
 import { NextRequest } from 'next/server'
-import { eq, inArray } from 'drizzle-orm'
+import { inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { products, stocks, lending_order, lending_item } from '@/db/schema'
 import { fromError, ok } from '@/lib/api/response'
-import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(req)
+  if (!auth.ok) return auth.response
+  const { user, scope } = auth
 
   try {
-    const isAdmin = user.role === 'super_admin'
 
-    const userProducts = isAdmin
-      ? await db.select({ product_id: products.product_id }).from(products)
-      : await db.select({ product_id: products.product_id }).from(products).where(eq(products.user_id, user.user_id))
+    // Scoped to the caller's COE, not to what they personally created.
+    const userProducts = await db
+      .select({ product_id: products.product_id })
+      .from(products)
+      .where(productScope(scope))
 
     const totalProducts = userProducts.length
     const productIds = userProducts.map((p) => p.product_id)
@@ -29,9 +32,10 @@ export async function GET(req: NextRequest) {
     const damagedQuantity = stocksData.reduce((sum, s) => sum + (s.damaged_quantity || 0), 0)
     const lostQuantity = stocksData.reduce((sum, s) => sum + (s.lost_quantity || 0), 0)
 
-    const userOrders = isAdmin
-      ? await db.select({ lending_order_id: lending_order.lending_order_id, status: lending_order.status }).from(lending_order)
-      : await db.select({ lending_order_id: lending_order.lending_order_id, status: lending_order.status }).from(lending_order).where(eq(lending_order.issued_by_user_id, user.user_id))
+    const userOrders = await db
+      .select({ lending_order_id: lending_order.lending_order_id, status: lending_order.status })
+      .from(lending_order)
+      .where(lendingScope(scope))
 
     const userOrderIds = userOrders.map((o) => o.lending_order_id)
 
@@ -46,6 +50,10 @@ export async function GET(req: NextRequest) {
       lentQuantity = lendingData.filter((item) => activeOrderIds.has(item.lend_order_id)).reduce((sum, item) => sum + (item.quantity || 0), 0)
     }
 
+    // `available` is what's on the shelf and `lent` is what's out on loan;
+    // damaged and lost units left the shelf when they were issued and are
+    // tracked separately, so the four are disjoint and sum to everything the
+    // COE has ever held.
     const stockDistribution = {
       lent: lentQuantity,
       available: totalStockQuantity,
@@ -64,6 +72,6 @@ export async function GET(req: NextRequest) {
 
     return ok({ totalProducts, totalStockQuantity, stockDistribution, stockDistributionPercentages })
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(req), userId: user.user_id, route: 'GET /api/dashboard/stats' })
   }
 }

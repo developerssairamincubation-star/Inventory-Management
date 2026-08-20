@@ -1,31 +1,32 @@
-import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { requireUser, invoiceScope } from '@/lib/authz'
+import { NextRequest } from "next/server";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { purchase_invoice, purchase_invoice_item, invoice_documents, products, stocks } from "@/db/schema";
-import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
+import { purchase_invoice, purchase_invoice_item, invoice_documents, products } from "@/db/schema";
 import { deleteImage, getPublicIdFromUrl } from "@/lib/cloudinary";
-import { classifyError } from "@/lib/api/classifyError";
-import { reportError } from "@/lib/api/reportError";
+import { ApiError } from "@/lib/api/errors";
+import { fromError, ok } from "@/lib/api/response";
+import { adjustStock, actorFrom } from "@/lib/stock";
+import { parseUuidParam } from "@/lib/validation";
+import { logger, requestIdFrom } from "@/lib/logger";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await getAuthUser(request)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(request)
+  if (!auth.ok) return auth.response
+  const { user, scope } = auth
 
   try {
-    const { id: invoiceId } = await params;
+    const { id: invoiceId } = await params.then((p) => ({ id: parseUuidParam(p.id) }));
 
-    // super_admin can open any invoice's detail (visibility only — delete
-    // below stays owner-scoped); everyone else only their own.
-    const invoiceCond = user.role === "super_admin"
-      ? eq(purchase_invoice.invoice_id, invoiceId)
-      : and(eq(purchase_invoice.invoice_id, invoiceId), eq(purchase_invoice.user_id, user.user_id))
-    const [invoice] = await db.select().from(purchase_invoice).where(invoiceCond)
-    if (!invoice) {
-      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
-    }
+    const visible = invoiceScope(scope)
+    const [invoice] = await db
+      .select()
+      .from(purchase_invoice)
+      .where(visible ? and(eq(purchase_invoice.invoice_id, invoiceId), visible) : eq(purchase_invoice.invoice_id, invoiceId))
+    if (!invoice) throw new ApiError(404, 'NOT_FOUND', 'Invoice not found')
 
     const items = await db
       .select({
@@ -48,7 +49,7 @@ export async function GET(
       .orderBy(desc(invoice_documents.created_at))
       .limit(1)
 
-    return NextResponse.json({
+    return ok({
       invoice_id: invoice.invoice_id,
       invoice_code: invoice.invoice_code,
       invoice_number: invoice.invoice_number,
@@ -67,9 +68,7 @@ export async function GET(
       })),
     });
   } catch (error) {
-    console.error('[/api/invoices/[id]] error:', error);
-    reportError(error, { source: '[/api/invoices/[id]] error' });
-    return NextResponse.json({ error: classifyError(error) }, { status: 500 });
+    return fromError(error, { requestId: requestIdFrom(request), userId: user.user_id, route: 'GET /api/invoices/[id]' })
   }
 }
 
@@ -77,29 +76,49 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await getAuthUser(request)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(request)
+  if (!auth.ok) return auth.response
+  const { user, scope } = auth
+  const actor = actorFrom(user, requestIdFrom(request))
 
   try {
-    const { id: invoiceId } = await params;
+    const { id: invoiceId } = await params.then((p) => ({ id: parseUuidParam(p.id) }));
 
-    // super_admin can delete any user's invoice; everyone else only their own.
-    const deleteCond = user.role === "super_admin"
-      ? eq(purchase_invoice.invoice_id, invoiceId)
-      : and(eq(purchase_invoice.invoice_id, invoiceId), eq(purchase_invoice.user_id, user.user_id))
-    const [invoice] = await db.select({ invoice_id: purchase_invoice.invoice_id }).from(purchase_invoice).where(deleteCond)
-    if (!invoice) {
-      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
-    }
+    const visible = invoiceScope(scope)
+    const [invoice] = await db
+      .select({ invoice_id: purchase_invoice.invoice_id, invoice_code: purchase_invoice.invoice_code })
+      .from(purchase_invoice)
+      .where(visible ? and(eq(purchase_invoice.invoice_id, invoiceId), visible) : eq(purchase_invoice.invoice_id, invoiceId))
+    if (!invoice) throw new ApiError(404, 'NOT_FOUND', 'Invoice not found')
 
     const documents = await db.select({ file_url: invoice_documents.file_url }).from(invoice_documents).where(eq(invoice_documents.invoice_id, invoiceId))
 
     await db.transaction(async (tx) => {
       const items = await tx.select({ product_id: purchase_invoice_item.product_id, quantity: purchase_invoice_item.quantity }).from(purchase_invoice_item).where(eq(purchase_invoice_item.invoice_id, invoiceId))
 
+      // Aggregate per product first, so a multi-line invoice takes one
+      // locked adjustment per product rather than one per line.
+      const byProduct = new Map<string, number>()
       for (const item of items) {
         if (!item.product_id) continue
-        await tx.update(stocks).set({ quantity: sql`GREATEST(0, ${stocks.quantity} - ${item.quantity})` }).where(eq(stocks.product_id, item.product_id))
+        byProduct.set(item.product_id, (byProduct.get(item.product_id) ?? 0) + item.quantity)
+      }
+
+      // This used to be `GREATEST(0, quantity - n)`, which clamped instead of
+      // failing: deleting an invoice whose stock had since been lent out or
+      // consumed silently applied only part of the reversal and left the
+      // ledger permanently out of step, with no error and no record.
+      // adjustStock refuses the whole transaction instead, so the operator
+      // finds out and can decide what to do.
+      for (const [product_id, quantity] of byProduct) {
+        await adjustStock(tx, {
+          productId: product_id,
+          delta: -quantity,
+          reason: 'INVOICE_DELETED',
+          actor,
+          referenceId: invoiceId,
+          note: `Reversed on deletion of invoice ${invoice.invoice_code}`,
+        })
       }
 
       // invoice_documents rows cascade automatically (ON DELETE CASCADE),
@@ -115,16 +134,13 @@ export async function DELETE(
         try {
           await deleteImage(publicId)
         } catch (err) {
-          console.error('Failed to delete invoice document from storage:', err)
-          reportError(err, { source: 'Failed to delete invoice document from storage' })
+          logger.warn('Failed to delete invoice document from storage', { invoiceId, publicId }, err)
         }
       }
     }
 
-    return NextResponse.json({ message: "Invoice deleted successfully" });
+    return ok({ message: "Invoice deleted successfully" });
   } catch (error) {
-    console.error('[/api/invoices/[id]] error:', error);
-    reportError(error, { source: '[/api/invoices/[id]] error' });
-    return NextResponse.json({ error: classifyError(error) }, { status: 500 });
+    return fromError(error, { requestId: requestIdFrom(request), userId: user.user_id, route: 'DELETE /api/invoices/[id]' })
   }
 }

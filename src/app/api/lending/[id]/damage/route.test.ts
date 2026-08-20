@@ -4,15 +4,22 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users, departments, products, category, stocks, students, lending_order, lending_item } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { POST } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 let OWNER_ID: string;
 let DEPT_ID: string;
 let BORROWER_ID: string;
@@ -49,7 +56,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
   await db
     .insert(stocks)
     .values({ product_id: PRODUCT_ID, quantity: 10, damaged_quantity: 0 })
@@ -69,7 +76,7 @@ afterAll(async () => {
 
 describe("POST /api/lending/[id]/damage", () => {
   it("returns 400 when damaged_quantity is missing or invalid", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const order = await makeOrderWithItem(5);
     const res = await POST(
       new NextRequest(`http://localhost/api/lending/${order.lending_order_id}/damage`, { method: "POST", body: JSON.stringify({ product_id: PRODUCT_ID }) }),
@@ -79,7 +86,7 @@ describe("POST /api/lending/[id]/damage", () => {
   });
 
   it("returns 400 when damaged_quantity exceeds the lent quantity", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const order = await makeOrderWithItem(3);
     const res = await POST(
       new NextRequest(`http://localhost/api/lending/${order.lending_order_id}/damage`, { method: "POST", body: JSON.stringify({ product_id: PRODUCT_ID, damaged_quantity: 5 }) }),
@@ -89,7 +96,7 @@ describe("POST /api/lending/[id]/damage", () => {
   });
 
   it("partial damage: updates item/stock and sets order status PARTIALLY_DAMAGED", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const order = await makeOrderWithItem(5);
 
     const res = await POST(
@@ -99,14 +106,18 @@ describe("POST /api/lending/[id]/damage", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { orderStatus: string; newStockQuantity: number };
     expect(body.orderStatus).toBe("PARTIALLY_DAMAGED");
-    expect(body.newStockQuantity).toBe(8); // 10 - 2
+    // Shelf quantity is unchanged, not 8. These units left the shelf when the
+    // loan was issued; the old route decremented stocks.quantity a second
+    // time here, so every loss was counted out of inventory twice — and the
+    // dashboard then added it back once as available + lent + damaged + lost.
+    expect(body.newStockQuantity).toBe(10); // 10 - 2
 
     const [updatedOrder] = await db.select({ status: lending_order.status }).from(lending_order).where(eq(lending_order.lending_order_id, order.lending_order_id));
     expect(updatedOrder.status).toBe("PARTIALLY_DAMAGED");
   });
 
   it("full damage: sets order status DAMAGED", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const order = await makeOrderWithItem(3);
 
     const res = await POST(

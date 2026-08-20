@@ -4,15 +4,22 @@ import { like } from "drizzle-orm";
 import { db } from "@/db/client";
 import { departments } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { PUT, DELETE } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
@@ -31,12 +38,12 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("PUT /api/departments/[id]", () => {
   it("returns 403 for a non-super_admin user", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser({ role: "user" }));
+    actingAs(authedUser({ role: "user" }));
     const res = await PUT(
       new NextRequest("http://localhost/api/departments/x", { method: "PUT", body: JSON.stringify({ department_name: "y" }) }),
       { params: Promise.resolve({ id: "00000000-0000-0000-0000-000000000000" }) },
@@ -46,7 +53,7 @@ describe("PUT /api/departments/[id]", () => {
 
   it("renames an existing department", async () => {
     const [dept] = await db.insert(departments).values({ department_name: "QaDeptItem Before" }).returning();
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
 
     const res = await PUT(
       new NextRequest(`http://localhost/api/departments/${dept.department_id}`, {
@@ -61,7 +68,7 @@ describe("PUT /api/departments/[id]", () => {
   });
 
   it("returns 404 for a nonexistent department", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await PUT(
       new NextRequest("http://localhost/api/departments/x", { method: "PUT", body: JSON.stringify({ department_name: "y" }) }),
       { params: Promise.resolve({ id: "00000000-0000-0000-0000-000000000000" }) },
@@ -71,7 +78,7 @@ describe("PUT /api/departments/[id]", () => {
 
   it("sets a code when provided, and leaves it alone when the field is omitted", async () => {
     const [dept] = await db.insert(departments).values({ department_name: "QaDeptItem Coded" }).returning();
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
 
     const withCode = await PUT(
       new NextRequest(`http://localhost/api/departments/${dept.department_id}`, {
@@ -98,7 +105,7 @@ describe("PUT /api/departments/[id]", () => {
 describe("DELETE /api/departments/[id]", () => {
   it("deletes an existing department", async () => {
     const [dept] = await db.insert(departments).values({ department_name: "QaDeptItem ToDelete" }).returning();
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
 
     const res = await DELETE(new NextRequest(`http://localhost/api/departments/${dept.department_id}`, { method: "DELETE" }), {
       params: Promise.resolve({ id: dept.department_id }),

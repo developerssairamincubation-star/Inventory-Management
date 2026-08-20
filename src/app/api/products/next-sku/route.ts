@@ -1,8 +1,8 @@
+import { requireUser } from '@/lib/authz'
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { category, id_sequences } from "@/db/schema";
-import { getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
 import { suggestCategoryCode } from "@/lib/categoryCode";
 
 export const dynamic = "force-dynamic";
@@ -15,8 +15,8 @@ export const dynamic = "force-dynamic";
 // creates in the same category — same accepted tradeoff as the invoice
 // number preview.
 export async function GET(request: NextRequest) {
-  const user = await getAuthUser(request);
-  if (!user) return unauthorizedResponse();
+  const auth = await requireUser(request)
+  if (!auth.ok) return auth.response
 
   try {
     const { searchParams } = new URL(request.url);

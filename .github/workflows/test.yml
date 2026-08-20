@@ -5,11 +5,17 @@ name: Test
 # GitHub-hosted runner (not the self-hosted DIT deploy runner) since this
 # stack is fully ephemeral per run — no real secrets involved, only
 # throwaway local credentials for containers that live for the run's duration.
+# Runs on pushes as well as PRs. It used to run on pull_request only, while
+# deploy-dit.yml triggered on push to `development` with no `needs:` — so a
+# push straight to development deployed without the suite ever running.
+# deploy-dit.yml now waits on this workflow, which means it has to run on the
+# same event.
 on:
   pull_request:
     branches: ["development", "main"]
   push:
-    branches: ["feature/postgres-minio-jwt-migration"]
+    branches: ["development", "main"]
+  workflow_call:
 
 env:
   POSTGRES_DB: inventory
@@ -58,6 +64,18 @@ jobs:
           docker compose up flyway
           docker compose up flyway-seed
           docker compose up flyway-test
+
+      - name: Check types
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      # Fails the build on a known high-severity advisory rather than leaving
+      # it to be noticed later. --audit-level=high so a moderate advisory in a
+      # dev-only transitive dep doesn't block a release.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
 
       - name: Run Vitest
         run: npm test

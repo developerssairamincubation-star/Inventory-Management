@@ -4,15 +4,22 @@ import { eq, inArray, like } from "drizzle-orm";
 import { db } from "@/db/client";
 import { products, stocks, users } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { PATCH } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 let OWNER_ID: string;
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
@@ -50,12 +57,12 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("PATCH /api/products/[id]/update-stock", () => {
   it("returns 400 for a negative additionalStock value", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Update Stock Invalid");
     const res = await PATCH(
       new NextRequest(`http://localhost/api/products/${product.product_id}/update-stock`, { method: "PATCH", body: JSON.stringify({ additionalStock: -1 }) }),
@@ -65,7 +72,7 @@ describe("PATCH /api/products/[id]/update-stock", () => {
   });
 
   it("adds additionalStock to the current quantity", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Update Stock Add", 10);
     const res = await PATCH(
       new NextRequest(`http://localhost/api/products/${product.product_id}/update-stock`, { method: "PATCH", body: JSON.stringify({ additionalStock: 5 }) }),
@@ -77,7 +84,7 @@ describe("PATCH /api/products/[id]/update-stock", () => {
   });
 
   it("sets an absolute newStock value and updates unitCost", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Update Stock Set", 10);
     const res = await PATCH(
       new NextRequest(`http://localhost/api/products/${product.product_id}/update-stock`, { method: "PATCH", body: JSON.stringify({ newStock: 42, unitCost: 7.5 }) }),
@@ -90,7 +97,7 @@ describe("PATCH /api/products/[id]/update-stock", () => {
   });
 
   it("sets location", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Update Stock Location", 10);
     const res = await PATCH(
       new NextRequest(`http://localhost/api/products/${product.product_id}/update-stock`, { method: "PATCH", body: JSON.stringify({ location: " R7 " }) }),
@@ -102,17 +109,17 @@ describe("PATCH /api/products/[id]/update-stock", () => {
   });
 
   it("a regular user cannot restock someone else's product, but a super_admin can", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const product = await makeProduct("Update Stock Other Owner", 10);
 
-    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "user" }));
+    actingAs(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "user" }));
     const deniedRes = await PATCH(
       new NextRequest(`http://localhost/api/products/${product.product_id}/update-stock`, { method: "PATCH", body: JSON.stringify({ additionalStock: 5 }) }),
       { params: Promise.resolve({ id: product.product_id }) },
     );
     expect(deniedRes.status).toBe(404);
 
-    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "11111111-1111-1111-1111-111111111111", role: "super_admin" }));
+    actingAs(authedUser({ user_id: "11111111-1111-1111-1111-111111111111", role: "super_admin" }));
     const adminRes = await PATCH(
       new NextRequest(`http://localhost/api/products/${product.product_id}/update-stock`, { method: "PATCH", body: JSON.stringify({ additionalStock: 5 }) }),
       { params: Promise.resolve({ id: product.product_id }) },

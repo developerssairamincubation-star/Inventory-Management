@@ -5,15 +5,22 @@ import { db } from "@/db/client";
 import { users } from "@/db/schema";
 import { verifyPassword } from "@/lib/passwords";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET, POST } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
@@ -32,12 +39,12 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("GET /api/admin/users", () => {
   it("returns 403 for a non-super_admin", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser({ role: "user" }));
+    actingAs(authedUser({ role: "user" }));
     const res = await GET(new NextRequest("http://localhost/api/admin/users"));
     expect(res.status).toBe(403);
   });
@@ -45,7 +52,7 @@ describe("GET /api/admin/users", () => {
 
 describe("POST /api/admin/users", () => {
   it("returns 400 for an invalid role", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(
       new NextRequest("http://localhost/api/admin/users", { method: "POST", body: JSON.stringify({ email: "x@x.com", full_name: "X", password: "p", role: "bogus" }) }),
     );
@@ -53,7 +60,7 @@ describe("POST /api/admin/users", () => {
   });
 
   it("creates a user with a real bcrypt password_hash (no Firebase account)", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const email = `admin-users-route-new-${Date.now()}@example.com`;
 
     const res = await POST(

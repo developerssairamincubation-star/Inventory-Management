@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { and, desc, eq, inArray, or } from 'drizzle-orm'
+import { NextRequest } from 'next/server'
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
+import { z } from 'zod'
 import { db } from '@/db/client'
 import {
   products,
@@ -16,10 +17,12 @@ import {
   coe_domains,
   stock_transfers,
 } from '@/db/schema'
-import { deleteImage, getPublicIdFromUrl } from '@/lib/cloudinary'
-import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
-import { classifyError } from '@/lib/api/classifyError'
-import { reportError } from '@/lib/api/reportError'
+import { deleteImage, getPublicIdFromUrl, isTrustedAssetUrl } from '@/lib/cloudinary'
+import { requireUser, productScope, lendingScope, type Scope } from '@/lib/authz'
+import { ApiError } from '@/lib/api/errors'
+import { fromError, ok } from '@/lib/api/response'
+import { parseBody, parseUuidParam, money, uuid } from '@/lib/validation'
+import { requestIdFrom, logger } from '@/lib/logger'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,33 +39,33 @@ function getFromDate(period: string): Date {
 
 const FINAL_STATUSES = ['RETURNED', 'RETURNED_DAMAGED', 'RETURNED_LOST', 'DAMAGED', 'LOST', 'CONSUMABLE']
 
+/** Loads a product the caller is allowed to act on, or null. */
+async function findVisibleProduct(scope: Scope, id: string) {
+  const visible = productScope(scope)
+  const [product] = await db
+    .select()
+    .from(products)
+    .where(visible ? and(eq(products.product_id, id), visible) : eq(products.product_id, id))
+  return product ?? null
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await getAuthUser(request)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(request)
+  if (!auth.ok) return auth.response
+  const { scope } = auth
 
   try {
-    const { id } = await params
+    const { id: rawId } = await params
+    const id = parseUuidParam(rawId)
     const { searchParams } = new URL(request.url)
     const period = searchParams.get('period') || 'monthly'
     const fromDate = getFromDate(period)
 
-    // super_admin can view any product's detail page (read-only — edits/
-    // deletes below stay owner-scoped); everyone else only their own.
-    const isAdmin = user.role === 'super_admin'
-    const productCond = isAdmin
-      ? eq(products.product_id, id)
-      : and(eq(products.product_id, id), eq(products.user_id, user.user_id))
-    const [product] = await db
-      .select()
-      .from(products)
-      .where(productCond)
-
-    if (!product) {
-      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
-    }
+    const product = await findVisibleProduct(scope, id)
+    if (!product) throw new ApiError(404, 'NOT_FOUND', 'Product not found')
 
     const [image] = await db.select({ image_url: product_image.image_url }).from(product_image).where(eq(product_image.product_id, id))
     const [stockRow] = await db
@@ -80,10 +83,8 @@ export async function GET(
       categoryName = catRow?.category_name ?? null
     }
 
-    // Which COE domain this product currently belongs to — derived from its
-    // owner, same as every other domain-scoped view in this app. The
-    // Transfer modal uses this to exclude the product's own domain from the
-    // destination list.
+    // Which COE domain this product belongs to — derived from its owner, the
+    // same derivation the authorization layer uses.
     let domainId: string | null = null
     let domainName: string | null = null
     if (product.user_id) {
@@ -98,14 +99,9 @@ export async function GET(
 
     const enrichedProduct = { ...product, image_url: image?.image_url ?? null, stocks: stockData, category_name: categoryName, domain_id: domainId, domain_name: domainName }
 
-    // Transfer history: this product shows up as either side of a transfer
-    // — as the source (its own row, quantity decremented or ownership
-    // moved) or as the destination (a brand-new row created by a partial
-    // transfer into this domain). source/destination are the same table
-    // joined twice, hence the aliasing.
     const sourceDomainAlias = alias(coe_domains, 'source_domain')
     const destDomainAlias = alias(coe_domains, 'dest_domain')
-    const transferRows = await db
+    const transferHistory = await db
       .select({
         transfer_id: stock_transfers.transfer_id,
         quantity: stock_transfers.quantity,
@@ -121,7 +117,6 @@ export async function GET(
       .leftJoin(users, eq(users.user_id, stock_transfers.transferred_by_user_id))
       .where(or(eq(stock_transfers.source_product_id, id), eq(stock_transfers.destination_product_id, id)))
       .orderBy(desc(stock_transfers.created_at))
-    const transferHistory = transferRows
 
     const lendingItems = await db
       .select({
@@ -156,6 +151,7 @@ export async function GET(
     const lendingSummary = { totalLent: 0, returned: 0 }
 
     if (orderIds.length > 0) {
+      const visibleLending = lendingScope(scope)
       const orders = await db
         .select({
           lending_order_id: lending_order.lending_order_id,
@@ -168,9 +164,9 @@ export async function GET(
         })
         .from(lending_order)
         .where(
-          isAdmin
-            ? inArray(lending_order.lending_order_id, orderIds)
-            : and(inArray(lending_order.lending_order_id, orderIds), eq(lending_order.issued_by_user_id, user.user_id))
+          visibleLending
+            ? and(inArray(lending_order.lending_order_id, orderIds), visibleLending)
+            : inArray(lending_order.lending_order_id, orderIds),
         )
         .orderBy(desc(lending_order.created_at))
 
@@ -247,68 +243,87 @@ export async function GET(
       }
     }
 
-    return NextResponse.json({ product: enrichedProduct, lendingSummary, borrowingHistory, transferHistory })
+    return ok({ product: enrichedProduct, lendingSummary, borrowingHistory, transferHistory })
   } catch (error) {
-    console.error('[GET /api/products/[id]] error:', error)
-    reportError(error, { source: '[GET /api/products/[id]] error' })
-    return NextResponse.json({ error: classifyError(error) }, { status: 500 })
+    return fromError(error, { requestId: requestIdFrom(request), userId: auth.user.user_id, route: 'GET /api/products/[id]' })
   }
 }
+
+const updateProductSchema = z.object({
+  product_name: z.string().trim().min(1).max(250).optional(),
+  unit_cost: money.optional(),
+  description: z.string().trim().max(2000).nullish(),
+  category_id: uuid.nullish(),
+  image_url: z.string().url().nullish(),
+})
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await getAuthUser(request)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(request)
+  if (!auth.ok) return auth.response
+  const { user, scope } = auth
 
   try {
-    const { id } = await params
-    const body = await request.json()
+    const { id: rawId } = await params
+    const id = parseUuidParam(rawId)
+    const body = await parseBody(request, updateProductSchema)
 
-    // sku_code is intentionally not editable here — it's auto-generated at
+    if (body.image_url && !isTrustedAssetUrl(body.image_url)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Product image must be an uploaded file')
+    }
+
+    // sku_code is intentionally not editable — it's auto-generated at
     // creation and printed as a barcode; changing it after the fact would
     // orphan any already-printed label.
     const updateData: Partial<typeof products.$inferInsert> = {}
     if (body.product_name !== undefined) updateData.product_name = body.product_name
     if (body.unit_cost !== undefined) updateData.unit_cost = String(body.unit_cost)
-    if (body.description !== undefined) updateData.description = typeof body.description === 'string' ? body.description.slice(0, 2000) : null
+    if (body.description !== undefined) updateData.description = body.description
     if (body.category_id !== undefined) updateData.category_id = body.category_id
 
-    // super_admin can edit any user's product (manages inventory across every
-    // domain); everyone else only their own.
-    const productCond = user.role === 'super_admin'
-      ? eq(products.product_id, id)
-      : and(eq(products.product_id, id), eq(products.user_id, user.user_id))
-    const [updated] = await db
-      .update(products)
-      .set(updateData)
-      .where(productCond)
-      .returning()
+    const result = await db.transaction(async (tx) => {
+      const visible = productScope(scope)
+      const [owned] = await tx
+        .select({ product_id: products.product_id })
+        .from(products)
+        .where(visible ? and(eq(products.product_id, id), visible) : eq(products.product_id, id))
+      if (!owned) throw new ApiError(404, 'NOT_FOUND', 'Product not found')
 
-    if (!updated) {
-      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
-    }
-
-    let returnedImageUrl: string | null = null
-    if (body.image_url !== undefined) {
-      const [existing] = await db.select({ image_url: product_image.image_url }).from(product_image).where(eq(product_image.product_id, id))
-      if (existing) {
-        await db.update(product_image).set({ image_url: body.image_url }).where(eq(product_image.product_id, id))
+      // `.set({})` on an empty object throws in Drizzle — a body with no
+      // updatable field used to surface as an opaque 500.
+      let updated = null
+      if (Object.keys(updateData).length > 0) {
+        ;[updated] = await tx.update(products).set(updateData).where(eq(products.product_id, id)).returning()
       } else {
-        await db.insert(product_image).values({ product_id: id, image_url: body.image_url })
+        ;[updated] = await tx.select().from(products).where(eq(products.product_id, id))
       }
-      returnedImageUrl = body.image_url
-    } else {
-      const [img] = await db.select({ image_url: product_image.image_url }).from(product_image).where(eq(product_image.product_id, id))
-      returnedImageUrl = img?.image_url ?? null
-    }
 
-    return NextResponse.json({ ...updated, image_url: returnedImageUrl })
+      let returnedImageUrl: string | null = null
+      if (body.image_url !== undefined) {
+        if (body.image_url === null) {
+          await tx.delete(product_image).where(eq(product_image.product_id, id))
+        } else {
+          const [existing] = await tx.select({ image_id: product_image.image_id }).from(product_image).where(eq(product_image.product_id, id))
+          if (existing) {
+            await tx.update(product_image).set({ image_url: body.image_url }).where(eq(product_image.product_id, id))
+          } else {
+            await tx.insert(product_image).values({ product_id: id, image_url: body.image_url })
+          }
+          returnedImageUrl = body.image_url
+        }
+      } else {
+        const [img] = await tx.select({ image_url: product_image.image_url }).from(product_image).where(eq(product_image.product_id, id))
+        returnedImageUrl = img?.image_url ?? null
+      }
+
+      return { ...updated, image_url: returnedImageUrl }
+    })
+
+    return ok(result)
   } catch (error) {
-    console.error('[PUT /api/products/[id]] error:', error)
-    reportError(error, { source: '[PUT /api/products/[id]] error' })
-    return NextResponse.json({ error: classifyError(error) }, { status: 500 })
+    return fromError(error, { requestId: requestIdFrom(request), userId: user.user_id, route: 'PUT /api/products/[id]' })
   }
 }
 
@@ -316,57 +331,94 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await getAuthUser(request)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(request)
+  if (!auth.ok) return auth.response
+  const { user, scope } = auth
 
   try {
-    const { id } = await params
-
-    // super_admin can delete any user's product; everyone else only their own.
-    const deleteCond = user.role === 'super_admin'
-      ? eq(products.product_id, id)
-      : and(eq(products.product_id, id), eq(products.user_id, user.user_id))
-    const [owned] = await db.select({ product_id: products.product_id }).from(products).where(deleteCond)
-    if (!owned) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    const { id: rawId } = await params
+    const id = parseUuidParam(rawId)
 
     const images = await db.select({ image_url: product_image.image_url }).from(product_image).where(eq(product_image.product_id, id))
 
-    // Transactional: a partial delete (e.g. stock/lending rows gone but the
-    // product row itself blocked by a FK) would leave the catalog corrupted.
     await db.transaction(async (tx) => {
-      const items = await tx.select({ lend_order_id: lending_item.lend_order_id }).from(lending_item).where(eq(lending_item.product_id, id))
-      const orderIds = [...new Set(items.map((li) => li.lend_order_id))]
+      const visible = productScope(scope)
+      const [owned] = await tx
+        .select({ product_id: products.product_id })
+        .from(products)
+        .where(visible ? and(eq(products.product_id, id), visible) : eq(products.product_id, id))
+      if (!owned) throw new ApiError(404, 'NOT_FOUND', 'Product not found')
+
+      // Refuse while anything is still out on loan. Deleting used to silently
+      // destroy the loan record along with the product, so units physically
+      // in a student's hands simply vanished from the ledger.
+      const [outstanding] = await tx
+        .select({ total: sql<number>`coalesce(sum(${lending_item.quantity}), 0)::int` })
+        .from(lending_item)
+        .where(eq(lending_item.product_id, id))
+
+      if ((outstanding?.total ?? 0) > 0) {
+        throw new ApiError(
+          409,
+          'PRODUCT_ON_LOAN',
+          `This product still has ${outstanding.total} unit(s) out on loan. Record the return or write them off before deleting it.`,
+        )
+      }
+
+      // The destructive bug this replaces: the old code collected every order
+      // that had ever contained this product, deleted only *this* product's
+      // line items, then deleted those orders wholesale — so in any
+      // multi-item order the other products' line items were swept away by
+      // ON DELETE CASCADE, destroying unrelated lending history that may have
+      // belonged to a different user in a different COE.
+      //
+      // Only this product's line items are removed. An order is deleted only
+      // if removing them leaves it with nothing at all.
+      const affected = await tx
+        .select({ lend_order_id: lending_item.lend_order_id })
+        .from(lending_item)
+        .where(eq(lending_item.product_id, id))
+      const affectedOrderIds = [...new Set(affected.map((li) => li.lend_order_id))]
 
       await tx.delete(lending_item).where(eq(lending_item.product_id, id))
-      if (orderIds.length > 0) {
-        await tx.delete(lending_order).where(inArray(lending_order.lending_order_id, orderIds))
+
+      if (affectedOrderIds.length > 0) {
+        const survivors = await tx
+          .select({ lend_order_id: lending_item.lend_order_id })
+          .from(lending_item)
+          .where(inArray(lending_item.lend_order_id, affectedOrderIds))
+        const stillPopulated = new Set(survivors.map((s) => s.lend_order_id))
+        const emptied = affectedOrderIds.filter((orderId) => !stillPopulated.has(orderId))
+        if (emptied.length > 0) {
+          await tx.delete(lending_order).where(inArray(lending_order.lending_order_id, emptied))
+        }
       }
+
       await tx.delete(stocks).where(eq(stocks.product_id, id))
       await tx.delete(product_image).where(eq(product_image.product_id, id))
       // purchase_invoice_item.product_id is ON DELETE RESTRICT — past invoice
       // line items must survive product deletion as a purchase record, so
       // unlink rather than delete them (product_name is already stored on the
-      // row for exactly this case, see purchaseInvoiceItem.ts).
+      // row for exactly this case).
       await tx.update(purchase_invoice_item).set({ product_id: null }).where(eq(purchase_invoice_item.product_id, id))
       await tx.delete(products).where(eq(products.product_id, id))
     })
 
+    // After the commit: a failure here leaves an orphaned Cloudinary file,
+    // which is recoverable, whereas deleting first would lose the file if the
+    // transaction then rolled back.
     for (const img of images) {
       const publicId = getPublicIdFromUrl(img.image_url)
-      if (publicId) {
-        try {
-          await deleteImage(publicId)
-        } catch (err) {
-          console.error('Failed to delete product image from storage:', err)
-          reportError(err, { source: 'Failed to delete product image from storage' })
-        }
+      if (!publicId) continue
+      try {
+        await deleteImage(publicId)
+      } catch (err) {
+        logger.warn('Failed to delete product image from storage', { productId: id, publicId }, err)
       }
     }
 
-    return NextResponse.json({ success: true })
+    return ok({ success: true })
   } catch (error) {
-    console.error('[DELETE /api/products/[id]] error:', error)
-    reportError(error, { source: '[DELETE /api/products/[id]] error' })
-    return NextResponse.json({ error: classifyError(error) }, { status: 500 })
+    return fromError(error, { requestId: requestIdFrom(request), userId: user.user_id, route: 'DELETE /api/products/[id]' })
   }
 }

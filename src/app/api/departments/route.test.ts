@@ -4,15 +4,22 @@ import { like } from "drizzle-orm";
 import { db } from "@/db/client";
 import { departments } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET, POST } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
@@ -31,18 +38,18 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("GET /api/departments", () => {
   it("returns 401 when unauthenticated", async () => {
-    mockGetAuthUser.mockResolvedValue(null);
+    actingAs(null);
     const res = await GET(new NextRequest("http://localhost/api/departments"));
     expect(res.status).toBe(401);
   });
 
   it("returns departments ordered by name for any authenticated role", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser({ role: "user" }));
+    actingAs(authedUser({ role: "user" }));
     await db.insert(departments).values({ department_name: "QaDeptList Z" });
     const res = await GET(new NextRequest("http://localhost/api/departments"));
     expect(res.status).toBe(200);
@@ -53,7 +60,7 @@ describe("GET /api/departments", () => {
 
 describe("POST /api/departments", () => {
   it("returns 403 for a non-super_admin user", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser({ role: "user" }));
+    actingAs(authedUser({ role: "user" }));
     const res = await POST(
       new NextRequest("http://localhost/api/departments", { method: "POST", body: JSON.stringify({ department_name: "QaDeptList A" }) }),
     );
@@ -61,7 +68,7 @@ describe("POST /api/departments", () => {
   });
 
   it("creates a department for a super_admin", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser({ role: "super_admin" }));
+    actingAs(authedUser({ role: "super_admin" }));
     const res = await POST(
       new NextRequest("http://localhost/api/departments", {
         method: "POST",
@@ -74,7 +81,7 @@ describe("POST /api/departments", () => {
   });
 
   it("accepts and uppercases a valid 2-letter code", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser({ role: "super_admin" }));
+    actingAs(authedUser({ role: "super_admin" }));
     const res = await POST(
       new NextRequest("http://localhost/api/departments", {
         method: "POST",
@@ -87,7 +94,7 @@ describe("POST /api/departments", () => {
   });
 
   it("rejects a code that isn't exactly 2 letters", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser({ role: "super_admin" }));
+    actingAs(authedUser({ role: "super_admin" }));
     const res = await POST(
       new NextRequest("http://localhost/api/departments", {
         method: "POST",
@@ -98,7 +105,7 @@ describe("POST /api/departments", () => {
   });
 
   it("rejects a duplicate code", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser({ role: "super_admin" }));
+    actingAs(authedUser({ role: "super_admin" }));
     await POST(
       new NextRequest("http://localhost/api/departments", {
         method: "POST",

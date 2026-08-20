@@ -14,7 +14,63 @@ const remotePatterns: NonNullable<NextConfig["images"]>["remotePatterns"] = [
   },
 ];
 
+// Security headers are declared here rather than set in middleware.
+//
+// Middleware sets them on the NextResponse it returns, but Next does not
+// propagate those response headers to page responses — verified against a
+// running dev server, where every header set that way was simply absent.
+// next.config's headers() is the supported mechanism for static headers, and
+// it's the better fit anyway: declarative, applied by the server, and no
+// per-request work in the Edge runtime.
+//
+// The app previously set none of these at all: no CSP, no HSTS, no
+// nosniff, no framing protection, no referrer policy.
+const SENTRY_INGEST = "https://*.ingest.de.sentry.io https://*.ingest.sentry.io";
+// @vercel/speed-insights loads its script from va.vercel-scripts.com and
+// reports to vitals.vercel-insights.com. Both have to be allowed explicitly
+// or the CSP silently kills the feature — which is exactly what happened the
+// first time these headers went in.
+const VERCEL_INSIGHTS_SCRIPT = "https://va.vercel-scripts.com";
+const VERCEL_INSIGHTS_REPORT = "https://vitals.vercel-insights.com";
+const isDev = process.env.NODE_ENV !== "production";
+
+const CSP = [
+  "default-src 'self'",
+  // 'unsafe-inline' is required by Next's inline hydration bootstrap;
+  // 'unsafe-eval' is dev-only (React Refresh) and dropped in production.
+  isDev
+    ? `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${VERCEL_INSIGHTS_SCRIPT}`
+    : `script-src 'self' 'unsafe-inline' ${VERCEL_INSIGHTS_SCRIPT}`,
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com data:",
+  "img-src 'self' data: blob: https://res.cloudinary.com",
+  // ws: is the dev-server HMR socket, dropped in production.
+  `connect-src 'self' https://api.cloudinary.com ${SENTRY_INGEST} ${VERCEL_INSIGHTS_REPORT}${isDev ? " ws: http://localhost:*" : ""}`,
+  // Nothing in this app is meant to be embedded, and the CSRF scheme rests on
+  // SameSite=Lax plus a double-submit token — neither of which covers
+  // clickjacking.
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
+const securityHeaders = [
+  { key: "Content-Security-Policy", value: CSP },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=(), payment=()" },
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  // Only meaningful over HTTPS; omitted in dev so a plain-HTTP localhost
+  // isn't pinned to HTTPS in the browser's HSTS store.
+  ...(isDev ? [] : [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }]),
+];
+
 const nextConfig: NextConfig = {
+  async headers() {
+    return [{ source: "/:path*", headers: securityHeaders }];
+  },
   // Traces and bundles only the actually-used dependency subset into
   // .next/standalone, instead of shipping the full node_modules — smaller
   // production image, faster container cold start. See the Dockerfile's

@@ -38,6 +38,12 @@ services:
 
   # One-shot: loads dev-only seed data (super_admin user, sample category).
   # Local/dev use only — never wire this into a prod-labeled compose file.
+  #
+  # Uses its own history table. It shared flyway_schema_history with the
+  # `flyway` service above, which scans a different location — so once the
+  # seed had run, every subsequent `docker compose up flyway` failed
+  # validation with "Detected applied migration not resolved locally: seed dev
+  # data" and no migration could be applied to a dev database at all.
   flyway-seed:
     image: flyway/flyway:10-alpine
     depends_on:
@@ -49,6 +55,7 @@ services:
       -url=jdbc:postgresql://postgres:5432/${POSTGRES_DB:-inventory}
       -user=${POSTGRES_USER}
       -password=${POSTGRES_PASSWORD}
+      -table=flyway_seed_history
       -connectRetries=10
       -baselineOnMigrate=true
       migrate

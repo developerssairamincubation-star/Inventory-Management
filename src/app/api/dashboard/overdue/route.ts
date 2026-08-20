@@ -1,20 +1,20 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { requireUser, lendingScope } from '@/lib/authz'
+import { NextRequest } from 'next/server'
 import { and, eq, inArray, lt } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { lending_order, lending_item, products, students } from '@/db/schema'
-import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
-import { classifyError } from '@/lib/api/classifyError'
-import { reportError } from '@/lib/api/reportError'
+import { fromError, ok } from '@/lib/api/response'
+import { requestIdFrom } from '@/lib/logger'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(req)
+  if (!auth.ok) return auth.response
+  const { user, scope } = auth
 
   try {
     const today = new Date().toISOString().split('T')[0]
-    const isAdmin = user.role === 'super_admin'
 
     const overdueOrders = await db
       .select({
@@ -24,14 +24,10 @@ export async function GET(req: NextRequest) {
         borrower_student_id: lending_order.borrower_student_id,
       })
       .from(lending_order)
-      .where(
-        isAdmin
-          ? and(lt(lending_order.due_date, today), eq(lending_order.status, 'PENDING'))
-          : and(eq(lending_order.issued_by_user_id, user.user_id), lt(lending_order.due_date, today), eq(lending_order.status, 'PENDING'))
-      )
+      .where(and(lendingScope(scope), lt(lending_order.due_date, today), eq(lending_order.status, 'PENDING')))
 
     if (overdueOrders.length === 0) {
-      return NextResponse.json([])
+      return ok([])
     }
 
     const orderIds = overdueOrders.map((o) => o.lending_order_id)
@@ -66,10 +62,8 @@ export async function GET(req: NextRequest) {
       }))
     })
 
-    return NextResponse.json(overdueAlerts)
+    return ok(overdueAlerts)
   } catch (error) {
-    console.error('[GET /api/dashboard/overdue] error:', error)
-    reportError(error, { source: '[GET /api/dashboard/overdue] error' })
-    return NextResponse.json({ error: classifyError(error) }, { status: 500 })
+    return fromError(error, { requestId: requestIdFrom(req), userId: user.user_id, route: 'GET /api/dashboard/overdue' })
   }
 }

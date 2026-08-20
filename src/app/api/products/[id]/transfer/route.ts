@@ -4,9 +4,24 @@ import { db } from '@/db/client'
 import { products, stocks, product_image, category, users, coe_domains, stock_transfers } from '@/db/schema'
 import { allocateNextCode, allocateNextSkuCode } from '@/lib/idSequences'
 import { suggestCategoryCode } from '@/lib/categoryCode'
+import { z } from 'zod'
 import { ApiError } from '@/lib/api/errors'
 import { fromError, ok } from '@/lib/api/response'
-import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
+import { requireUser, productScope } from '@/lib/authz'
+import { adjustStock, openStock, lockStock, recordStockEvent, actorFrom } from '@/lib/stock'
+import { parseBody, parseUuidParam, positiveQuantity, uuid } from '@/lib/validation'
+import { requestIdFrom } from '@/lib/logger'
+
+// This route already validated its input thoroughly and already re-read stock
+// inside the transaction — it was the one place in the codebase doing both.
+// The changes here are to share the scope predicate with every other route
+// and to route stock changes through the locking helper so transfers land in
+// the audit ledger alongside every other movement.
+const transferSchema = z.object({
+  target_domain_id: uuid,
+  quantity: positiveQuantity,
+  location: z.string().trim().max(50).nullish(),
+})
 
 // Moves stock from one COE domain to another. Products/stocks carry no
 // domain_id of their own — a product's domain is whichever COE its owning
@@ -28,32 +43,19 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await getAuthUser(request)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(request)
+  if (!auth.ok) return auth.response
+  const { user, scope } = auth
+  const actor = actorFrom(user, requestIdFrom(request))
 
   try {
-    const { id } = await params
-    const body = await request.json()
-    const target_domain_id: unknown = body?.target_domain_id
-    const quantity: unknown = body?.quantity
-    const location: unknown = body?.location
+    const { id: rawId } = await params
+    const id = parseUuidParam(rawId)
+    const { target_domain_id, quantity, location } = await parseBody(request, transferSchema)
+    const cleanLocation = location === undefined ? undefined : (location || null)
 
-    if (typeof target_domain_id !== 'string' || !target_domain_id) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'target_domain_id is required')
-    }
-    if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity <= 0) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'quantity must be a positive integer')
-    }
-    if (location !== undefined && location !== null && typeof location !== 'string') {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid location value')
-    }
-    const cleanLocation = location === undefined ? undefined : (typeof location === 'string' && location.trim() ? location.trim().slice(0, 50) : null)
-
-    // super_admin can transfer any user's product; everyone else only their
-    // own — same ownership rule as PUT/DELETE /api/products/[id].
-    const productCond = user.role === 'super_admin'
-      ? eq(products.product_id, id)
-      : and(eq(products.product_id, id), eq(products.user_id, user.user_id))
+    const visible = productScope(scope)
+    const productCond = visible ? and(eq(products.product_id, id), visible) : eq(products.product_id, id)
     const [product] = await db
       .select({
         product_id: products.product_id,
@@ -98,8 +100,9 @@ export async function POST(
       // Re-read inside the transaction (rather than trusting a pre-tx read)
       // so a concurrent stock change can't push this transfer past what's
       // actually available.
-      const [stockRow] = await tx.select({ quantity: stocks.quantity }).from(stocks).where(eq(stocks.product_id, id))
-      if (!stockRow) throw new ApiError(404, 'NOT_FOUND', 'Stock record not found')
+      // FOR UPDATE, so a concurrent lend or restock can't slip between the
+      // availability check and the decrement below.
+      const stockRow = await lockStock(tx, id)
       if (quantity > stockRow.quantity) {
         throw new ApiError(400, 'VALIDATION_ERROR', `Only ${stockRow.quantity} unit(s) available to transfer`)
       }
@@ -114,7 +117,13 @@ export async function POST(
         }
         destinationProductId = id
       } else {
-        await tx.update(stocks).set({ quantity: stockRow.quantity - quantity }).where(eq(stocks.product_id, id))
+        await adjustStock(tx, {
+          productId: id,
+          delta: -quantity,
+          reason: 'TRANSFER_OUT',
+          actor,
+          note: `Transferred to ${targetDomain.domain_name}`,
+        })
 
         // Category-scoped SKU prefix, same self-heal logic as POST /api/products.
         let skuPrefix = 'GEN'
@@ -141,7 +150,12 @@ export async function POST(
         if (product.category_id) insertData.category_id = product.category_id
 
         const [newProduct] = await tx.insert(products).values(insertData).returning({ product_id: products.product_id })
-        await tx.insert(stocks).values({ product_id: newProduct.product_id, quantity, location: cleanLocation || null })
+        await openStock(tx, {
+          productId: newProduct.product_id,
+          quantity,
+          location: cleanLocation || null,
+          actor,
+        })
 
         const [sourceImage] = await tx.select({ image_url: product_image.image_url }).from(product_image).where(eq(product_image.product_id, id))
         if (sourceImage) {
@@ -160,6 +174,17 @@ export async function POST(
         transferred_by_user_id: user.user_id,
       })
 
+      if (isFull) {
+        // Ownership moved rather than quantity, so the shelf count is
+        // unchanged — but the transfer still belongs in the audit trail.
+        await recordStockEvent(tx, {
+          productId: id,
+          reason: 'TRANSFER_OUT',
+          actor,
+          note: `Full transfer to ${targetDomain.domain_name} (ownership reassigned, quantity unchanged)`,
+        })
+      }
+
       return { mode: isFull ? 'full' as const : 'partial' as const, destination_product_id: destinationProductId }
     })
 
@@ -169,6 +194,6 @@ export async function POST(
       destination_domain: { domain_id: targetDomain.domain_id, domain_name: targetDomain.domain_name },
     })
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(request), userId: user.user_id, route: 'POST /api/products/[id]/transfer' })
   }
 }

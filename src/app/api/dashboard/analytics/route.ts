@@ -1,9 +1,10 @@
+import { requireUser, lendingScope, productScope } from '@/lib/authz'
+import { requestIdFrom } from '@/lib/logger'
 import { NextRequest } from 'next/server'
-import { and, eq, gte, inArray } from 'drizzle-orm'
+import { and, gte, inArray } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { lending_order, lending_item, students, departments, products, stocks, category, coe_domains } from '@/db/schema'
 import { ok, fromError } from '@/lib/api/response'
-import { getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,11 +22,11 @@ function monthLabel(d: Date): string {
 }
 
 export async function GET(req: NextRequest) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(req)
+  if (!auth.ok) return auth.response
+  const { user, scope } = auth
 
   try {
-    const isAdmin = user.role === 'super_admin'
 
     // Reference data (students/departments/categories/domains) is shared
     // across all COEs, not scoped to issued_by_user_id like lending is.
@@ -48,11 +49,7 @@ export async function GET(req: NextRequest) {
         borrower_student_id: lending_order.borrower_student_id,
       })
       .from(lending_order)
-      .where(
-        isAdmin
-          ? gte(lending_order.created_at, oneYearAgo)
-          : and(eq(lending_order.issued_by_user_id, user.user_id), gte(lending_order.created_at, oneYearAgo))
-      )
+      .where(and(lendingScope(scope), gte(lending_order.created_at, oneYearAgo)))
 
     const orderIds = orders.map((o) => o.lending_order_id)
     const items = orderIds.length
@@ -62,12 +59,10 @@ export async function GET(req: NextRequest) {
           .where(inArray(lending_item.lend_order_id, orderIds))
       : []
 
-    const myProducts = isAdmin
-      ? await db.select({ product_id: products.product_id, category_id: products.category_id }).from(products)
-      : await db
-          .select({ product_id: products.product_id, category_id: products.category_id })
-          .from(products)
-          .where(eq(products.user_id, user.user_id))
+    const myProducts = await db
+      .select({ product_id: products.product_id, category_id: products.category_id })
+      .from(products)
+      .where(productScope(scope))
     const myProductIds = myProducts.map((p) => p.product_id)
     const myStocks = myProductIds.length
       ? await db.select({ product_id: stocks.product_id, quantity: stocks.quantity }).from(stocks).where(inArray(stocks.product_id, myProductIds))
@@ -162,6 +157,6 @@ export async function GET(req: NextRequest) {
       monthlyTrend: months,
     })
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(req), userId: user.user_id, route: 'GET /api/dashboard/analytics' })
   }
 }

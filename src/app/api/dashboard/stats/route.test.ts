@@ -4,15 +4,22 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users, category, products, stocks, students, departments, lending_order, lending_item } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 let OWNER_ID: string;
 let DEPT_ID: string;
 let BORROWER_ID: string;
@@ -54,18 +61,18 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("GET /api/dashboard/stats", () => {
   it("returns 401 when unauthenticated", async () => {
-    mockGetAuthUser.mockResolvedValue(null);
+    actingAs(null);
     const res = await GET(new NextRequest("http://localhost/api/dashboard/stats"));
     expect(res.status).toBe(401);
   });
 
   it("computes totals scoped to the authenticated owner's products/orders, excluding the dead ACTIVE status", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [cat] = await db.insert(category).values({ category_name: "Dash Stats Category" }).returning();
     const [product] = await db.insert(products).values({ product_name: "Dash Stats Product", unit_cost: "1", user_id: OWNER_ID, category_id: cat.category_id }).returning();
     await db.insert(stocks).values({ product_id: product.product_id, quantity: 3, damaged_quantity: 1, lost_quantity: 1 });

@@ -4,15 +4,22 @@ import { eq, like } from "drizzle-orm";
 import { db } from "@/db/client";
 import { students, departments } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET, POST } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 
 function authedUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
@@ -32,36 +39,36 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("GET /api/students", () => {
   it("returns 401 when unauthenticated", async () => {
-    mockGetAuthUser.mockResolvedValue(null);
+    actingAs(null);
     const res = await GET(new NextRequest("http://localhost/api/students"));
     expect(res.status).toBe(401);
   });
 
   it("returns students with a nested departments.department_name, matching the old Supabase embed shape", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentList CS" }).returning();
     await db.insert(students).values({ name: "QaStudentList Alice", department_id: dept.department_id });
 
     const res = await GET(new NextRequest("http://localhost/api/students"));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Array<{ name: string; departments: { department_name: string } | null }>;
+    const body = ((await res.json()) as { students: Array<{ name: string; departments: { department_name: string } | null }> }).students;
     const alice = body.find((s) => s.name === "QaStudentList Alice");
     expect(alice).toBeDefined();
     expect(alice?.departments).toEqual({ department_name: "QaDeptForStudentList CS" });
   });
 
   it("filters by search across name/email/student_id_code", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentList Search" }).returning();
     await db.insert(students).values({ name: "QaStudentList Bob", department_id: dept.department_id, email: "qastudentlist-bob@example.com" });
 
     const res = await GET(new NextRequest("http://localhost/api/students?search=qastudentlist-bob"));
-    const body = (await res.json()) as Array<{ name: string }>;
+    const body = ((await res.json()) as { students: Array<{ name: string }> }).students;
     expect(body.some((s) => s.name === "QaStudentList Bob")).toBe(true);
     expect(body.every((s) => s.name.includes("Bob") || true)).toBe(true);
   });
@@ -69,13 +76,13 @@ describe("GET /api/students", () => {
 
 describe("POST /api/students", () => {
   it("returns 400 when name or department_id is missing", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(new NextRequest("http://localhost/api/students", { method: "POST", body: JSON.stringify({}) }));
     expect(res.status).toBe(400);
   });
 
   it("creates a student and returns it with the nested department", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentList New" }).returning();
 
     const res = await POST(
@@ -91,7 +98,7 @@ describe("POST /api/students", () => {
   });
 
   it("returns 400 for a malformed student_id_code", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(
       new NextRequest("http://localhost/api/students", {
         method: "POST",
@@ -102,7 +109,7 @@ describe("POST /api/students", () => {
   });
 
   it("returns 422 when the student_id_code's department code is unknown", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(
       new NextRequest("http://localhost/api/students", {
         method: "POST",
@@ -113,7 +120,7 @@ describe("POST /api/students", () => {
   });
 
   it("resolves department_id from a decodable student_id_code and allows a blank name", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     await db.insert(departments).values({ department_name: "QaDeptForStudentList CS Decode", code: "CS" });
 
     const res = await POST(
@@ -133,7 +140,7 @@ describe("POST /api/students", () => {
   });
 
   it("returns 409 when the student_id_code is already taken", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const [dept] = await db.insert(departments).values({ department_name: "QaDeptForStudentList DupCode", code: "EC" }).returning();
     await db.insert(students).values({ name: "QaStudentList DupCode", department_id: dept.department_id, student_id_code: "sit20ec111" });
 

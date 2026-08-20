@@ -4,15 +4,22 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users, category, products, students, departments, lending_order, lending_item } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 let OWNER_ID: string;
 let DEPT_ID: string;
 let BORROWER_ID: string;
@@ -53,22 +60,25 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("GET /api/dashboard/overdue", () => {
   it("returns [] when there are no overdue orders", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await GET(new NextRequest("http://localhost/api/dashboard/overdue"));
     const body = (await res.json()) as unknown[];
     expect(body).toEqual([]);
   });
 
   it("only flags PENDING orders past their due_date, joined with borrower/product names", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const pastDue = "2020-01-01";
     const [overdue] = await db.insert(lending_order).values({ borrower_type: "STUDENT", borrower_student_id: BORROWER_ID, issued_by_user_id: OWNER_ID, status: "PENDING", due_date: pastDue }).returning();
-    await db.insert(lending_item).values({ lend_order_id: overdue.lending_order_id, product_id: PRODUCT_ID, quantity: 1 });
+    // original_quantity has to be set explicitly: it defaults to 0, and
+    // chk_lending_item_quantities_balance (V29) requires
+    // quantity + damaged + lost <= original_quantity.
+    await db.insert(lending_item).values({ lend_order_id: overdue.lending_order_id, product_id: PRODUCT_ID, quantity: 1, original_quantity: 1 });
 
     // Not overdue: due_date in the future.
     const future = "2099-01-01";

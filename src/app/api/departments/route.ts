@@ -4,7 +4,8 @@ import { db } from "@/db/client";
 import { departments } from "@/db/schema";
 import { ApiError } from '@/lib/api/errors'
 import { created, fromError, ok } from '@/lib/api/response'
-import { forbiddenResponse, getAuthUser, unauthorizedResponse } from "@/lib/authMiddleware";
+import { requireUser } from '@/lib/authz'
+import { requestIdFrom } from '@/lib/logger'
 
 const DEPARTMENT_CODE_PATTERN = /^[A-Z]{2}$/
 
@@ -31,8 +32,8 @@ async function assertDepartmentCodeAvailable(code: string, excludeDepartmentId?:
 }
 
 export async function GET(req: NextRequest) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
+  const auth = await requireUser(req)
+  if (!auth.ok) return auth.response
 
   try {
     const rows = await db
@@ -42,14 +43,13 @@ export async function GET(req: NextRequest) {
 
     return ok(rows)
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(req), route: 'departments' })
   }
 }
 
 export async function POST(req: NextRequest) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
-  if (user.role !== 'super_admin') return forbiddenResponse()
+  const auth = await requireUser(req, { role: 'super_admin' })
+  if (!auth.ok) return auth.response
 
   try {
     const body = await req.json()
@@ -68,6 +68,6 @@ export async function POST(req: NextRequest) {
 
     return created(row)
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(req), route: 'departments' })
   }
 }

@@ -9,7 +9,7 @@
 // merely revoked-but-not-replaced (e.g. an explicit logout) is just treated
 // as invalid, not theft.
 import { randomBytes, createHash } from "crypto";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, lt, or } from "drizzle-orm";
 import type { DbOrTx } from "@/db/client";
 import { sessions } from "@/db/schema";
 
@@ -19,8 +19,35 @@ function generateRawToken(): string {
   return randomBytes(32).toString("base64url");
 }
 
+// JWT_REFRESH_PEPPER is mixed in so a leaked database dump alone can't be
+// used to look up valid refresh tokens by their plain SHA-256. The variable
+// was documented and deployed by CI but never actually read by any code —
+// refresh tokens were hashed unpeppered.
+//
+// Optional and empty-safe: with no pepper set the digest is identical to the
+// old one, so existing sessions keep working. Setting it (or changing it)
+// invalidates every outstanding refresh token, which signs everyone out once.
 function hashToken(raw: string): string {
-  return createHash("sha256").update(raw).digest("hex");
+  const pepper = process.env.JWT_REFRESH_PEPPER ?? "";
+  return createHash("sha256").update(raw).update(pepper).digest("hex");
+}
+
+/**
+ * Deletes sessions that are already expired or were revoked long enough ago
+ * to be useless for reuse detection.
+ *
+ * Nothing ever reaped this table. With a 30-day TTL and rotation on every
+ * 15-minute refresh it grew by roughly 2,880 rows per active user per month,
+ * forever. Revoked rows are kept for a grace period rather than deleted
+ * immediately, because rotateSession relies on finding an already-rotated row
+ * to detect token theft — deleting them eagerly would turn a theft signal
+ * into an ordinary "invalid token".
+ */
+export async function pruneExpiredSessions(db: DbOrTx, revokedGraceDays = 7): Promise<void> {
+  const revokedCutoff = new Date(Date.now() - revokedGraceDays * 24 * 60 * 60 * 1000);
+  await db
+    .delete(sessions)
+    .where(or(lt(sessions.expires_at, new Date()), lt(sessions.revoked_at, revokedCutoff)));
 }
 
 export interface SessionMeta {

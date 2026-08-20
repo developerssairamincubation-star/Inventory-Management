@@ -77,7 +77,10 @@ export default function StudentsPage() {
       if (!res.ok) {
         throw new Error(extractErrorMessage(data, "Failed to load students"));
       }
-      setStudents(Array.isArray(data) ? data : []);
+      // The endpoint is paginated now and returns { students, total, limit,
+      // offset }; the array form is still accepted so an older cached bundle
+      // doesn't blank the page mid-deploy.
+      setStudents(Array.isArray(data) ? data : Array.isArray(data?.students) ? data.students : []);
     } catch (err) {
       // This page's `error` state is only ever rendered inside the Add/Edit
       // modals, which aren't open during the initial list load — a toast is

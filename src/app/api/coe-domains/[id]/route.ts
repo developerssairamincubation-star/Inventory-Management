@@ -4,25 +4,27 @@ import { db } from '@/db/client'
 import { coe_domains, users, lending_order } from '@/db/schema'
 import { ApiError } from '@/lib/api/errors'
 import { fromError, ok } from '@/lib/api/response'
-import { forbiddenResponse, getAuthUser, unauthorizedResponse } from '@/lib/authMiddleware'
+import { z } from 'zod'
+import { requireUser } from '@/lib/authz'
+import { parseBody, parseUuidParam } from '@/lib/validation'
+import { requestIdFrom } from '@/lib/logger'
+
+const domainSchema = z.object({
+  domain_name: z.string().trim().min(1).max(150),
+  room_name: z.string().trim().min(1).max(150),
+})
 
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
-  if (user.role !== 'super_admin') return forbiddenResponse()
+  const auth = await requireUser(req, { role: 'super_admin' })
+  if (!auth.ok) return auth.response
 
   try {
-    const { id } = await params
-    const body = await req.json()
-    const domain_name = (body?.domain_name ?? '').trim()
-    const room_name = (body?.room_name ?? '').trim()
-
-    if (!domain_name || !room_name) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'domain_name and room_name are required')
-    }
+    const { id: rawId } = await params
+    const id = parseUuidParam(rawId)
+    const { domain_name, room_name } = await parseBody(req, domainSchema)
 
     const [existing] = await db
       .select({ domain_id: coe_domains.domain_id })
@@ -45,7 +47,7 @@ export async function PUT(
 
     return ok(row)
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(req), route: 'coe-domains/[id]' })
   }
 }
 
@@ -53,12 +55,12 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const user = await getAuthUser(req)
-  if (!user) return unauthorizedResponse()
-  if (user.role !== 'super_admin') return forbiddenResponse()
+  const auth = await requireUser(req, { role: 'super_admin' })
+  if (!auth.ok) return auth.response
 
   try {
-    const { id } = await params
+    const { id: rawId } = await params
+    const id = parseUuidParam(rawId)
 
     const [referencingUser] = await db
       .select({ user_id: users.user_id })
@@ -89,6 +91,6 @@ export async function DELETE(
 
     return ok({ success: true })
   } catch (error) {
-    return fromError(error)
+    return fromError(error, { requestId: requestIdFrom(req), route: 'coe-domains/[id]' })
   }
 }

@@ -4,15 +4,22 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users, products, category, stocks, purchase_invoice, purchase_invoice_item } from "@/db/schema";
 
-vi.mock("@/lib/authMiddleware", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/authMiddleware")>();
-  return { ...actual, getAuthUser: vi.fn() };
+vi.mock("@/lib/authz", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authz")>();
+  return { ...actual, requireUser: vi.fn() };
 });
 
-import { getAuthUser, type AuthUser } from "@/lib/authMiddleware";
+import { requireUser, type AuthUser } from "@/lib/authz";
+import { authResultFor } from "@/test/authMock";
 import { GET, POST } from "./route";
 
-const mockGetAuthUser = vi.mocked(getAuthUser);
+const mockRequireUser = vi.mocked(requireUser);
+
+// Routes call requireUser(req, { role }) — honour the role option here so a
+// plain `user` still gets a 403 from a super_admin-only route under test.
+function actingAs(user: AuthUser | null) {
+  mockRequireUser.mockImplementation(async (_req, opts) => authResultFor(user, opts));
+}
 let OWNER_ID: string;
 let PRODUCT_ID: string;
 
@@ -32,7 +39,10 @@ beforeAll(async () => {
   const [owner] = await db.insert(users).values({ email: `invoices-route-owner-${Date.now()}@example.com`, password_hash: "irrelevant", full_name: "Invoices Owner" }).returning();
   OWNER_ID = owner.user_id;
   const [cat] = await db.insert(category).values({ category_name: "Invoices Route Category" }).returning();
-  const [product] = await db.insert(products).values({ product_name: "Invoices Route Product", unit_cost: "1", category_id: cat.category_id }).returning();
+  // Invoice line items may only restock products the caller can see, so the
+  // fixture product needs a real owner — an ownerless product resolves to no
+  // domain and is now correctly invisible.
+  const [product] = await db.insert(products).values({ product_name: "Invoices Route Product", unit_cost: "1", category_id: cat.category_id, user_id: OWNER_ID }).returning();
   PRODUCT_ID = product.product_id;
 });
 
@@ -48,18 +58,18 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  mockGetAuthUser.mockReset();
+  mockRequireUser.mockReset();
 });
 
 describe("GET /api/invoices", () => {
   it("returns 401 when unauthenticated", async () => {
-    mockGetAuthUser.mockResolvedValue(null);
+    actingAs(null);
     const res = await GET(new NextRequest("http://localhost/api/invoices"));
     expect(res.status).toBe(401);
   });
 
   it("returns an empty list when the user has no invoices", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await GET(new NextRequest("http://localhost/api/invoices"));
     const body = (await res.json()) as { invoices: unknown[] };
     expect(body.invoices).toEqual([]);
@@ -68,13 +78,13 @@ describe("GET /api/invoices", () => {
 
 describe("POST /api/invoices", () => {
   it("returns 400 when required fields are missing", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     const res = await POST(new NextRequest("http://localhost/api/invoices", { method: "POST", body: JSON.stringify({}) }));
     expect(res.status).toBe(400);
   });
 
   it("creates an invoice+items and increments existing stock for matched products", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     await db.insert(stocks).values({ product_id: PRODUCT_ID, quantity: 5 });
 
     const res = await POST(
@@ -88,7 +98,9 @@ describe("POST /api/invoices", () => {
         }),
       }),
     );
-    expect(res.status).toBe(200);
+    // 201, not 200 — this creates a resource. Clients branch on res.ok, so the
+    // change is invisible to them.
+    expect(res.status).toBe(201);
     const body = (await res.json()) as { invoice: { invoice_id: string; total_amount: string } };
     expect(Number(body.invoice.total_amount)).toBe(20);
 
@@ -97,7 +109,7 @@ describe("POST /api/invoices", () => {
   });
 
   it("sets the stock's location from a line item, and leaves it untouched on a later restock with no location", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     // A prior test in this file may already have a stocks row for PRODUCT_ID
     // (stocks.product_id is unique) — reset to a known baseline instead of
     // assuming this test runs first.
@@ -138,7 +150,7 @@ describe("POST /api/invoices", () => {
 
 describe("GET /api/invoices — super_admin visibility", () => {
   it("returns invoices from every user, with owner_name, when the caller is super_admin", async () => {
-    mockGetAuthUser.mockResolvedValue(authedUser());
+    actingAs(authedUser());
     await POST(
       new NextRequest("http://localhost/api/invoices", {
         method: "POST",
@@ -151,7 +163,7 @@ describe("GET /api/invoices — super_admin visibility", () => {
       }),
     );
 
-    mockGetAuthUser.mockResolvedValue(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "super_admin" }));
+    actingAs(authedUser({ user_id: "00000000-0000-0000-0000-000000000000", role: "super_admin" }));
     const res = await GET(new NextRequest("http://localhost/api/invoices"));
     const body = (await res.json()) as { invoices: Array<{ invoice_number: string; owner_name: string | null }> };
     const created = body.invoices.find((i) => i.invoice_number === "INV-TEST-ADMIN-VIS");
