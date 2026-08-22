@@ -30,6 +30,7 @@ const SENTRY_INGEST = "https://*.ingest.de.sentry.io https://*.ingest.sentry.io"
 // reports to vitals.vercel-insights.com. Both have to be allowed explicitly
 // or the CSP silently kills the feature — which is exactly what happened the
 // first time these headers went in.
+const CLOUDINARY_DELIVERY = "https://res.cloudinary.com";
 const VERCEL_INSIGHTS_SCRIPT = "https://va.vercel-scripts.com";
 const VERCEL_INSIGHTS_REPORT = "https://vitals.vercel-insights.com";
 const isDev = process.env.NODE_ENV !== "production";
@@ -43,13 +44,22 @@ const CSP = [
     : `script-src 'self' 'unsafe-inline' ${VERCEL_INSIGHTS_SCRIPT}`,
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
-  "img-src 'self' data: blob: https://res.cloudinary.com",
+  `img-src 'self' data: blob: ${CLOUDINARY_DELIVERY}`,
   // ws: is the dev-server HMR socket, dropped in production.
   `connect-src 'self' https://api.cloudinary.com ${SENTRY_INGEST} ${VERCEL_INSIGHTS_REPORT}${isDev ? " ws: http://localhost:*" : ""}`,
   // Nothing in this app is meant to be embedded, and the CSRF scheme rests on
   // SameSite=Lax plus a double-submit token — neither of which covers
   // clickjacking.
   "frame-ancestors 'none'",
+  // What *we* may frame, as opposed to who may frame us. The invoice PDF
+  // previews need two sources: blob: for the local preview of a file the user
+  // just picked, and Cloudinary for the stored original of a saved invoice.
+  `frame-src 'self' blob: ${CLOUDINARY_DELIVERY}`,
+  // Kept at 'none'. The PDF previews used <object>, which this blocks — they
+  // are <iframe> now precisely so this directive can stay closed. object-src
+  // exists to block legacy plugin content and is one of the directives a
+  // strict CSP is expected to lock down, so it is not worth reopening to
+  // display a PDF.
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

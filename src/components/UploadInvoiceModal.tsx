@@ -453,12 +453,25 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
                     style={{ fontSize: 11, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", padding: "2px 6px", whiteSpace: "nowrap" }}>Replace</button>
                 </div>
                 {pdfUrl && (
-                  <object data={pdfUrl} type="application/pdf" style={{ flex: 1, width: "100%", minHeight: 0 }}>
-                    <div style={{ padding: 20, fontSize: 12, color: "var(--muted)" }}>
-                      Cannot display PDF inline.{" "}
-                      <a href={pdfUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>Open in new tab</a>
+                  <>
+                    {/* iframe, not <object>: the CSP keeps object-src at 'none'
+                        (see next.config.ts), which blocks <object> outright —
+                        the browser then rendered the fallback children, so this
+                        pane showed "Cannot display PDF inline" for every upload
+                        instead of the document. */}
+                    <iframe
+                      src={pdfUrl}
+                      title={pdfFile ? `Preview of ${pdfFile.name}` : "Invoice PDF preview"}
+                      style={{ flex: 1, width: "100%", minHeight: 0, border: "none" }}
+                    />
+                    {/* An iframe has no fallback content, so the escape hatch is
+                        a permanent link rather than something shown only on
+                        failure. Matches the saved-invoice viewer on the billing
+                        page. */}
+                    <div style={{ padding: "8px 14px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
+                      <a href={pdfUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "var(--accent)" }}>Open in new tab ↗</a>
                     </div>
-                  </object>
+                  </>
                 )}
               </div>
             )}

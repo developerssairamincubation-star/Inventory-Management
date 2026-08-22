@@ -379,12 +379,16 @@ export default function BillingPage() {
               <div style={{ width: '42%', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                 {selectedInvoice.file_url ? (
                   <>
-                    <object data={selectedInvoice.file_url} type="application/pdf" style={{ flex: 1, width: '100%', minHeight: 0 }}>
-                      <div style={{ padding: 20, fontSize: 12, color: 'var(--muted)' }}>
-                        Cannot display PDF inline.{' '}
-                        <a href={selectedInvoice.file_url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>Open in new tab</a>
-                      </div>
-                    </object>
+                    {/* iframe, not <object>: the CSP keeps object-src at 'none'
+                        (see next.config.ts), which blocks <object> outright and
+                        made this pane render its fallback text instead of the
+                        PDF. The "Open original in new tab" link below is the
+                        escape hatch an iframe can't express as child content. */}
+                    <iframe
+                      src={selectedInvoice.file_url}
+                      title={`Invoice ${selectedInvoice.invoice_code} original document`}
+                      style={{ flex: 1, width: '100%', minHeight: 0, border: 'none' }}
+                    />
                     <div style={{ padding: '8px 14px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
                       <a href={selectedInvoice.file_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--accent)' }}>Open original in new tab ↗</a>
                     </div>
