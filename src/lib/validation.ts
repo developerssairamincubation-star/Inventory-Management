@@ -93,8 +93,12 @@ export const userRole = z.enum(['super_admin', 'user'])
 // ── Passwords ────────────────────────────────────────────────────────────
 
 // Not exhaustive, and not meant to be — it catches the handful of passwords
-// that actually show up first in a credential-stuffing list. The length
-// floor does the real work.
+// that actually show up first in a credential-stuffing list.
+//
+// These carry more weight than they used to. The length floor was 12, which
+// was doing most of the work; at 6 it is no longer a serious barrier on its
+// own, so the blocklist and the distinct-character rule are what stop the
+// most obvious choices.
 const COMMON_PASSWORDS = new Set([
   'password', 'password1', 'password123', 'passw0rd', '123456', '12345678', '123456789',
   '1234567890', 'qwerty', 'qwerty123', 'admin', 'admin123', 'administrator', 'letmein',
@@ -103,15 +107,33 @@ const COMMON_PASSWORDS = new Set([
   'inventory123', 'abc123', 'abcd1234', 'p@ssw0rd', 'trustno1',
 ])
 
+/**
+ * Messages are written as sentence fragments, not full sentences:
+ * describeIssue() in parseBody prepends the field label, so a message that
+ * began with "Password" rendered as "Password Password must be at least 6
+ * characters".
+ *
+ * Minimum length is 6, matching what the admin "add user" form has always
+ * told people ("Min. 6 characters", minLength={6}). The schema said 12, so
+ * the form was rejecting passwords that satisfied its own hint — the two
+ * agree now.
+ *
+ * 6 is a deliberate product decision, not a security recommendation: it is
+ * short enough to be brute-forced offline if the hashes ever leak. What
+ * stands behind it here is bcrypt at cost 12, the login rate limits in
+ * src/lib/rateLimit.ts (8 attempts per IP and 12 per account per 15
+ * minutes), and the two content rules below. Raise this before the app
+ * holds anything that would hurt to lose.
+ */
 export const password = z
   .string()
-  .min(12, 'Password must be at least 12 characters')
-  .max(200, 'Password must be at most 200 characters')
+  .min(6, 'must be at least 6 characters')
+  .max(200, 'must be at most 200 characters')
   .refine((v) => !COMMON_PASSWORDS.has(v.toLowerCase()), {
-    message: 'That password is too common. Please choose a less predictable one.',
+    message: 'is too common — please choose a less predictable one',
   })
   .refine((v) => new Set(v).size >= 5, {
-    message: 'Password must use at least 5 different characters',
+    message: 'must use at least 5 different characters',
   })
 
 export const email = z.email().max(255).transform((v) => v.trim().toLowerCase())
