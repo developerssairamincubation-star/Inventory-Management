@@ -5,6 +5,7 @@ import ImageCropModal from "@/components/ImageCropModal";
 import LoadingState from "@/components/LoadingState";
 import { useToast } from "@/components/ui/Toast";
 import { authFetch } from "@/contexts/UserContext";
+import { readApiError, extractErrorMessage } from "@/lib/extractErrorMessage";
 import { uploadFile } from "@/lib/uploadClient";
 
 // ---------------------------------------------------------------------------
@@ -94,8 +95,11 @@ function createRow(base: Partial<ParsedProduct>, existingProducts: ExistingProdu
   return {
     product_name,
     quantity: base.quantity ?? 1,
-    unit_price: base.unit_price ?? 0,
-    total: base.total ?? 0,
+    // Rounded here, not just at submit: the parser returns whatever the PDF
+    // printed, and a row showing 33.333 that silently saves as 33.33 is worse
+    // than one that shows 33.33 from the start and can be corrected.
+    unit_price: toMoney(base.unit_price ?? 0),
+    total: toMoney(base.total ?? 0),
     action: match ? "add_stock" : "new_product",
     linkedProductId: match?.product_id ?? null,
     linkQuery: "",
@@ -109,6 +113,18 @@ function createRow(base: Partial<ParsedProduct>, existingProducts: ExistingProdu
     location: match?.location ?? "",
   };
 }
+
+/**
+ * Money the database can actually store.
+ *
+ * numeric(12,2) means two decimal places, and the API rejects anything finer.
+ * Values reaching this form are not always that tidy: a supplier PDF can print
+ * a unit price to three decimals, and the parser hands back whatever it read
+ * (33.333). Rounding at the edges — on the way in from the parse, and again on
+ * the way out to the API — means what the user sees in the row is exactly what
+ * gets saved, instead of a value that looks fine and is rejected on submit.
+ */
+const toMoney = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
 const isRowTouched = (r: InvoiceRow) => r.product_name.trim() !== "" || r.quantity !== 0 || r.unit_price !== 0;
 
@@ -203,7 +219,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
           // provider's own error text — so it's fine to show directly.
           const e = await res.json().catch(() => ({}));
           console.error("[UploadInvoiceModal] parse-pdf failed:", e);
-          setParseError(e.error || "We couldn't read this invoice. Please check the file and try again, or enter the details manually.");
+          setParseError(extractErrorMessage(e, "We couldn't read this invoice. Please check the file and try again, or enter the details manually."));
           return;
         }
         const data = await res.json();
@@ -251,8 +267,11 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
     setRows((prev) => prev.map((r, i) => {
       if (i !== idx) return r;
       const num = parseFloat(val) || 0;
-      const next = { ...r, [field]: num };
-      next.total = next.quantity * next.unit_price;
+      const next = { ...r, [field]: field === "unit_price" ? toMoney(num) : num };
+      // quantity x unit_price can land a hair off a clean cent in binary
+      // floating point; the API rejects anything that isn't a whole number of
+      // cents, so settle it here rather than at submit.
+      next.total = toMoney(next.quantity * next.unit_price);
       return next;
     }));
   };
@@ -298,89 +317,84 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
   const executeSubmit = async (touchedRows: InvoiceRow[]) => {
     setIsSubmitting(true);
     try {
-      const items: Array<{ product_id: string | null; product_name: string; quantity: number; unit_cost: number; total_cost: number; location: string | null }> = [];
-
-      for (const row of touchedRows) {
-        let product_id: string | null = null;
-
-        if (row.action === "add_stock") {
-          product_id = row.linkedProductId;
-        } else if (row.action === "new_product") {
-          let image_url: string | undefined;
-          if (row.imageFile) {
-            try {
-              image_url = await uploadFile(row.imageFile, "products", authFetch);
-            } catch (uploadErr) {
-              console.error("Image upload error:", uploadErr);
-            }
-          }
-          const body: Record<string, unknown> = {
-            product_name: row.product_name,
-            description: row.description || undefined,
-            unit_cost: row.unit_price,
-            // Initial stock stays 0 — the invoice's own quantity (added
-            // below via POST /api/invoices' per-item stock increment) is
-            // what actually sets this product's starting stock. Sending
-            // the invoice quantity here too would double-count it.
-            quantity: 0,
-            ...(image_url ? { image_url } : {}),
-          };
-          if (row.category_id) body.category_id = row.category_id;
-          const res = await authFetch("/api/products", { method: "POST", body: JSON.stringify(body) });
-          if (!res.ok) {
-            const e = await res.json();
-            throw new Error(`Failed to create "${row.product_name}": ${e.error}`);
-          }
-          const newProd = await res.json();
-          product_id = newProd.product?.product_id ?? newProd.product_id;
+      // Images upload before the invoice call because they go to Cloudinary,
+      // not the database — they cannot take part in the transaction. A failed
+      // image is deliberately non-fatal: the product still gets created.
+      const imageUrls = new Map<number, string>();
+      for (const [idx, row] of touchedRows.entries()) {
+        if (row.action !== "new_product" || !row.imageFile) continue;
+        try {
+          imageUrls.set(idx, await uploadFile(row.imageFile, "products", authFetch));
+        } catch (uploadErr) {
+          console.error("Image upload error:", uploadErr);
+          showToast(`Couldn't upload the image for "${row.product_name}" — saving without it.`, "warning");
         }
-        // invoice_only rows keep product_id === null
+      }
 
-        items.push({
-          product_id,
+      // One payload describing the whole invoice, including the products it
+      // introduces. Products used to be created here in a loop, one POST
+      // each, before the invoice was posted — so any later failure left those
+      // products behind with no invoice, and pressing Save again created them
+      // a second time. The server now creates them inside the invoice's own
+      // transaction (src/lib/products.ts), so the entire upload either lands
+      // or leaves nothing behind.
+      const items = touchedRows.map((row, idx) => {
+        const image_url = imageUrls.get(idx);
+        return {
+          product_id: row.action === "add_stock" ? row.linkedProductId : null,
+          ...(row.action === "new_product"
+            ? {
+                new_product: {
+                  ...(row.category_id ? { category_id: row.category_id } : {}),
+                  ...(row.description ? { description: row.description } : {}),
+                  ...(image_url ? { image_url } : {}),
+                },
+              }
+            : {}),
           product_name: row.product_name,
           quantity: row.quantity,
-          unit_cost: row.unit_price,
-          total_cost: row.total,
+          unit_cost: toMoney(row.unit_price),
+          total_cost: toMoney(row.total),
           location: row.action !== "invoice_only" && row.location.trim() ? row.location.trim() : null,
-        });
-      }
+        };
+      });
 
-      if (items.length === 0) {
-        showToast("Please add at least one invoice item.", "warning");
-        setIsSubmitting(false);
-        return;
-      }
-
-      // Upload the source PDF alongside the parsed data — best-effort, same
-      // as the product image upload above: a storage hiccup here shouldn't
-      // block saving the invoice's actual data.
+      // Best-effort, same as the product images above: a storage hiccup
+      // shouldn't block saving the invoice's actual data.
       let invoice_file_url: string | undefined;
       if (pdfFile) {
         try {
           invoice_file_url = await uploadFile(pdfFile, "invoices", authFetch);
         } catch (uploadErr) {
           console.error("Invoice PDF upload error:", uploadErr);
-          showToast("Invoice saved, but the PDF attachment failed to upload.", "warning");
+          showToast("Couldn't attach the PDF — saving the invoice details anyway.", "warning");
         }
       }
 
       const invNo = invoiceNumber.trim() || autoInvoiceNo;
-      const total_amount = invoiceTotal === "" ? itemsSubtotal : invoiceTotal;
-      const res = await authFetch("/api/invoices", { method: "POST", body: JSON.stringify({ invoice_number: invNo, supplier_name: supplierName, received_date: deliveryDate, total_amount, items, ...(invoice_file_url ? { invoice_file_url } : {}) }) });
-      if (!res.ok) {
-        const e = await res.json();
-        throw new Error(e.error || "Failed to create invoice");
-      }
-      showToast("Invoice created successfully! Stock was updated for linked products.", "success");
+      const total_amount = toMoney(invoiceTotal === "" ? itemsSubtotal : invoiceTotal);
+      const res = await authFetch("/api/invoices", {
+        method: "POST",
+        body: JSON.stringify({
+          invoice_number: invNo,
+          supplier_name: supplierName,
+          received_date: deliveryDate,
+          total_amount,
+          items,
+          ...(invoice_file_url ? { invoice_file_url } : {}),
+        }),
+      });
+      if (!res.ok) throw new Error(await readApiError(res, "Couldn't save the invoice."));
+
+      showToast("Invoice saved. Stock was updated for every linked product.", "success");
       onSuccess();
       onClose();
     } catch (err) {
-      // Messages reaching here already come from the backend's safe,
-      // classified error text (see src/lib/api/classifyError.ts) or from a
-      // thrown validation Error above — never raw driver/SDK text.
       console.error("[UploadInvoiceModal] submit failed:", err);
-      showToast(err instanceof Error ? `Error: ${err.message}` : "Something went wrong. Please try again.", "error");
+      showToast(
+        err instanceof Error ? err.message : "Something went wrong. Please try again.",
+        "error",
+      );
     } finally {
       setIsSubmitting(false);
     }

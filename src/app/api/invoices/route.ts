@@ -4,7 +4,8 @@ import { z } from "zod";
 import { db } from "@/db/client";
 import { purchase_invoice, purchase_invoice_item, invoice_documents, products, users, coe_domains } from "@/db/schema";
 import { requireUser, invoiceScope, productScope } from "@/lib/authz";
-import { ApiError } from "@/lib/api/errors";
+import { ApiError, isApiError } from "@/lib/api/errors";
+import { createProductInTx } from "@/lib/products";
 import { fromError, ok, created } from "@/lib/api/response";
 import { allocateNextCode } from "@/lib/idSequences";
 import { adjustStock, actorFrom } from "@/lib/stock";
@@ -84,11 +85,32 @@ const createInvoiceSchema = z.object({
         // yet. When present it must be a real product the caller can see —
         // enforced in the transaction below.
         product_id: uuid.nullish(),
+        /**
+         * Ask the server to create a product for this line, inside this
+         * invoice's transaction.
+         *
+         * The upload UI used to POST /api/products once per new line and then
+         * post the invoice, so a failure part-way through left the earlier
+         * products committed with no invoice — and retrying created them
+         * again. Declaring the intent here instead makes the whole upload one
+         * transaction: every product, every line, and every stock movement
+         * commit together or not at all.
+         */
+        new_product: z
+          .object({
+            category_id: uuid.nullish(),
+            description: z.string().trim().max(2000).nullish(),
+            image_url: z.string().url().nullish(),
+          })
+          .optional(),
         product_name: z.string().trim().min(1).max(500),
         quantity: positiveQuantity,
         unit_cost: money,
         total_cost: money,
         location: z.string().trim().max(50).nullish(),
+      })
+      .refine((item) => !(item.product_id && item.new_product), {
+        error: 'cannot both link to an existing product and create a new one',
       }),
     )
     .min(1, 'An invoice needs at least one line item')
@@ -114,26 +136,16 @@ export async function POST(request: NextRequest) {
     const computedTotal = body.items.reduce((sum, item) => sum + item.total_cost, 0)
     const total_amount = body.total_amount ?? computedTotal
 
-    // Aggregated before the transaction so a multi-line invoice costs one
-    // locked adjustment per product rather than one per line.
-    const stockUpdates = new Map<string, { quantity: number; location: string | null }>()
-    for (const item of body.items) {
-      if (!item.product_id) continue
-      const existing = stockUpdates.get(item.product_id)
-      if (existing) {
-        existing.quantity += item.quantity
-        if (item.location) existing.location = item.location
-      } else {
-        stockUpdates.set(item.product_id, { quantity: item.quantity, location: item.location ?? null })
-      }
-    }
+    // Only lines that point at an already-existing product can be resolved
+    // out here. Lines carrying `new_product` get their id inside the
+    // transaction, below, and are folded into this map at that point.
+    const referencedIds = [...new Set(body.items.filter((i) => i.product_id).map((i) => i.product_id as string))]
 
     const invoice = await db.transaction(async (tx) => {
       // The hole this closes: product_id came straight from the request body
       // into an upsert on `stocks` with no ownership check at all, so any
       // authenticated user could add arbitrary quantities to any other COE's
       // products — and overwrite their storage location while doing it.
-      const referencedIds = [...stockUpdates.keys()]
       if (referencedIds.length > 0) {
         const visible = productScope(scope)
         const allowed = await tx
@@ -145,6 +157,56 @@ export async function POST(request: NextRequest) {
           throw new ApiError(404, 'NOT_FOUND', 'One or more products are not available in your inventory')
         }
       }
+
+      // Create the products this invoice is introducing, in the same
+      // transaction. `resolvedProductIds` maps a line's index to the id it
+      // ended up with, so line items and stock movements below can reference
+      // rows that did not exist when the request arrived.
+      //
+      // Opening stock is 0: the invoice's own line quantity is applied further
+      // down through adjustStock, so seeding it here would double-count.
+      const resolvedProductIds = new Map<number, string>()
+      for (const [index, item] of body.items.entries()) {
+        if (!item.new_product) continue
+        try {
+          const { product } = await createProductInTx(
+            tx,
+            {
+              product_name: item.product_name,
+              unit_cost: item.unit_cost,
+              quantity: 0,
+              description: item.new_product.description,
+              image_url: item.new_product.image_url,
+              category_id: item.new_product.category_id,
+              location: item.location,
+            },
+            { userId: user.user_id, actor },
+          )
+          resolvedProductIds.set(index, product.product_id)
+        } catch (error) {
+          // Name the line, so a 22-item invoice doesn't force the user to
+          // guess which row the server objected to.
+          if (isApiError(error)) {
+            throw new ApiError(error.status, error.code, `Line ${index + 1} ("${item.product_name}"): ${error.message}`)
+          }
+          throw error
+        }
+      }
+
+      // Aggregated so a multi-line invoice costs one locked adjustment per
+      // product rather than one per line.
+      const stockUpdates = new Map<string, { quantity: number; location: string | null }>()
+      body.items.forEach((item, index) => {
+        const productId = item.product_id ?? resolvedProductIds.get(index)
+        if (!productId) return
+        const existing = stockUpdates.get(productId)
+        if (existing) {
+          existing.quantity += item.quantity
+          if (item.location) existing.location = item.location
+        } else {
+          stockUpdates.set(productId, { quantity: item.quantity, location: item.location ?? null })
+        }
+      })
 
       const invoice_code = await allocateNextCode(tx, 'invoice_code')
 
@@ -161,9 +223,9 @@ export async function POST(request: NextRequest) {
         .returning()
 
       await tx.insert(purchase_invoice_item).values(
-        body.items.map((item) => ({
+        body.items.map((item, index) => ({
           invoice_id: invoiceRow.invoice_id,
-          product_id: item.product_id ?? null,
+          product_id: item.product_id ?? resolvedProductIds.get(index) ?? null,
           product_name: item.product_name,
           quantity: item.quantity,
           unit_cost: String(item.unit_cost),

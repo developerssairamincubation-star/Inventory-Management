@@ -1,5 +1,6 @@
 ﻿"use client";
 import { authFetch, useUser } from "@/contexts/UserContext";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 
 import { useEffect, useState } from "react";
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from "lucide-react";
@@ -197,7 +198,7 @@ export default function BillingPage() {
         fetchInvoices();
       } else {
         const error = await res.json();
-        showToast(`Error: ${error.error || "Failed to delete invoice"}`, "error");
+        showToast(extractErrorMessage(error, "Couldn't delete the invoice. Please try again."), "error");
       }
     } catch (error) {
       console.error("Error deleting invoice:", error);

@@ -572,7 +572,7 @@ export default function ProductDetailPage() {
       const res = await authFetch(`/api/products/${id}?period=${period}`)
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        throw new Error(body.error || 'Product not found')
+        throw new Error(extractErrorMessage(body, 'Product not found'))
       }
       const data = await res.json()
       setProduct(data.product)

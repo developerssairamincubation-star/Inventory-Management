@@ -3,13 +3,11 @@ import { and, desc, eq, getTableColumns } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@/db/client'
 import { products, product_image, stocks, category, users, coe_domains } from '@/db/schema'
-import { allocateNextCode, allocateNextSkuCode } from '@/lib/idSequences'
-import { suggestCategoryCode } from '@/lib/categoryCode'
 import { requireUser, productScope } from '@/lib/authz'
 import { ApiError } from '@/lib/api/errors'
 import { fromError, ok, created } from '@/lib/api/response'
-import { openStock, actorFrom } from '@/lib/stock'
-import { isTrustedAssetUrl } from '@/lib/cloudinary'
+import { actorFrom } from '@/lib/stock'
+import { createProductInTx } from '@/lib/products'
 import { parseBody, money, nonNegativeQuantity, uuid } from '@/lib/validation'
 import { requestIdFrom } from '@/lib/logger'
 
@@ -125,66 +123,24 @@ export async function POST(req: NextRequest) {
     // Image URLs were stored exactly as the client sent them. next/image
     // refuses a foreign host, but the value still reached the database and
     // any consumer not going through next/image would follow it.
-    if (body.image_url && !isTrustedAssetUrl(body.image_url)) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'Product image must be an uploaded file')
-    }
-
-    const result = await db.transaction(async (tx) => {
-      if (body.category_id) {
-        const [exists] = await tx
-          .select({ category_id: category.category_id })
-          .from(category)
-          .where(eq(category.category_id, body.category_id))
-        if (!exists) throw new ApiError(400, 'VALIDATION_ERROR', 'category_id does not reference an existing category')
-      }
-
-      const product_code = await allocateNextCode(tx, 'product_code')
-
-      // SKU is always auto-generated, category-scoped, and the barcode
-      // payload printed on product labels — never client-supplied.
-      let skuPrefix = 'GEN'
-      if (body.category_id) {
-        const [cat] = await tx
-          .select({ category_name: category.category_name, code: category.code })
-          .from(category)
-          .where(eq(category.category_id, body.category_id))
-        if (cat?.code) {
-          skuPrefix = cat.code
-        } else if (cat) {
-          // Category predates the code feature — backfill a unique code now
-          // rather than falling back to the shared literal "GEN", which would
-          // collide with the uncategorized sequence.
-          skuPrefix = await suggestCategoryCode(tx, cat.category_name)
-          await tx.update(category).set({ code: skuPrefix }).where(eq(category.category_id, body.category_id))
-        }
-      }
-      const sku_code = await allocateNextSkuCode(tx, body.category_id, skuPrefix)
-
-      const insertData: typeof products.$inferInsert = {
-        product_code,
-        product_name: body.product_name,
-        unit_cost: String(body.unit_cost),
-        user_id: user.user_id,
-        sku_code,
-      }
-      if (body.description) insertData.description = body.description
-      if (body.category_id) insertData.category_id = body.category_id
-
-      const [product] = await tx.insert(products).values(insertData).returning()
-
-      const stock = await openStock(tx, {
-        productId: product.product_id,
-        quantity: body.quantity,
-        location: body.location,
-        actor,
-      })
-
-      if (body.image_url) {
-        await tx.insert(product_image).values({ product_id: product.product_id, image_url: body.image_url })
-      }
-
-      return { product, stock }
-    })
+    // The body of this used to live here inline. It now lives in
+    // src/lib/products.ts so POST /api/invoices can run the identical logic
+    // inside its own transaction — see the note at the top of that file.
+    const result = await db.transaction(async (tx) =>
+      createProductInTx(
+        tx,
+        {
+          product_name: body.product_name,
+          unit_cost: body.unit_cost,
+          quantity: body.quantity,
+          description: body.description,
+          image_url: body.image_url,
+          category_id: body.category_id,
+          location: body.location,
+        },
+        { userId: user.user_id, actor },
+      ),
+    )
 
     return created({
       product: { ...result.product, image_url: body.image_url ?? null },

@@ -19,15 +19,39 @@ import { ApiError } from '@/lib/api/errors'
  * bounded — an unbounded integer still lets someone set stock to 2^31 and
  * overflow the INT column.
  */
-export const positiveQuantity = z.number().int().positive().max(1_000_000)
+export const positiveQuantity = z
+  .number({ error: 'must be a number' })
+  .int('must be a whole number')
+  .positive('must be at least 1')
+  .max(1_000_000, 'is too large')
 
 /** Same, but zero is a legitimate value (setting stock to empty). */
-export const nonNegativeQuantity = z.number().int().min(0).max(1_000_000)
+export const nonNegativeQuantity = z
+  .number({ error: 'must be a number' })
+  .int('must be a whole number')
+  .min(0, 'cannot be negative')
+  .max(1_000_000, 'is too large')
 
-/** Money. numeric(12,2) in Postgres, so two decimal places and non-negative. */
-export const money = z.number().nonnegative().max(99_999_999).multipleOf(0.01)
+/**
+ * Money. numeric(12,2) in Postgres, so two decimal places and non-negative.
+ *
+ * The messages here are written to be read by whoever is filling in the form,
+ * not by whoever wrote the schema. Zod's default for the last rule is
+ * "Invalid number: must be a multiple of 0.01", which is accurate and tells a
+ * user nothing about what to do. This is the rule real invoices trip most
+ * often: a supplier PDF that prints a unit price to three decimals, or a
+ * parsed value like 33.333, is rejected here.
+ */
+export const money = z
+  .number({ error: 'must be a number' })
+  .nonnegative('cannot be negative')
+  .max(99_999_999, 'is too large')
+  .multipleOf(0.01, 'can have at most 2 decimal places (for example 33.33, not 33.333)')
 
-export const uuid = z.uuid()
+// Message is written to complete the sentence describeIssue() builds, e.g.
+// "Line 3: category is not a valid selection" — Zod's default ("Invalid UUID")
+// reads as gibberish to anyone who isn't a developer.
+export const uuid = z.uuid('is not a valid selection')
 
 /** Optional free-text, trimmed, length-capped to match the column. */
 export const shortText = (max: number) =>
@@ -99,6 +123,50 @@ export const email = z.email().max(255).transform((v) => v.trim().toLowerCase())
  * `fromError` handler already knows how to render. `details` carries the
  * per-field messages so a form can show them inline.
  */
+/**
+ * Turns a Zod issue path into something readable.
+ *
+ *   ["items", 3, "unit_cost"]  ->  "Line 4: unit cost can have at most 2 decimal places"
+ *   ["supplier_name"]          ->  "Supplier name is required"
+ *
+ * Array indices become 1-based line numbers because that is how the row is
+ * labelled on screen; a user counting rows does not start at zero.
+ */
+const FIELD_LABELS: Record<string, string> = {
+  unit_cost: 'unit cost',
+  total_cost: 'total cost',
+  product_name: 'product name',
+  supplier_name: 'supplier name',
+  invoice_number: 'invoice number',
+  received_date: 'received date',
+  total_amount: 'total amount',
+  student_id_code: 'student ID',
+  lending_items: 'items',
+  due_date: 'due date',
+  category_id: 'category',
+  domain_id: 'COE domain',
+  image_url: 'image',
+  quantity: 'quantity',
+  location: 'location',
+  description: 'description',
+  email: 'email',
+  name: 'name',
+}
+
+export function describeIssue(path: ReadonlyArray<PropertyKey>, message: string): string {
+  const segments = path.map((p) => (typeof p === 'number' ? p : String(p)))
+  const lineIndex = segments.findIndex((p) => typeof p === 'number')
+
+  const fieldKey = String(segments[segments.length - 1] ?? '')
+  const label = FIELD_LABELS[fieldKey] ?? fieldKey.replace(/_/g, ' ')
+
+  const prefix = lineIndex >= 0 ? `Line ${(segments[lineIndex] as number) + 1}: ` : ''
+  if (!label) return `${prefix}${message}`
+
+  const sentence = `${prefix}${label} ${message}`
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1)
+}
+
 export async function parseBody<T extends z.ZodType>(req: Request, schema: T): Promise<z.infer<T>> {
   let raw: unknown
   try {
@@ -112,8 +180,17 @@ export async function parseBody<T extends z.ZodType>(req: Request, schema: T): P
     const details = result.error.issues.map((issue) => ({
       field: issue.path.join('.') || '(body)',
       message: issue.message,
+      // A sentence the person filling in the form can act on, rather than a
+      // schema path. "items.3.unit_cost" + "must be a multiple of 0.01" told
+      // a user neither which row was wrong nor what to change.
+      detail: describeIssue(issue.path, issue.message),
     }))
-    throw new ApiError(400, 'VALIDATION_ERROR', details[0]?.message ?? 'Invalid request body', details)
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      details[0]?.detail ?? details[0]?.message ?? 'Invalid request body',
+      details,
+    )
   }
 
   return result.data

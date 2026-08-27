@@ -1,5 +1,6 @@
 ﻿"use client";
 import { authFetch, useUser } from "@/contexts/UserContext";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { uploadFile } from "@/lib/uploadClient";
 
 import { useEffect, useState, useCallback } from "react";
@@ -630,7 +631,7 @@ export default function ProductsPage() {
                       succeededIds.push(item.id);
                     } else {
                       const errData = await res.json().catch(() => null);
-                      throw new Error(errData?.error || `Failed to create "${item.productName || 'product'}"`);
+                      throw new Error(extractErrorMessage(errData, `Couldn't create "${item.productName || 'product'}".`));
                     }
                   } catch (itemErr) {
                     console.error('Error saving product row:', itemErr);
@@ -1305,7 +1306,7 @@ export default function ProductsPage() {
                                 removeInlineItem(item.id);
                               } else {
                                 const errData = await res.json().catch(() => null);
-                                throw new Error(errData?.error || `Failed to create "${item.productName || 'product'}"`);
+                                throw new Error(extractErrorMessage(errData, `Couldn't create "${item.productName || 'product'}".`));
                               }
                             } catch (err) {
                               console.error('Error adding product:', err);

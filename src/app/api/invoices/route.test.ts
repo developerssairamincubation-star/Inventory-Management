@@ -51,8 +51,16 @@ afterAll(async () => {
   const invoiceIds = invoices.map((i) => i.id);
   if (invoiceIds.length) await db.delete(purchase_invoice_item).where(inArray(purchase_invoice_item.invoice_id, invoiceIds));
   await db.delete(purchase_invoice).where(eq(purchase_invoice.user_id, OWNER_ID));
-  await db.delete(stocks).where(eq(stocks.product_id, PRODUCT_ID));
-  await db.delete(products).where(eq(products.product_id, PRODUCT_ID));
+  // Not just the fixture: the atomicity tests create products through the
+  // route itself, and they are owned by OWNER_ID like everything else here.
+  // Leaving them behind made a second run of this file see six "Atomic New"
+  // rows where it expected two.
+  const owned = await db.select({ id: products.product_id }).from(products).where(eq(products.user_id, OWNER_ID));
+  const ownedIds = owned.map((p) => p.id);
+  if (ownedIds.length) {
+    await db.delete(stocks).where(inArray(stocks.product_id, ownedIds));
+    await db.delete(products).where(inArray(products.product_id, ownedIds));
+  }
   await db.delete(category).where(eq(category.category_name, "Invoices Route Category"));
   await db.delete(users).where(eq(users.user_id, OWNER_ID));
 });
@@ -106,6 +114,119 @@ describe("POST /api/invoices", () => {
 
     const [stock] = await db.select({ quantity: stocks.quantity }).from(stocks).where(eq(stocks.product_id, PRODUCT_ID));
     expect(stock.quantity).toBe(15);
+  });
+
+  // ── Atomicity ──────────────────────────────────────────────────────────
+  //
+  // The upload UI used to create each new product with its own
+  // POST /api/products call before posting the invoice. A failure part-way
+  // through left those products committed with no invoice, and pressing Save
+  // again created them a second time — a 22-line invoice could leave 21
+  // orphans behind. Product creation now happens inside this route's
+  // transaction; these two tests are what stop that regressing.
+
+  it("creates new products inside the invoice's own transaction", async () => {
+    actingAs(authedUser());
+
+    const res = await POST(
+      new NextRequest("http://localhost/api/invoices", {
+        method: "POST",
+        body: JSON.stringify({
+          invoice_number: "INV-ATOMIC-OK",
+          supplier_name: "Atomic Supplier",
+          received_date: "2026-01-01",
+          items: [
+            { product_name: "Atomic New A", quantity: 7, unit_cost: 12.5, total_cost: 87.5, location: "R2", new_product: {} },
+            { product_name: "Atomic New B", quantity: 3, unit_cost: 4.25, total_cost: 12.75, new_product: {} },
+          ],
+        }),
+      }),
+    );
+    expect(res.status).toBe(201);
+
+    const created = await db
+      .select({ id: products.product_id, name: products.product_name })
+      .from(products)
+      .where(inArray(products.product_name, ["Atomic New A", "Atomic New B"]));
+    expect(created).toHaveLength(2);
+
+    // Opening stock is 0 and the invoice's own quantity supplies the balance,
+    // so a double-count would show up here as 14 rather than 7.
+    const a = created.find((p) => p.name === "Atomic New A")!;
+    const [stockA] = await db.select({ quantity: stocks.quantity, location: stocks.location }).from(stocks).where(eq(stocks.product_id, a.id));
+    expect(stockA.quantity).toBe(7);
+    expect(stockA.location).toBe("R2");
+
+    // The line item must point at the product the transaction created, not null.
+    const [invoiceRow] = await db.select({ id: purchase_invoice.invoice_id }).from(purchase_invoice).where(eq(purchase_invoice.invoice_number, "INV-ATOMIC-OK"));
+    const lines = await db.select({ product_id: purchase_invoice_item.product_id }).from(purchase_invoice_item).where(eq(purchase_invoice_item.invoice_id, invoiceRow.id));
+    expect(lines).toHaveLength(2);
+    expect(lines.every((l) => l.product_id !== null)).toBe(true);
+  });
+
+  it("leaves nothing behind when a later line fails", async () => {
+    actingAs(authedUser());
+
+    const res = await POST(
+      new NextRequest("http://localhost/api/invoices", {
+        method: "POST",
+        body: JSON.stringify({
+          invoice_number: "INV-ATOMIC-FAIL",
+          supplier_name: "Atomic Supplier",
+          received_date: "2026-01-01",
+          items: [
+            { product_name: "Rollback A", quantity: 2, unit_cost: 10, total_cost: 20, new_product: {} },
+            { product_name: "Rollback B", quantity: 1, unit_cost: 5, total_cost: 5, new_product: {} },
+            // Valid UUID, no such category — so this throws inside the
+            // transaction, after A and B have already been inserted.
+            { product_name: "Rollback C", quantity: 1, unit_cost: 5, total_cost: 5, new_product: { category_id: "550e8400-e29b-41d4-a716-446655440000" } },
+          ],
+        }),
+      }),
+    );
+    expect(res.ok).toBe(false);
+
+    // The message names the offending line, so a long invoice doesn't force
+    // the user to guess which row the server objected to.
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("Line 3");
+    expect(body.error.message).toContain("Rollback C");
+
+    const survivors = await db
+      .select({ id: products.product_id })
+      .from(products)
+      .where(inArray(products.product_name, ["Rollback A", "Rollback B", "Rollback C"]));
+    expect(survivors).toHaveLength(0);
+
+    const invoices = await db.select({ id: purchase_invoice.invoice_id }).from(purchase_invoice).where(eq(purchase_invoice.invoice_number, "INV-ATOMIC-FAIL"));
+    expect(invoices).toHaveLength(0);
+  });
+
+  it("rejects money with more than two decimal places, naming the line", async () => {
+    actingAs(authedUser());
+
+    const res = await POST(
+      new NextRequest("http://localhost/api/invoices", {
+        method: "POST",
+        body: JSON.stringify({
+          invoice_number: "INV-PRECISION",
+          supplier_name: "Atomic Supplier",
+          received_date: "2026-01-01",
+          items: [
+            { product_name: "Fine", quantity: 1, unit_cost: 10.5, total_cost: 10.5, new_product: {} },
+            { product_name: "Too precise", quantity: 1, unit_cost: 33.333, total_cost: 33.33, new_product: {} },
+          ],
+        }),
+      }),
+    );
+    expect(res.status).toBe(400);
+
+    const body = (await res.json()) as { error: { message: string; details: Array<{ detail: string }> } };
+    // numeric(12,2) genuinely cannot hold it, so rejecting is right — but the
+    // message has to say which line and what to do about it.
+    expect(body.error.message).toContain("Line 2");
+    expect(body.error.message).toContain("2 decimal places");
+    expect(body.error.details[0].detail).toContain("unit cost");
   });
 
   it("sets the stock's location from a line item, and leaves it untouched on a later restock with no location", async () => {
