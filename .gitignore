@@ -58,3 +58,6 @@ next-env.d.ts
 
 # Local database dumps taken before destructive operations — never commit.
 db/backups/
+
+# k6 self-signed certs for local TLS-terminated load tests
+k6/tools/.certs/
