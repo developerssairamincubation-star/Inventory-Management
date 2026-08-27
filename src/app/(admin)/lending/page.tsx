@@ -194,13 +194,33 @@ function ProductSearchDropdown({
   open,
   products,
   onSelect,
+  activeIndex = 0,
+  onHover,
+  listId,
+  optionIdPrefix,
 }: {
   anchorEl: HTMLElement | null;
   open: boolean;
   products: { product_id: string; product_name: string }[];
   onSelect: (product: { product_id: string; product_name: string }) => void;
+  /** Option the arrow keys have moved to; highlighted and scrolled into view. */
+  activeIndex?: number;
+  /** Keeps the mouse and keyboard pointing at the same option. */
+  onHover?: (index: number) => void;
+  listId?: string;
+  optionIdPrefix?: string;
 }) {
   const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  // The list scrolls at 180px tall, so arrowing past the fold has to bring the
+  // highlighted row with it — otherwise the selection silently walks off
+  // screen and the keyboard path is unusable beyond the first few matches.
+  useEffect(() => {
+    if (!open) return;
+    const el = listRef.current?.querySelector<HTMLElement>('[data-active="true"]');
+    el?.scrollIntoView({ block: "nearest" });
+  }, [open, activeIndex, products.length]);
 
   useEffect(() => {
     if (!open || !anchorEl) { setRect(null); return; }
@@ -221,23 +241,39 @@ function ProductSearchDropdown({
 
   return createPortal(
     <div
+      ref={listRef}
+      id={listId}
+      role="listbox"
       style={{
         position: "fixed", top: rect.top, left: rect.left, width: rect.width, zIndex: 1000,
         background: "#fff", border: "1px solid var(--border)", maxHeight: 180, overflowY: "auto",
         boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
       }}
     >
-      {products.map((product) => (
-        <button
-          key={product.product_id}
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onSelect(product)}
-          style={{ display: "block", width: "100%", padding: "5px 8px", textAlign: "left", fontSize: 11, color: "var(--fg)", background: "none", border: "none", cursor: "pointer" }}
-        >
-          {product.product_name}
-        </button>
-      ))}
+      {products.map((product, index) => {
+        const active = index === activeIndex;
+        return (
+          <button
+            key={product.product_id}
+            id={optionIdPrefix ? `${optionIdPrefix}-${product.product_id}` : undefined}
+            type="button"
+            role="option"
+            aria-selected={active}
+            data-active={active}
+            onMouseDown={(e) => e.preventDefault()}
+            onMouseEnter={() => onHover?.(index)}
+            onClick={() => onSelect(product)}
+            style={{
+              display: "block", width: "100%", padding: "5px 8px", textAlign: "left", fontSize: 11,
+              color: active ? "#fff" : "var(--fg)",
+              background: active ? "var(--accent)" : "none",
+              border: "none", cursor: "pointer",
+            }}
+          >
+            {product.product_name}
+          </button>
+        );
+      })}
     </div>,
     document.body
   );
@@ -267,9 +303,20 @@ export default function LendingPage() {
   const [coeDomains, setCoeDomains] = useState<CoeDomain[]>([]);
   const [adminDomainId, setAdminDomainId] = useState(""); // only used when appUser has no domain
   const [lineDropdown, setLineDropdown] = useState<{ rowId: string; lineId: string } | null>(null);
+  // Which option the arrow keys have moved to. The product picker was
+  // mouse-only: with a barcode scanner in one hand, reaching for the mouse to
+  // pick a product is the slowest step in the whole entry flow.
+  const [lineDropdownIndex, setLineDropdownIndex] = useState(0);
   // Both keyed by `${rowId}:${lineId}` — one product line's own errors.
   const [lineStockError, setLineStockError] = useState<{ [key: string]: string }>({});
-  const [rowSubmitStatus, setRowSubmitStatus] = useState<{ [rowId: string]: "ok" | "error" }>({});
+  /**
+   * Per-row submit outcome. This used to be just "ok" | "error", so a failed
+   * row turned red and the toast said "some rows failed" — the actual reason
+   * came back in the response and was thrown away. It now carries the server's
+   * message and, where the response names one, the field to highlight.
+   */
+  type RowSubmitState = { status: "ok" | "error"; message?: string; field?: string; lineId?: string };
+  const [rowSubmitStatus, setRowSubmitStatus] = useState<{ [rowId: string]: RowSubmitState }>({});
   const [editingReturnDate, setEditingReturnDate] = useState<number | null>(null);
   const [editQtyStr, setEditQtyStr] = useState<string>('');
   const [editingRow, setEditingRow] = useState<number | null>(null);
@@ -883,7 +930,8 @@ export default function LendingPage() {
 
     setIsSubmitting(true);
     let anyFailed = false;
-    const statusUpdate: { [rowId: string]: "ok" | "error" } = {};
+    let firstError = "";
+    const statusUpdate: { [rowId: string]: RowSubmitState } = {};
 
     // due_date lives on the order, not the item, so a row whose lines have
     // different item types/due dates can't collapse into one POST — group
@@ -898,6 +946,7 @@ export default function LendingPage() {
       }
 
       let rowFailed = false;
+      let rowError: { message?: string; field?: string; lineId?: string } = {};
       for (const items of groups.values()) {
         try {
           const res = await authFetch("/api/lending", {
@@ -912,13 +961,31 @@ export default function LendingPage() {
               lending_items: items.map(l => ({ product_id: l.productId, quantity: Number(l.quantity) || 1, item_type: l.itemType })),
             }),
           });
-          if (!res.ok) rowFailed = true;
+          if (!res.ok) {
+            const body = await res.json().catch(() => null);
+            const message = extractErrorMessage(body, "Couldn't save this entry. Please try again.");
+            const field = (body as { error?: { details?: Array<{ field?: string }> } } | null)
+              ?.error?.details?.[0]?.field;
+            // A validation path like "lending_items.2.quantity" points at a
+            // specific product line, so resolve it back to that line's id and
+            // mark the input the user actually has to change.
+            const lineMatch = field?.match(/^lending_items\.(\d+)\./);
+            rowError = {
+              message,
+              field,
+              lineId: lineMatch ? items[Number(lineMatch[1])]?.id : undefined,
+            };
+            if (!firstError) firstError = message;
+            rowFailed = true;
+          }
         } catch (error) {
           console.error("Error creating lending entry:", error);
+          rowError = { message: "Couldn't reach the server. Check your connection and try again." };
+          if (!firstError) firstError = rowError.message!;
           rowFailed = true;
         }
       }
-      statusUpdate[row.id] = rowFailed ? "error" : "ok";
+      statusUpdate[row.id] = rowFailed ? { status: "error", ...rowError } : { status: "ok" };
       if (rowFailed) anyFailed = true;
     }
 
@@ -930,9 +997,9 @@ export default function LendingPage() {
       setIsModalOpen(false);
       resetForm();
     } else {
-      showToast("Some rows failed — fix the highlighted rows and submit again.", "warning");
+      showToast(firstError || "Some rows couldn't be saved — fix the highlighted rows and submit again.", "error");
       // Keep only the failed rows so the user can fix and resubmit.
-      setFormRows(prev => prev.filter(r => statusUpdate[r.id] === "error"));
+      setFormRows(prev => prev.filter(r => statusUpdate[r.id]?.status === "error"));
     }
   };
 
@@ -1641,10 +1708,25 @@ export default function LendingPage() {
                   const submitState = rowSubmitStatus[row.id];
                   return (
                     <div key={row.id} style={{
-                      border: submitState === 'error' ? '1px solid #dc2626' : '1px solid var(--border)',
+                      border: submitState?.status === 'error' ? '1px solid #dc2626' : '1px solid var(--border)',
                       background: index % 2 === 0 ? '#fff' : 'var(--surface)',
                       padding: 10,
                     }}>
+                      {submitState?.status === 'error' && submitState.message && (
+                        <div
+                          role="alert"
+                          style={{
+                            display: 'flex', gap: 6, alignItems: 'flex-start',
+                            background: '#fef2f2', border: '1px solid #fecaca',
+                            color: '#991b1b', fontSize: 11, lineHeight: 1.45,
+                            padding: '6px 8px', marginBottom: 8,
+                          }}
+                        >
+                          <span aria-hidden="true" style={{ fontWeight: 700 }}>!</span>
+                          <span>{submitState.message}</span>
+                        </div>
+                      )}
+
                       {/* Card header: S.No, Student ID, Student Name, row actions */}
                       <div style={{ display: 'grid', gridTemplateColumns: '30px 150px 1fr auto', gap: 8, alignItems: 'start', marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
                         <div style={{ fontSize: 11, color: 'var(--muted)', paddingTop: 5 }}>{index + 1}</div>
@@ -1661,7 +1743,8 @@ export default function LendingPage() {
                               if (e.key === 'Enter') { e.preventDefault(); decodeStudentIdForRow(row.id, row.studentIdCode); focusNextStudentIdField(row.id); }
                               else if (e.key === 'F2') { e.preventDefault(); focusNextStudentIdField(row.id); }
                             }}
-                            style={{ width: '100%', padding: '4px 6px', fontSize: 11, border: row.decodeError ? '1px solid #dc2626' : '1px solid var(--border)', boxSizing: 'border-box' as const, fontFamily: 'monospace' }}
+                            style={{ width: '100%', padding: '4px 6px', fontSize: 11, border: (row.decodeError || submitState?.field === 'student_id_code') ? '1px solid #dc2626' : '1px solid var(--border)', boxSizing: 'border-box' as const, fontFamily: 'monospace' }}
+                            aria-invalid={!!(row.decodeError || submitState?.field === 'student_id_code')}
                             title="Enter: decode and next row · F2: skip to next row"
                           />
                           {row.decoded?.department_name && (
@@ -1718,8 +1801,42 @@ export default function LendingPage() {
                                   type="text"
                                   placeholder="Type to search…"
                                   value={line.productQuery}
-                                  onChange={(e) => { updateLine(row.id, line.id, 'productQuery', e.target.value); setLineDropdown({ rowId: row.id, lineId: line.id }); }}
-                                  onFocus={() => setLineDropdown({ rowId: row.id, lineId: line.id })}
+                                  onChange={(e) => { updateLine(row.id, line.id, 'productQuery', e.target.value); setLineDropdown({ rowId: row.id, lineId: line.id }); setLineDropdownIndex(0); }}
+                                  onFocus={() => { setLineDropdown({ rowId: row.id, lineId: line.id }); setLineDropdownIndex(0); }}
+                                  onKeyDown={(e) => {
+                                    const isOpen = lineDropdown?.rowId === row.id && lineDropdown.lineId === line.id;
+                                    if (!isOpen || lineProducts.length === 0) return;
+                                    if (e.key === 'ArrowDown') {
+                                      e.preventDefault();
+                                      setLineDropdownIndex((i) => (i + 1) % lineProducts.length);
+                                    } else if (e.key === 'ArrowUp') {
+                                      e.preventDefault();
+                                      setLineDropdownIndex((i) => (i - 1 + lineProducts.length) % lineProducts.length);
+                                    } else if (e.key === 'Home') {
+                                      e.preventDefault();
+                                      setLineDropdownIndex(0);
+                                    } else if (e.key === 'End') {
+                                      e.preventDefault();
+                                      setLineDropdownIndex(lineProducts.length - 1);
+                                    } else if (e.key === 'Enter') {
+                                      // Only swallow Enter when an option is actually highlighted —
+                                      // otherwise a scanner's trailing Enter would be eaten here.
+                                      const picked = lineProducts[lineDropdownIndex];
+                                      if (picked) { e.preventDefault(); selectProductForLine(row.id, line.id, picked as Product); }
+                                    } else if (e.key === 'Escape') {
+                                      e.preventDefault();
+                                      setLineDropdown(null);
+                                    }
+                                  }}
+                                  role="combobox"
+                                  aria-expanded={lineDropdown?.rowId === row.id && lineDropdown.lineId === line.id && lineProducts.length > 0}
+                                  aria-controls={`product-options-${line.id}`}
+                                  aria-activedescendant={
+                                    lineDropdown?.rowId === row.id && lineDropdown.lineId === line.id && lineProducts[lineDropdownIndex]
+                                      ? `product-option-${line.id}-${lineProducts[lineDropdownIndex].product_id}`
+                                      : undefined
+                                  }
+                                  aria-autocomplete="list"
                                   style={{ width: '100%', padding: '4px 6px', fontSize: 11, border: '1px solid var(--border)', boxSizing: 'border-box' as const }}
                                 />
                                 {line.productName && <div style={{ fontSize: 9, color: 'var(--accent)', marginTop: 2 }}>{line.productName}</div>}
@@ -1727,6 +1844,10 @@ export default function LendingPage() {
                                   anchorEl={productInputRefs.current.get(line.id) ?? null}
                                   open={lineDropdown?.rowId === row.id && lineDropdown.lineId === line.id}
                                   products={lineProducts}
+                                  activeIndex={lineDropdownIndex}
+                                  listId={`product-options-${line.id}`}
+                                  optionIdPrefix={`product-option-${line.id}`}
+                                  onHover={setLineDropdownIndex}
                                   onSelect={(product) => selectProductForLine(row.id, line.id, product as Product)}
                                 />
                               </div>
@@ -1751,7 +1872,8 @@ export default function LendingPage() {
                                     updateLine(row.id, line.id, 'quantity', v);
                                     if (line.productId && v !== '') checkStockForLine(row.id, line.id, line.productId, Number(v));
                                   }}
-                                  style={{ width: '100%', padding: '4px 6px', fontSize: 11, border: lineStockError[lineKey] ? '1px solid #dc2626' : '1px solid var(--border)', boxSizing: 'border-box' as const }}
+                                  aria-invalid={!!(lineStockError[lineKey] || (submitState?.lineId === line.id && submitState.field?.endsWith('quantity')))}
+                                  style={{ width: '100%', padding: '4px 6px', fontSize: 11, border: (lineStockError[lineKey] || (submitState?.lineId === line.id && submitState.field?.endsWith('quantity'))) ? '1px solid #dc2626' : '1px solid var(--border)', boxSizing: 'border-box' as const }}
                                 />
                                 {lineStockError[lineKey] && <div style={{ fontSize: 9, color: '#dc2626', marginTop: 2 }}>{lineStockError[lineKey]}</div>}
                               </div>
@@ -1770,7 +1892,8 @@ export default function LendingPage() {
                               <input type="date" disabled={line.itemType === 'CONSUMABLE'} min={new Date().toISOString().split('T')[0]}
                                 value={line.dueDateValue}
                                 onChange={(e) => updateLine(row.id, line.id, 'dueDateValue', e.target.value)}
-                                style={{ width: '100%', padding: '4px 6px', fontSize: 11, border: '1px solid var(--border)', boxSizing: 'border-box' as const, opacity: line.itemType === 'CONSUMABLE' ? 0.4 : 1 }} />
+                                aria-invalid={submitState?.field === 'due_date'}
+                                style={{ width: '100%', padding: '4px 6px', fontSize: 11, border: submitState?.field === 'due_date' ? '1px solid #dc2626' : '1px solid var(--border)', boxSizing: 'border-box' as const, opacity: line.itemType === 'CONSUMABLE' ? 0.4 : 1 }} />
                               <input type="number" min={0} placeholder="days" disabled={line.itemType === 'CONSUMABLE'}
                                 value={daysDisplay}
                                 onChange={(e) => {

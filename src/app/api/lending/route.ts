@@ -159,8 +159,13 @@ const createLendingSchema = z.object({
   // Was `new Date(lending_date)` on raw input: an unparseable string became
   // an Invalid Date that failed at insert as an opaque 500, and a valid one
   // could backdate or post-date a record out of every reporting window.
-  lending_date: pastOrPresentDate.optional(),
-  due_date: isoDateOnly.optional(),
+  // nullish(), not optional(): a consumable has no due date, and the entry
+  // form sends `due_date: null` to say so. `.optional()` accepts undefined
+  // but rejects an explicit null, so every consumable entry failed with
+  // "expected string, received null" — while the route below already
+  // normalises with `due_date || null`, i.e. null was always the intent.
+  lending_date: pastOrPresentDate.nullish(),
+  due_date: isoDateOnly.nullish(),
   domain_id: uuid.optional(),
 })
 
