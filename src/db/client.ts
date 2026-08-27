@@ -23,8 +23,27 @@ const pool =
   globalForDb.pgPool ??
   new Pool({
     connectionString: process.env.DATABASE_URL,
-    max: Number(process.env.PGPOOL_MAX || 10),
+    // Raised from 10 after load testing (see k6/README.md). At 10, requests
+    // queued for a connection while Postgres itself sat idle — the pool, not
+    // the database, was the ceiling. Every route in this app funnels through
+    // one pool, and the read-heavy dashboard routes hold a connection for the
+    // whole of a multi-statement handler, so 10 concurrent in-flight requests
+    // was enough to exhaust it.
+    //
+    // 25 is sized against Postgres's own max_connections (100, minus 3
+    // reserved for superusers): it leaves room for a second app instance, the
+    // Flyway migration job, pg_backup, and a human with psql open.
+    //
+    // Raise this ONLY alongside max_connections, and be careful on serverless:
+    // the pool is per process, so N Vercel instances mean N x this many
+    // connections. A serverless deployment should point DATABASE_URL at
+    // Neon's *pooled* endpoint and set PGPOOL_MAX low (1-5) instead — there,
+    // pgBouncer is the pool and this one is just a client to it.
+    max: Number(process.env.PGPOOL_MAX || 25),
     idleTimeoutMillis: 30_000,
+    // How long a request waits for a free connection before failing. Worth
+    // knowing when reading a load test: with the pool saturated, this is the
+    // extra latency a request absorbs before it turns into a 500.
     connectionTimeoutMillis: 5_000,
     // Without these, one pathological query holds a connection from a pool of
     // 10 indefinitely and the app starves. Both are enforced by the server,

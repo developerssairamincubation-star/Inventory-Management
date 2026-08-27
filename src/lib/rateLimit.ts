@@ -105,7 +105,52 @@ function resolveStore(): RateLimitStore {
 
 // ── Public API ───────────────────────────────────────────────────────────
 
+/**
+ * Kill switch for load testing, and ONLY for load testing.
+ *
+ * A load test from one machine is a single client IP, so the per-IP rules
+ * below fire within seconds and the run ends up measuring this file instead
+ * of the application. There are two ways around that:
+ *
+ *   1. Give each virtual user a distinct X-Forwarded-For, so the limiter sees
+ *      many clients (what k6/lib/session.js does by default). Keeps the
+ *      limiter in the request path, which is the more faithful measurement.
+ *   2. Turn the limiter off entirely — this flag. Simpler, and the right
+ *      choice when you want the app's raw ceiling with no limiter overhead,
+ *      or when a proxy in front rewrites X-Forwarded-For and option 1 stops
+ *      working.
+ *
+ * Deliberately NOT gated on NODE_ENV: a meaningful load test runs against a
+ * production build, so a NODE_ENV check would make this useless exactly where
+ * it is needed. The protection is the noise instead — every request path that
+ * consults this logs at error level on the first bypass, and the startup
+ * warning below is unmissable in any log aggregator.
+ *
+ * Setting this in a real deployment removes brute-force protection from
+ * /api/auth/login and uncaps spend on the metered Gemini endpoint. It belongs
+ * in a throwaway load-test environment's env file and nowhere else.
+ */
+const DISABLED = process.env.RATE_LIMIT_DISABLED === 'true'
+
+let warnedDisabled = false
+
+function warnDisabledOnce() {
+  if (warnedDisabled) return
+  warnedDisabled = true
+  logger.error('RATE LIMITING IS DISABLED', {
+    component: 'rate-limit',
+    detail:
+      'RATE_LIMIT_DISABLED=true — login brute-force protection and third-party spend caps are OFF. ' +
+      'This must only ever be set in a disposable load-test environment.',
+  })
+}
+
 export async function rateLimit(key: string, rule: RateLimitRule): Promise<RateLimitResult> {
+  if (DISABLED) {
+    warnDisabledOnce()
+    return { allowed: true, limit: rule.limit, remaining: rule.limit, resetAt: Date.now() + rule.windowMs }
+  }
+
   try {
     const { count, resetAt } = await resolveStore().increment(key, rule.windowMs)
     return {

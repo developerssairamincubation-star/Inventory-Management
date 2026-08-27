@@ -117,6 +117,11 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-inventory}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_REFRESH_PEPPER: ${JWT_REFRESH_PEPPER}
+      # Tunable without a rebuild, so a load test can A/B it. The code default
+      # is 25; postgres:16-alpine ships max_connections=100, so keep
+      # (instances x PGPOOL_MAX) comfortably under ~90 or connections start
+      # being refused rather than queued.
+      PGPOOL_MAX: ${PGPOOL_MAX:-25}
       # Cloudinary is a real external service (api.cloudinary.com /
       # res.cloudinary.com) reached the same way from inside this container
       # as from host-side `npm run dev` — no container-network address
