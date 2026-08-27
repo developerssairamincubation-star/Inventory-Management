@@ -22,7 +22,17 @@ export async function allocateNextCode(db: DbOrTx, key: SequenceKey): Promise<st
     .set({ current_value: sql`${id_sequences.current_value} + 1` })
     .where(eq(id_sequences.sequence_key, key))
     .returning({
-      code: sql<string>`${id_sequences.prefix} || lpad(${id_sequences.current_value}::text, ${id_sequences.pad_width}, '0')`,
+      // GREATEST(pad_width, length(...)) rather than a bare pad_width:
+      // Postgres's lpad() TRUNCATES when the input is longer than the target
+      // width, it does not grow. With product_code's pad_width of 3 that
+      // meant every value past 999 was cut back to three characters —
+      // 1000, 1001 … 1009 all rendered as "STIC100" — so once the sequence
+      // crossed 1000, nine out of every ten allocations collided with an
+      // already-issued code and POST /api/products died on
+      // products_product_code_key with a 500. Found by load testing; it was
+      // never a concurrency bug, just an arithmetic one that any deployment
+      // would hit on its 1000th product.
+      code: sql<string>`${id_sequences.prefix} || lpad(${id_sequences.current_value}::text, GREATEST(${id_sequences.pad_width}, length(${id_sequences.current_value}::text)), '0')`,
     });
 
   if (!row) {
@@ -67,7 +77,12 @@ export async function allocateNextSkuCode(db: DbOrTx, categoryId: string | null,
         set: { current_value: sql`${id_sequences.current_value} + 1`, prefix },
       })
       .returning({
-        code: sql<string>`${id_sequences.prefix} || '-' || lpad(${id_sequences.current_value}::text, ${id_sequences.pad_width}, '0')`,
+        // Same non-truncating pad as allocateNextCode above. The retry loop
+        // below would have papered over the collisions here (at the cost of
+        // one wasted increment and one extra query per attempt, and a hard
+        // failure after 50), but the padding is what actually keeps the
+        // sequence monotonic past 9999.
+        code: sql<string>`${id_sequences.prefix} || '-' || lpad(${id_sequences.current_value}::text, GREATEST(${id_sequences.pad_width}, length(${id_sequences.current_value}::text)), '0')`,
       });
 
     const [taken] = await db.select({ id: products.product_id }).from(products).where(eq(products.sku_code, row.code));

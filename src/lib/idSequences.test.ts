@@ -21,6 +21,70 @@ describe("idSequences", () => {
     );
     expect(new Set(results).size).toBe(10);
   });
+
+  it("keeps growing past the pad width instead of truncating", async () => {
+    // Regression, found by load testing. Postgres's lpad() TRUNCATES an input
+    // longer than the target width — lpad('1001', 3, '0') is '100', not
+    // '1001'. product_code has pad_width 3, so every allocation from 1000
+    // onward rendered as STIC100/STIC101/… , colliding with codes already
+    // issued at 100/101/… . products_product_code_key then rejected the
+    // insert and POST /api/products returned a 500. Nine of every ten product
+    // creations failed, permanently, from the 1000th product onward.
+    //
+    // The test above could never catch it: JS's padStart() does NOT truncate,
+    // so the expectation was correct all along — the test database's counter
+    // simply never got past 999, which is where the two implementations
+    // start to disagree. Hence this test, which puts it there on purpose.
+    const [original] = await db
+      .select()
+      .from(id_sequences)
+      .where(eq(id_sequences.sequence_key, "product_code"));
+
+    try {
+      await db
+        .update(id_sequences)
+        .set({ current_value: 999 })
+        .where(eq(id_sequences.sequence_key, "product_code"));
+
+      expect(await allocateNextCode(db, "product_code")).toBe("STIC1000");
+      expect(await allocateNextCode(db, "product_code")).toBe("STIC1001");
+
+      // And across the next order of magnitude, where a 4-wide pad would fail
+      // the same way.
+      await db
+        .update(id_sequences)
+        .set({ current_value: 9999 })
+        .where(eq(id_sequences.sequence_key, "product_code"));
+
+      expect(await allocateNextCode(db, "product_code")).toBe("STIC10000");
+    } finally {
+      await db
+        .update(id_sequences)
+        .set({ current_value: original.current_value })
+        .where(eq(id_sequences.sequence_key, "product_code"));
+    }
+  });
+
+  it("still zero-pads values below the pad width", async () => {
+    const [original] = await db
+      .select()
+      .from(id_sequences)
+      .where(eq(id_sequences.sequence_key, "product_code"));
+
+    try {
+      await db
+        .update(id_sequences)
+        .set({ current_value: 6 })
+        .where(eq(id_sequences.sequence_key, "product_code"));
+
+      expect(await allocateNextCode(db, "product_code")).toBe("STIC007");
+    } finally {
+      await db
+        .update(id_sequences)
+        .set({ current_value: original.current_value })
+        .where(eq(id_sequences.sequence_key, "product_code"));
+    }
+  });
 });
 
 describe("allocateNextSkuCode", () => {
