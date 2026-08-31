@@ -13,6 +13,14 @@ import { requireUser, type AuthUser } from "@/lib/authz";
 import { authResultFor } from "@/test/authMock";
 import { GET, POST } from "./route";
 
+// Returnable items require a due date (POST /api/lending refines on it): an
+// item somebody has to bring back without a date can never go overdue, so
+// nothing ever prompts anyone to chase it. Every RETURNABLE payload below
+// therefore carries one, so each test still fails for the reason it was
+// written to check rather than for a missing date.
+const DUE_DATE = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+
+
 const mockRequireUser = vi.mocked(requireUser);
 
 // Routes call requireUser(req, { role }) — honour the role option here so a
@@ -97,6 +105,7 @@ describe("GET /api/lending", () => {
         body: JSON.stringify({
           student_id_code: "sit24lr999",
           student_name: "Admin Visibility Student",
+          due_date: DUE_DATE,
           lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
         }),
       }),
@@ -157,6 +166,7 @@ describe("POST /api/lending", () => {
         body: JSON.stringify({
           student_id_code: "sit24lr001",
           student_name: "Lending Route New Student",
+          due_date: DUE_DATE,
           lending_items: [{ product_id: PRODUCT_ID, quantity: 3, item_type: "RETURNABLE" }],
         }),
       }),
@@ -186,6 +196,7 @@ describe("POST /api/lending", () => {
         body: JSON.stringify({
           student_id_code: "sit24lr002",
           student_name: "Attempted Overwrite Name",
+          due_date: DUE_DATE,
           lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
         }),
       }),
@@ -207,6 +218,7 @@ describe("POST /api/lending", () => {
         body: JSON.stringify({
           student_id_code: "sit24lr003",
           student_name: "Filled In Name",
+          due_date: DUE_DATE,
           lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
         }),
       }),
@@ -221,7 +233,7 @@ describe("POST /api/lending", () => {
     const res = await POST(
       new NextRequest("http://localhost/api/lending", {
         method: "POST",
-        body: JSON.stringify({ student_id_code: "not-an-id", lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }] }),
+        body: JSON.stringify({ due_date: DUE_DATE, student_id_code: "not-an-id", lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }] }),
       }),
     );
     expect(res.status).toBe(400);
@@ -232,10 +244,62 @@ describe("POST /api/lending", () => {
     const res = await POST(
       new NextRequest("http://localhost/api/lending", {
         method: "POST",
-        body: JSON.stringify({ student_id_code: "sit24zz001", lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }] }),
+        body: JSON.stringify({ due_date: DUE_DATE, student_id_code: "sit24zz001", lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }] }),
       }),
     );
     expect(res.status).toBe(422);
+  });
+
+  // The due date is what makes a returnable item chaseable: without one it
+  // never goes overdue, never appears on the overdue list, and nobody is ever
+  // prompted to get it back. Returnables were being stored with a null due
+  // date, so these pin the rule down from both directions.
+  it("rejects a returnable item with no due date", async () => {
+    actingAs(authedUser());
+    const res = await POST(
+      new NextRequest("http://localhost/api/lending", {
+        method: "POST",
+        body: JSON.stringify({
+          student_id_code: "sit24lr101",
+          lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
+        }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/due date/i);
+  });
+
+  it("rejects a due date on an all-consumable order", async () => {
+    actingAs(authedUser());
+    const res = await POST(
+      new NextRequest("http://localhost/api/lending", {
+        method: "POST",
+        body: JSON.stringify({
+          student_id_code: "sit24lr102",
+          due_date: DUE_DATE,
+          lending_items: [{ product_id: CONSUMABLE_PRODUCT_ID, quantity: 1, item_type: "CONSUMABLE" }],
+        }),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("stores the due date on a returnable order", async () => {
+    actingAs(authedUser());
+    const res = await POST(
+      new NextRequest("http://localhost/api/lending", {
+        method: "POST",
+        body: JSON.stringify({
+          student_id_code: "sit24lr103",
+          due_date: DUE_DATE,
+          lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
+        }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const { order } = (await res.json()) as { order: { lending_order_id: string; due_date: string | null } };
+    expect(order.due_date).not.toBeNull();
   });
 
   it("marks the order CONSUMABLE only when every item is consumable", async () => {
@@ -264,7 +328,7 @@ describe("POST /api/lending", () => {
     const missing = await POST(
       new NextRequest("http://localhost/api/lending", {
         method: "POST",
-        body: JSON.stringify({ student_id_code: "sit24lr006", lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }] }),
+        body: JSON.stringify({ due_date: DUE_DATE, student_id_code: "sit24lr006", lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }] }),
       }),
     );
     expect(missing.status).toBe(400);
@@ -274,6 +338,7 @@ describe("POST /api/lending", () => {
         method: "POST",
         body: JSON.stringify({
           student_id_code: "sit24lr006",
+          due_date: DUE_DATE,
           lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
           domain_id: DOMAIN_ID,
         }),
@@ -288,6 +353,7 @@ describe("POST /api/lending", () => {
         method: "POST",
         body: JSON.stringify({
           student_id_code: "sit24lr006",
+          due_date: DUE_DATE,
           lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
           domain_id: DOMAIN_ID,
         }),

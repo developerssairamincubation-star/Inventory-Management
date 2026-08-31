@@ -236,6 +236,17 @@ export default function UploadStudentsCsvModal({ onClose, onDone, departments }:
 
       setResults({ ok, failed });
       if (ok > 0) onDone();
+
+      // Close once everything landed. The modal used to stay open after a
+      // fully successful upload, so the Upload button was still sitting there
+      // inviting a second click — harmless, because the API rejects duplicate
+      // student IDs, but it reads as "nothing happened".
+      //
+      // A partial failure deliberately keeps it open: that is the only place
+      // the per-row errors are shown, and closing would discard them.
+      if (failed.length === 0 && ok > 0) {
+        onClose();
+      }
     } finally {
       setApplying(false);
     }

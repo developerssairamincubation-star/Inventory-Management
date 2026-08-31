@@ -22,6 +22,14 @@ import { POST as createLending } from "./lending/route";
 import { PUT as updateLending } from "./lending/[id]/route";
 import { POST as createInvoice } from "./invoices/route";
 
+// Returnable items require a due date (POST /api/lending refines on it): an
+// item somebody has to bring back without a date can never go overdue, so
+// nothing ever prompts anyone to chase it. Every RETURNABLE payload below
+// therefore carries one, so each test still fails for the reason it was
+// written to check rather than for a missing date.
+const DUE_DATE = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+
+
 const mockRequireUser = vi.mocked(requireUser);
 const SUFFIX = randomBytes(4).toString("hex");
 
@@ -116,6 +124,7 @@ describe("POST /api/lending — stock inflation via a negative quantity", () => 
     const res = await createLending(
       lendingRequest({
         student_id_code: "sit24ig001",
+        due_date: DUE_DATE,
         lending_items: [{ product_id: PRODUCT_ID, quantity: -5000, item_type: "RETURNABLE" }],
       }),
     );
@@ -128,6 +137,7 @@ describe("POST /api/lending — stock inflation via a negative quantity", () => 
     const res = await createLending(
       lendingRequest({
         student_id_code: "sit24ig001",
+        due_date: DUE_DATE,
         lending_items: [{ product_id: PRODUCT_ID, quantity: 1.5, item_type: "RETURNABLE" }],
       }),
     );
@@ -138,6 +148,7 @@ describe("POST /api/lending — stock inflation via a negative quantity", () => 
     const res = await createLending(
       lendingRequest({
         student_id_code: "sit24ig001",
+        due_date: DUE_DATE,
         lending_items: [{ product_id: PRODUCT_ID, quantity: "5", item_type: "RETURNABLE" }],
       }),
     );
@@ -151,6 +162,7 @@ describe("POST /api/lending — stock inflation via a negative quantity", () => 
     const res = await createLending(
       lendingRequest({
         student_id_code: "sit24ig001",
+        due_date: DUE_DATE,
         lending_items: [{ product_id: PRODUCT_ID, quantity: before + 500, item_type: "RETURNABLE" }],
       }),
     );
@@ -165,6 +177,7 @@ describe("POST /api/lending — stock inflation via a negative quantity", () => 
     const res = await createLending(
       lendingRequest({
         student_id_code: "sit24ig001",
+        due_date: DUE_DATE,
         lending_items: [{ product_id: OUTSIDER_PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
       }),
     );
@@ -182,6 +195,7 @@ describe("PUT /api/lending/[id] — stock inflation via a negative return", () =
     const created = await createLending(
       lendingRequest({
         student_id_code: "sit24ig002",
+        due_date: DUE_DATE,
         lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
       }),
     );
@@ -206,6 +220,7 @@ describe("PUT /api/lending/[id] — stock inflation via a negative return", () =
     const created = await createLending(
       lendingRequest({
         student_id_code: "sit24ig003",
+        due_date: DUE_DATE,
         lending_items: [{ product_id: PRODUCT_ID, quantity: 2, item_type: "RETURNABLE" }],
       }),
     );
@@ -230,6 +245,7 @@ describe("PUT /api/lending/[id] — stock inflation via a negative return", () =
     const created = await createLending(
       lendingRequest({
         student_id_code: "sit24ig004",
+        due_date: DUE_DATE,
         lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
       }),
     );
@@ -256,6 +272,7 @@ describe("PUT /api/lending/[id] — stock inflation via a negative return", () =
     const created = await createLending(
       lendingRequest({
         student_id_code: "sit24ig005",
+        due_date: DUE_DATE,
         lending_items: [
           { product_id: PRODUCT_ID, quantity: 3, item_type: "RETURNABLE" },
           { product_id: PRODUCT_ID, quantity: 2, item_type: "RETURNABLE" },
@@ -345,6 +362,7 @@ describe("audit trail", () => {
     const created = await createLending(
       lendingRequest({
         student_id_code: "sit24ig006",
+        due_date: DUE_DATE,
         lending_items: [{ product_id: PRODUCT_ID, quantity: 1, item_type: "RETURNABLE" }],
       }),
     );

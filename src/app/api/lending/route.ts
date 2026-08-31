@@ -168,6 +168,19 @@ const createLendingSchema = z.object({
   due_date: isoDateOnly.nullish(),
   domain_id: uuid.optional(),
 })
+  .refine(
+    // A returnable item is one somebody has to bring back, so "when" is not
+    // optional information — without it the item never becomes overdue, never
+    // appears in the overdue list, and nothing ever prompts anyone to chase
+    // it. Consumables are the opposite: they are handed over for good, so a
+    // due date is meaningless and the form disables the field.
+    (b) => !b.lending_items.some((i) => i.item_type === 'RETURNABLE') || !!b.due_date,
+    { message: 'is required for returnable items', path: ['due_date'] },
+  )
+  .refine(
+    (b) => !b.lending_items.every((i) => i.item_type === 'CONSUMABLE') || !b.due_date,
+    { message: "doesn't apply to consumables — they aren't returned", path: ['due_date'] },
+  )
 
 export async function POST(request: NextRequest) {
   const auth = await requireUser(request)

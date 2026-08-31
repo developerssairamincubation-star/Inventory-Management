@@ -1,12 +1,13 @@
 ﻿"use client";
 import { authFetch, useUser } from "@/contexts/UserContext";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
-import { uploadFile } from "@/lib/uploadClient";
+import { uploadFile, checkImageFile, ACCEPTED_IMAGE_ACCEPT } from "@/lib/uploadClient";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ImageCropModal from "@/components/ImageCropModal";
 import UploadProductsCsvModal from "@/components/UploadProductsCsvModal";
+import ProductSearchDropdown, { productSearchKeys } from "@/components/ProductSearchDropdown";
 import TransferStockModal from "@/components/TransferStockModal";
 import Pagination from "@/components/Pagination";
 import { usePagination } from "@/hooks/usePagination";
@@ -232,6 +233,71 @@ export default function ProductsPage() {
 
   const normaliseName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 
+  // ── "Type to search" on the product-name field ───────────────────────────
+  // Typing a name that already exists used to only print a passive
+  // "Found in inventory: X" hint — you still had to retype the location and
+  // every other detail by hand, and nothing stopped you creating a near
+  // duplicate. Now the matches are selectable, and picking one carries its
+  // stored details across.
+  const [nameDropdownItemId, setNameDropdownItemId] = useState<string | null>(null);
+  const [nameDropdownIndex, setNameDropdownIndex] = useState(0);
+  const nameInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+
+  /** What the picker needs from an existing product to fill a row. */
+  type ProductSuggestion = {
+    product_id: string;
+    product_name: string;
+    location: string | null;
+    unit_cost: number | null;
+    category_id: string | null;
+    description: string | null;
+  };
+
+  /**
+   * Existing products whose name contains what has been typed so far.
+   *
+   * Reads through a loose record rather than `any`: the products list is
+   * assembled from several shapes (API rows, CSV imports, freshly created
+   * rows), which is exactly why normalizeProduct exists.
+   */
+  const matchingProducts = (query: string): ProductSuggestion[] => {
+    const q = normaliseName(query);
+    if (!q) return [];
+    type Loose = Record<string, unknown> & { stocks?: { location?: string | null } | null };
+    const str = (v: unknown) => (v == null ? "" : String(v));
+    return (products.map(normalizeProduct) as Loose[])
+      .filter((p) => normaliseName(str(p.product_name ?? p.name)).includes(q))
+      .slice(0, 25)
+      .map((p) => ({
+        product_id: str(p.product_id ?? p.id),
+        product_name: str(p.product_name ?? p.name),
+        location: p.stocks?.location ?? (p.location == null ? null : str(p.location)),
+        unit_cost: p.unit_cost != null ? Number(p.unit_cost) : p.cost != null ? Number(p.cost) : null,
+        category_id: p.category_id == null ? null : str(p.category_id),
+        description: p.description == null ? null : str(p.description),
+      }));
+  };
+
+  /**
+   * Fill the row from the picked product. Only blank fields are populated —
+   * anything already typed is the operator's deliberate input for *this*
+   * delivery and must not be overwritten. Quantity is always left alone: it
+   * is how many arrived now, never what the catalogue happens to hold.
+   */
+  const selectExistingProduct = (itemId: string, product: ProductSuggestion, inline: boolean) => {
+    const merge = inline ? mergeInlineItem : mergeProductItem;
+    const current = (inline ? inlineItems : productItems).find((i) => i.id === itemId);
+    const patch: Record<string, unknown> = { productName: product.product_name };
+    if (current && !current.location.trim() && product.location) patch.location = product.location;
+    if (current && current.cost === '' && product.unit_cost != null && product.unit_cost > 0) patch.cost = product.unit_cost;
+    if (current && !current.category_id && product.category_id) patch.category_id = product.category_id;
+    if (current && !current.description.trim() && product.description) patch.description = product.description;
+    merge(itemId, patch as never);
+    setNameDropdownItemId(null);
+    setNameDropdownIndex(0);
+  };
+
+
   const findExistingMatch = (name: string) => {
     if (!name.trim()) return null;
     const n = normaliseName(name);
@@ -338,6 +404,8 @@ export default function ProductsPage() {
   // products (grid card / list row) — no crop step, just attach whatever was
   // selected, matching the "cropping is optional" decision for new products.
   const handleQuickImageUpload = async (productId: string, file: File) => {
+    const problem = checkImageFile(file);
+    if (problem) { showToast(problem, 'error'); return; }
     try {
       const image_url = await uploadFile(file, 'products', authFetch);
       const res = await authFetch(`/api/products/${productId}`, {
@@ -354,7 +422,7 @@ export default function ProductsPage() {
       }
     } catch (err) {
       console.error('Error uploading product image:', err);
-      showToast("Couldn't upload the image. Please check your connection and try again.", 'error');
+      showToast(err instanceof Error ? err.message : "Couldn't upload the image. Please try again.", 'error');
     }
   };
 
@@ -400,11 +468,13 @@ export default function ProductsPage() {
               <span style={{ fontSize: 10 }}>Upload image</span>
               <input
                 type="file"
-                accept="image/*"
+                accept={ACCEPTED_IMAGE_ACCEPT}
                 style={{ display: 'none' }}
                 onClick={(e) => e.stopPropagation()}
                 onChange={(e) => {
                   const f = e.target.files?.[0] ?? null;
+                  const problem = f ? checkImageFile(f) : null;
+                  if (problem) { showToast(problem, 'error'); e.target.value = ''; return; }
                   if (f && productId) handleQuickImageUpload(productId, f);
                   e.target.value = '';
                 }}
@@ -589,16 +659,13 @@ export default function ProductsPage() {
 
                     // Upload image if exists
                     if (item.imageFile) {
-                      try {
-                        image_url = await uploadFile(item.imageFile, 'products', authFetch);
-                      } catch (uploadErr) {
-                        console.error('Image upload error:', uploadErr);
-                        // Fallback: if upload failed, use the local data URL preview so UI shows the image.
-                        if (item.imagePreview) {
-                          console.warn('[upload] falling back to data URL for product image (not persisted to storage)');
-                          image_url = item.imagePreview;
-                        }
-                      }
+                      // No silent fallback. This used to drop back to the local
+                      // data URL when the upload failed, which POST /api/products
+                      // then rejected with "Product image must be an uploaded
+                      // file" — so an unsupported photo format surfaced as a
+                      // confusing error about something else, with the real
+                      // cause only in the console.
+                      image_url = await uploadFile(item.imageFile, 'products', authFetch);
                     }
 
                     const body: any = {
@@ -724,10 +791,12 @@ export default function ProductsPage() {
                         )}
                         <input 
                           type="file" 
-                          accept="image/*" 
+                          accept={ACCEPTED_IMAGE_ACCEPT} 
                           style={{ display: 'none' }} 
                           onChange={(e) => {
                             const f = e.target.files?.[0] ?? null;
+                            const problem = f ? checkImageFile(f) : null;
+                            if (problem) { showToast(problem, 'error'); e.target.value = ''; return; }
                             if (f) {
                               const fr = new FileReader();
                               fr.onload = () => {
@@ -747,12 +816,44 @@ export default function ProductsPage() {
 
                     {/* Product Name */}
                     <div>
-                      <input
-                        value={item.productName}
-                        onChange={(e) => updateProductItem(item.id, 'productName', e.target.value)}
-                        style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, borderColor: incomplete && !item.productName.trim() ? 'var(--danger)' : undefined }}
-                        placeholder="Product name"
-                      />
+                      {(() => {
+                        const nameMatches = matchingProducts(item.productName);
+                        const nameOpen = nameDropdownItemId === item.id;
+                        const keys = productSearchKeys({
+                          open: nameOpen,
+                          items: nameMatches,
+                          activeIndex: nameDropdownIndex,
+                          setActiveIndex: (fn) => setNameDropdownIndex(fn),
+                          onSelect: (product) => selectExistingProduct(item.id, product, false),
+                          onClose: () => setNameDropdownItemId(null),
+                          listId: `pname-options-${item.id}`,
+                          optionId: (product) => `pname-option-${item.id}-${product.product_id}`,
+                        });
+                        return (
+                          <>
+                            <input
+                              ref={(el) => { if (el) nameInputRefs.current.set(item.id, el); else nameInputRefs.current.delete(item.id); }}
+                              value={item.productName}
+                              onChange={(e) => { updateProductItem(item.id, 'productName', e.target.value); setNameDropdownItemId(item.id); setNameDropdownIndex(0); }}
+                              onFocus={() => { setNameDropdownItemId(item.id); setNameDropdownIndex(0); }}
+                              onBlur={() => setNameDropdownItemId((cur) => (cur === item.id ? null : cur))}
+                              {...keys}
+                              style={{ ...inputStyle, padding: '4px 6px', fontSize: 11, borderColor: incomplete && !item.productName.trim() ? 'var(--danger)' : undefined }}
+                              placeholder="Product name"
+                            />
+                            <ProductSearchDropdown
+                              anchorEl={nameInputRefs.current.get(item.id) ?? null}
+                              open={nameOpen}
+                              products={nameMatches}
+                              activeIndex={nameDropdownIndex}
+                              listId={`pname-options-${item.id}`}
+                              optionIdPrefix={`pname-option-${item.id}`}
+                              onHover={setNameDropdownIndex}
+                              onSelect={(product) => selectExistingProduct(item.id, product as ProductSuggestion, false)}
+                            />
+                          </>
+                        );
+                      })()}
                       {matchedName && (
                         <div style={{ fontSize: 10, color: 'var(--accent)', marginTop: 4 }}>
                           Found in inventory: {matchedName}
@@ -899,13 +1000,15 @@ export default function ProductsPage() {
                   onClick={() => setShowCsvModal(true)}
                   style={{
                     marginLeft: 8,
-                    padding: '6px 14px',
+                    padding: '5px 12px',
                     fontSize: 11,
-                    border: 'none',
-                    background: 'var(--fg)',
-                    color: '#fff',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    background: 'var(--bg)',
+                    color: 'var(--accent)',
                     cursor: 'pointer',
-                    fontWeight: 600
+                    fontWeight: 600,
+                    lineHeight: 1.6,
                   }}
                 >
                   Bulk Upload (CSV)
@@ -1090,11 +1193,13 @@ export default function ProductsPage() {
                               <span style={{ fontSize: 8 }}>Upload</span>
                               <input
                                 type="file"
-                                accept="image/*"
+                                accept={ACCEPTED_IMAGE_ACCEPT}
                                 style={{ display: 'none' }}
                                 onClick={(e) => e.stopPropagation()}
                                 onChange={(e) => {
                                   const f = e.target.files?.[0] ?? null;
+                                  const problem = f ? checkImageFile(f) : null;
+                                  if (problem) { showToast(problem, 'error'); e.target.value = ''; return; }
                                   if (f && rowProductId) handleQuickImageUpload(rowProductId, f);
                                   e.target.value = '';
                                 }}
@@ -1158,10 +1263,12 @@ export default function ProductsPage() {
                         )}
                         <input 
                           type="file" 
-                          accept="image/*" 
+                          accept={ACCEPTED_IMAGE_ACCEPT} 
                           style={{ display: 'none' }} 
                           onChange={(e) => {
                             const f = e.target.files?.[0] ?? null;
+                            const problem = f ? checkImageFile(f) : null;
+                            if (problem) { showToast(problem, 'error'); e.target.value = ''; return; }
                             if (f) {
                               const fr = new FileReader();
                               fr.onload = () => {
@@ -1356,13 +1463,14 @@ export default function ProductsPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <button
                 onClick={addNewInlineItem}
-                style={{ padding: '5px 12px', fontSize: 11, border: '1px dashed var(--border)', background: 'var(--bg)', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600 }}
+                style={{ padding: '5px 12px', fontSize: 11, border: '1px dashed var(--border)', borderRadius: 6, background: 'var(--bg)', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600, lineHeight: 1.6 }}
               >
                 + Add Item
               </button>
               <button
+                type="button"
                 onClick={() => setShowCsvModal(true)}
-                style={{ padding: '5px 14px', fontSize: 11, border: 'none', background: 'var(--fg)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                style={{ padding: '5px 12px', fontSize: 11, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600, lineHeight: 1.6 }}
               >
                 Bulk Upload (CSV)
               </button>

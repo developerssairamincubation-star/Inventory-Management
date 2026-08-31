@@ -1,4 +1,5 @@
 import { v2 as cloudinary } from 'cloudinary'
+import { ApiError } from '@/lib/api/errors'
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -67,7 +68,13 @@ export function createSignedUpload(folderSuffix: UploadFolder, mimeType: string)
 
   const formats = MIME_TO_FORMATS[mimeType]
   if (!formats) {
-    throw new Error(`Refusing to sign an upload for unsupported type "${mimeType}"`)
+    // Reaches the user through the presign route's error body, so it reads as
+    // guidance rather than as an internal refusal.
+    throw new ApiError(
+      400,
+      'UNSUPPORTED_FILE_TYPE',
+      'That file type isn\'t supported. Please use a JPG, PNG, WebP, GIF or AVIF image, or a PDF for invoices.',
+    )
   }
 
   const folder = `${rootFolder}/${folderSuffix}`

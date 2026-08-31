@@ -15,6 +15,7 @@ import autoTable from "jspdf-autotable";
 // identical.
 import * as XLSX from "@e965/xlsx";
 import Pagination from "@/components/Pagination";
+import ProductSearchDropdown from "@/components/ProductSearchDropdown";
 import { usePagination } from "@/hooks/usePagination";
 import { groupByStudentAndDate, computeItemCounts } from "@/lib/groupLendingRecords";
 import { decodeStudentIdCode } from "@/lib/studentIdCode";
@@ -189,96 +190,6 @@ function daysToDueDate(days: number): string {
 // axes — so the dropdown was invisible/clipped for any row not near the
 // very top. Rendering it into a portal at document.body, positioned via
 // the anchor input's own bounding rect, escapes that clipping entirely.
-function ProductSearchDropdown({
-  anchorEl,
-  open,
-  products,
-  onSelect,
-  activeIndex = 0,
-  onHover,
-  listId,
-  optionIdPrefix,
-}: {
-  anchorEl: HTMLElement | null;
-  open: boolean;
-  products: { product_id: string; product_name: string }[];
-  onSelect: (product: { product_id: string; product_name: string }) => void;
-  /** Option the arrow keys have moved to; highlighted and scrolled into view. */
-  activeIndex?: number;
-  /** Keeps the mouse and keyboard pointing at the same option. */
-  onHover?: (index: number) => void;
-  listId?: string;
-  optionIdPrefix?: string;
-}) {
-  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
-  const listRef = useRef<HTMLDivElement | null>(null);
-
-  // The list scrolls at 180px tall, so arrowing past the fold has to bring the
-  // highlighted row with it — otherwise the selection silently walks off
-  // screen and the keyboard path is unusable beyond the first few matches.
-  useEffect(() => {
-    if (!open) return;
-    const el = listRef.current?.querySelector<HTMLElement>('[data-active="true"]');
-    el?.scrollIntoView({ block: "nearest" });
-  }, [open, activeIndex, products.length]);
-
-  useEffect(() => {
-    if (!open || !anchorEl) { setRect(null); return; }
-    const update = () => {
-      const r = anchorEl.getBoundingClientRect();
-      setRect({ top: r.bottom, left: r.left, width: r.width });
-    };
-    update();
-    window.addEventListener("scroll", update, true);
-    window.addEventListener("resize", update);
-    return () => {
-      window.removeEventListener("scroll", update, true);
-      window.removeEventListener("resize", update);
-    };
-  }, [open, anchorEl]);
-
-  if (!open || !rect || products.length === 0 || typeof document === "undefined") return null;
-
-  return createPortal(
-    <div
-      ref={listRef}
-      id={listId}
-      role="listbox"
-      style={{
-        position: "fixed", top: rect.top, left: rect.left, width: rect.width, zIndex: 1000,
-        background: "#fff", border: "1px solid var(--border)", maxHeight: 180, overflowY: "auto",
-        boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
-      }}
-    >
-      {products.map((product, index) => {
-        const active = index === activeIndex;
-        return (
-          <button
-            key={product.product_id}
-            id={optionIdPrefix ? `${optionIdPrefix}-${product.product_id}` : undefined}
-            type="button"
-            role="option"
-            aria-selected={active}
-            data-active={active}
-            onMouseDown={(e) => e.preventDefault()}
-            onMouseEnter={() => onHover?.(index)}
-            onClick={() => onSelect(product)}
-            style={{
-              display: "block", width: "100%", padding: "5px 8px", textAlign: "left", fontSize: 11,
-              color: active ? "#fff" : "var(--fg)",
-              background: active ? "var(--accent)" : "none",
-              border: "none", cursor: "pointer",
-            }}
-          >
-            {product.product_name}
-          </button>
-        );
-      })}
-    </div>,
-    document.body
-  );
-}
-
 // const th: React.CSSProperties = {
 //     border: '1px solid #1D293780',
 // };
@@ -919,6 +830,20 @@ export default function LendingPage() {
     }
     if (Object.keys(lineStockError).length > 0) {
       showToast("Please resolve stock availability issues before submitting.", "warning");
+      return;
+    }
+
+    // A returnable item is one somebody has to bring back, so it needs a date
+    // — without one it can never go overdue and nothing ever prompts anyone to
+    // chase it. Caught here as well as on the server so the user is told
+    // before a single request is sent, and the offending row is marked.
+    const missingDue = validRows.find((r) => r.items.some((l) => l.itemType === "RETURNABLE" && !l.dueDateValue));
+    if (missingDue) {
+      const rowNo = validRows.indexOf(missingDue) + 1;
+      setRowSubmitStatus({
+        [missingDue.id]: { status: "error", message: "Returnable items need a due date. Set a date, or change the type to Consumable.", field: "due_date" },
+      });
+      showToast(`Row ${rowNo}: returnable items need a due date.`, "warning");
       return;
     }
 
@@ -1779,7 +1704,7 @@ export default function LendingPage() {
 
                       {/* Product line header */}
                       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 60px 110px 120px 90px 30px', gap: 6, marginBottom: 4 }}>
-                        {['Product (search)', 'or Scan SKU', 'Qty', 'Type', 'Due Date', 'Due (days)', ''].map((h) => (
+                        {['Product (search)', 'or Scan SKU', 'Qty', 'Type', 'Due Date *', 'Due (days)', ''].map((h) => (
                           <div key={h} style={{ fontSize: 9, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase' }}>{h}</div>
                         ))}
                       </div>
@@ -1890,6 +1815,8 @@ export default function LendingPage() {
 
                               {/* Due date — both Date and Days shown, kept in sync */}
                               <input type="date" disabled={line.itemType === 'CONSUMABLE'} min={new Date().toISOString().split('T')[0]}
+                                required={line.itemType === 'RETURNABLE'}
+                                title={line.itemType === 'CONSUMABLE' ? "Consumables aren't returned, so they have no due date" : 'Required — when this item is due back'}
                                 value={line.dueDateValue}
                                 onChange={(e) => updateLine(row.id, line.id, 'dueDateValue', e.target.value)}
                                 aria-invalid={submitState?.field === 'due_date'}

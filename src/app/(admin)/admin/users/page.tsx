@@ -5,7 +5,7 @@ import { useUser } from "@/contexts/UserContext";
 import { authFetch } from "@/contexts/UserContext";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, UserCheck, UserX, Shield, User, Building2, Trash2, MapPin, Tag } from "lucide-react";
+import { Plus, Pencil, UserCheck, UserX, Shield, User, Building2, Trash2, MapPin, Tag, Eye, EyeOff } from "lucide-react";
 
 type AppUser = {
   user_id: string;
@@ -52,6 +52,9 @@ export default function UserManagementPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editUser, setEditUser] = useState<AppUser | null>(null);
   const [form, setForm] = useState<AddUserForm>({ full_name: "", email: "", password: "", role: "user", domain_id: "" });
+  // Admins type a temporary password and read it out to the new user, so
+  // they need to be able to see what they typed before saving it.
+  const [showPassword, setShowPassword] = useState(false);
   const [editForm, setEditForm] = useState<Partial<{ full_name: string; role: string; is_active: boolean; domain_id: string }>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -644,7 +647,31 @@ export default function UserManagementPage() {
               </div>
               <div>
                 <label style={labelStyle}>Temporary Password</label>
-                <input style={inputStyle} type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required placeholder="Min. 6 characters" minLength={6} />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    style={{ ...inputStyle, paddingRight: 38 }}
+                    type={showPassword ? "text" : "password"}
+                    value={form.password}
+                    onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                    required
+                    placeholder="Min. 6 characters"
+                    minLength={6}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    title={showPassword ? "Hide password" : "Show password"}
+                    style={{
+                      position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: 'none', border: 'none', padding: 4, cursor: 'pointer',
+                      color: 'var(--muted)', lineHeight: 0,
+                    }}
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
               <div>
                 <label style={labelStyle}>Role</label>
