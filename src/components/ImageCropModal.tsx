@@ -25,6 +25,85 @@ function clamp(val: number, min: number, max: number) {
   return Math.min(Math.max(val, min), max)
 }
 
+/**
+ * Decodes a data: URL into a Blob without going through the network stack.
+ *
+ * This used to be `await fetch(dataUrl)`, which is the idiomatic one-liner —
+ * and which the app's Content-Security-Policy blocks. fetch() of a data: URL
+ * is governed by `connect-src` (next.config.ts), and that directive lists
+ * only 'self', api.cloudinary.com and the telemetry hosts. Every product
+ * image path runs through this modal, so both "Apply Crop" and "Use Original"
+ * failed with "Failed to fetch" and the upload never started.
+ *
+ * Decoding it here is also strictly cheaper: no request, no extra copy of the
+ * base64 payload handed to the fetch stack.
+ */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(',')
+  if (!dataUrl.startsWith('data:') || comma === -1) {
+    throw new Error('Not a data URL')
+  }
+  const header = dataUrl.slice(5, comma)
+  const isBase64 = header.endsWith(';base64')
+  const type = (isBase64 ? header.slice(0, -';base64'.length) : header) || 'image/jpeg'
+  const payload = dataUrl.slice(comma + 1)
+
+  if (!isBase64) return new Blob([decodeURIComponent(payload)], { type })
+
+  const binary = atob(payload)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return new Blob([bytes], { type })
+}
+
+/** Promise wrapper for canvas.toBlob, falling back to a data-URL decode. */
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    if (typeof canvas.toBlob !== 'function') {
+      try {
+        resolve(dataUrlToBlob(canvas.toDataURL(type, quality)))
+      } catch (err) {
+        reject(err)
+      }
+      return
+    }
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('Could not read the cropped image'))),
+      type,
+      quality,
+    )
+  })
+}
+
+/**
+ * Loads `src` into an <img> we are allowed to draw onto a canvas.
+ *
+ * crossOrigin is set first so a remote (Cloudinary) source arrives with CORS
+ * headers and doesn't taint the canvas; a data: URL doesn't need it, and the
+ * no-crossOrigin retry covers a host that doesn't answer with them. Image
+ * loads are governed by `img-src`, which does allow data:, blob: and
+ * res.cloudinary.com — this is why the drawing path works where fetch() does
+ * not.
+ */
+function loadDrawableImage(imageSrc: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const fresh = new window.Image()
+    fresh.crossOrigin = 'anonymous'
+    fresh.onload = () => resolve(fresh)
+    fresh.onerror = () => {
+      const fallback = new window.Image()
+      fallback.onload = () => resolve(fallback)
+      fallback.onerror = () => reject(new Error('Could not load the image'))
+      fallback.src = imageSrc
+    }
+    // Cache-buster only for remote URLs, so the browser re-fetches with CORS
+    // headers instead of serving a non-CORS cached response.
+    fresh.src = imageSrc.startsWith('data:')
+      ? imageSrc
+      : imageSrc + (imageSrc.includes('?') ? '&' : '?') + '_cb=' + Date.now()
+  })
+}
+
 export default function ImageCropModal({ imageSrc, onCrop, onClose, aspect = 1 }: ImageCropModalProps) {
   const imgRef = useRef<HTMLImageElement>(null)
   const [crop, setCrop] = useState<CropBox>({ x: 0, y: 0, width: 0, height: 0 })
@@ -153,26 +232,9 @@ export default function ImageCropModal({ imageSrc, onCrop, onClose, aspect = 1 }
       const ctx = canvas.getContext('2d')
       if (!ctx) throw new Error('Canvas is not supported in this browser.')
 
-      // Load a fresh copy of the image with crossOrigin to avoid tainted-canvas
-      // when imageSrc is a remote (S3) URL
-      const drawSource = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const fresh = new window.Image()
-        fresh.crossOrigin = 'anonymous'
-        fresh.onload = () => resolve(fresh)
-        fresh.onerror = () => {
-          // Fallback: try without crossOrigin (works for data: URLs)
-          const fallback = new window.Image()
-          fallback.onload = () => resolve(fallback)
-          fallback.onerror = reject
-          fallback.src = imageSrc
-        }
-        // Add cache-buster only for remote URLs so the browser re-fetches
-        // with CORS headers instead of serving a non-CORS cached response
-        const src = imageSrc.startsWith('data:')
-          ? imageSrc
-          : imageSrc + (imageSrc.includes('?') ? '&' : '?') + '_cb=' + Date.now()
-        fresh.src = src
-      })
+      // A fresh copy loaded with crossOrigin, so a remote (Cloudinary) source
+      // doesn't taint the canvas and block reading the pixels back out.
+      const drawSource = await loadDrawableImage(imageSrc)
 
       ctx.drawImage(
         drawSource,
@@ -185,9 +247,11 @@ export default function ImageCropModal({ imageSrc, onCrop, onClose, aspect = 1 }
         canvas.width,
         canvas.height
       )
+      // toBlob for the bytes we upload, toDataURL for the on-screen preview.
+      // The preview stays a data: URL because `img-src` allows those; only
+      // fetch()ing one is blocked.
+      const blob = await canvasToBlob(canvas, 'image/jpeg', 0.92)
       const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
-      const res = await fetch(dataUrl)
-      const blob = await res.blob()
       const file = new File([blob], 'cropped.jpg', { type: 'image/jpeg' })
       onCrop(dataUrl, file)
     } catch (err) {
@@ -203,8 +267,24 @@ export default function ImageCropModal({ imageSrc, onCrop, onClose, aspect = 1 }
     setProcessing(true)
     setCropError(null)
     try {
-      const res = await fetch(imageSrc)
-      const blob = await res.blob()
+      // A freshly picked file arrives here as a data: URL from FileReader, so
+      // its exact bytes and format are decoded straight out of the string —
+      // no re-encode, and nothing for `connect-src` to block. A remote source
+      // (re-cropping an already-saved product image) has no local bytes to
+      // recover, so it goes through the canvas instead.
+      const blob = imageSrc.startsWith('data:')
+        ? dataUrlToBlob(imageSrc)
+        : await (async () => {
+            const source = await loadDrawableImage(imageSrc)
+            const canvas = document.createElement('canvas')
+            canvas.width = source.naturalWidth
+            canvas.height = source.naturalHeight
+            const ctx = canvas.getContext('2d')
+            if (!ctx) throw new Error('Canvas is not supported in this browser.')
+            ctx.drawImage(source, 0, 0)
+            return canvasToBlob(canvas, 'image/jpeg', 0.92)
+          })()
+
       const ext = (blob.type.split('/')[1] || 'jpg').split('+')[0]
       const file = new File([blob], `original.${ext}`, { type: blob.type || 'image/jpeg' })
       onCrop(imageSrc, file)

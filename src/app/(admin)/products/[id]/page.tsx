@@ -6,7 +6,7 @@ import ImageCropModal from '@/components/ImageCropModal'
 import BarcodeLabel from '@/components/BarcodeLabel'
 import TransferStockModal from '@/components/TransferStockModal'
 import { authFetch } from '@/contexts/UserContext'
-import { uploadFile } from '@/lib/uploadClient'
+import { uploadFile, checkImageFile, ACCEPTED_IMAGE_ACCEPT } from '@/lib/uploadClient'
 import { useToast } from '@/components/ui/Toast'
 import { extractErrorMessage } from '@/lib/extractErrorMessage'
 import { ArrowUpNarrowWide, ArrowUpWideNarrow } from 'lucide-react'
@@ -427,9 +427,11 @@ function EditModal({
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg)', cursor: 'pointer', padding: '4px 10px', border: '1px solid var(--border)', background: 'var(--surface)' }}>
                 Re-Upload
-                <input type="file" accept="image/*" style={{ display: 'none' }}
+                <input type="file" accept={ACCEPTED_IMAGE_ACCEPT} style={{ display: 'none' }}
                   onChange={(e) => {
                     const f = e.target.files?.[0] ?? null
+                    const problem = f ? checkImageFile(f) : null
+                    if (problem) { showToast(problem, 'error'); e.target.value = ''; return }
                     if (f) {
                       const fr = new FileReader()
                       fr.onload = () => {
@@ -524,6 +526,11 @@ export default function ProductDetailPage() {
 
   // UI state
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
+  // Source for the crop modal opened from the "Upload image" placeholder on
+  // the info strip. That placeholder used to upload the file as-is with no
+  // crop step; the crop is offered here too now (and is still optional, via
+  // the modal's "Use Original").
+  const [quickCropSrc, setQuickCropSrc] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
   const [transferOpen, setTransferOpen] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
@@ -795,11 +802,18 @@ export default function ProductDetailPage() {
               <span style={{ fontSize: 11 }}>Upload image</span>
               <input
                 type="file"
-                accept="image/*"
+                accept={ACCEPTED_IMAGE_ACCEPT}
                 style={{ display: 'none' }}
                 onChange={(e) => {
                   const f = e.target.files?.[0] ?? null
-                  if (f) handleQuickImageUpload(f)
+                  const problem = f ? checkImageFile(f) : null
+                  if (problem) { showToast(problem, 'error'); e.target.value = ''; return }
+                  if (f) {
+                    const fr = new FileReader()
+                    fr.onload = () => { if (typeof fr.result === 'string') setQuickCropSrc(fr.result) }
+                    fr.onerror = () => showToast("Couldn't read that image. Please try again.", 'error')
+                    fr.readAsDataURL(f)
+                  }
                   e.target.value = ''
                 }}
               />
@@ -1051,6 +1065,19 @@ export default function ProductDetailPage() {
           }}
           onClose={() => setTransferOpen(false)}
           onTransferred={handleTransferred}
+        />
+      )}
+
+      {/* Crop step for the info-strip "Upload image" placeholder */}
+      {quickCropSrc && (
+        <ImageCropModal
+          imageSrc={quickCropSrc}
+          aspect={1}
+          onCrop={(_dataUrl, file) => {
+            setQuickCropSrc(null)
+            void handleQuickImageUpload(file)
+          }}
+          onClose={() => setQuickCropSrc(null)}
         />
       )}
 

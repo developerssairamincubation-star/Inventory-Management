@@ -101,6 +101,11 @@ export default function ProductsPage() {
   const [cropSrc, setCropSrc] = useState<string | null>(null);
   const [showCropModal, setShowCropModal] = useState(false);
   const [currentCropItemId, setCurrentCropItemId] = useState<string | null>(null);
+  // Set when the crop is for an already-saved product (the "Upload image"
+  // placeholder on a card or list row) rather than for a draft row in the add
+  // form — the cropped file goes straight to the API instead of into
+  // productItems/inlineItems.
+  const [quickCropProductId, setQuickCropProductId] = useState<string | null>(null);
 
   // Inline add items in list view (array to support multiple inline additions)
   const [inlineItems, setInlineItems] = useState<ProductItem[]>([]);
@@ -400,9 +405,30 @@ export default function ProductsPage() {
     }
   };
 
-  // Direct upload for the "no image" placeholder affordance on already-saved
-  // products (grid card / list row) — no crop step, just attach whatever was
-  // selected, matching the "cropping is optional" decision for new products.
+  /**
+   * Opens the crop modal for the "no image" placeholder on an already-saved
+   * product (grid card / list row).
+   *
+   * These two entry points used to upload the selected file as-is, with no
+   * crop step at all — the only product-image paths that didn't offer one.
+   * Cropping is still optional (the modal's "Use Original" button), but it is
+   * now offered everywhere an image can be attached.
+   */
+  const openQuickCrop = (productId: string, file: File) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      if (typeof fr.result !== 'string') return;
+      setCropSrc(fr.result);
+      setQuickCropProductId(productId);
+      setCurrentCropItemId(null);
+      setShowCropModal(true);
+    };
+    fr.onerror = () => showToast("Couldn't read that image. Please try again.", 'error');
+    fr.readAsDataURL(file);
+  };
+
+  // Saves a cropped (or as-selected) image against a product that already
+  // exists, straight through the API — no draft row involved.
   const handleQuickImageUpload = async (productId: string, file: File) => {
     const problem = checkImageFile(file);
     if (problem) { showToast(problem, 'error'); return; }
@@ -475,7 +501,7 @@ export default function ProductsPage() {
                   const f = e.target.files?.[0] ?? null;
                   const problem = f ? checkImageFile(f) : null;
                   if (problem) { showToast(problem, 'error'); e.target.value = ''; return; }
-                  if (f && productId) handleQuickImageUpload(productId, f);
+                  if (f && productId) openQuickCrop(productId, f);
                   e.target.value = '';
                 }}
               />
@@ -1071,9 +1097,12 @@ export default function ProductsPage() {
           imageSrc={cropSrc}
           aspect={1}
           onCrop={(dataUrl, file) => {
-            // Merge both fields in ONE state update — two separate calls would
-            // cause the second to see stale state and silently drop imageFile
-            if (currentCropItemId?.startsWith('inline-')) {
+            if (quickCropProductId) {
+              // An already-saved product: upload and PUT it now.
+              void handleQuickImageUpload(quickCropProductId, file);
+            } else if (currentCropItemId?.startsWith('inline-')) {
+              // Merge both fields in ONE state update — two separate calls would
+              // cause the second to see stale state and silently drop imageFile
               mergeInlineItem(currentCropItemId, { imageFile: file, imagePreview: dataUrl });
             } else if (currentCropItemId) {
               mergeProductItem(currentCropItemId, { imageFile: file, imagePreview: dataUrl });
@@ -1081,11 +1110,13 @@ export default function ProductsPage() {
             setShowCropModal(false);
             setCropSrc(null);
             setCurrentCropItemId(null);
+            setQuickCropProductId(null);
           }}
           onClose={() => {
             setShowCropModal(false);
             setCropSrc(null);
             setCurrentCropItemId(null);
+            setQuickCropProductId(null);
           }}
         />
       )}
@@ -1200,7 +1231,7 @@ export default function ProductsPage() {
                                   const f = e.target.files?.[0] ?? null;
                                   const problem = f ? checkImageFile(f) : null;
                                   if (problem) { showToast(problem, 'error'); e.target.value = ''; return; }
-                                  if (f && rowProductId) handleQuickImageUpload(rowProductId, f);
+                                  if (f && rowProductId) openQuickCrop(rowProductId, f);
                                   e.target.value = '';
                                 }}
                               />
