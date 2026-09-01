@@ -76,7 +76,8 @@ e2e/
 Practical notes that decide whether this suite is loved or deleted:
 
 - **Log in once via API, reuse storage state.** Do not drive the login form in
-  every spec — it is slow and it burns `RULES.login` (8 per IP per 15 min).
+  every spec — it is slow and it burns `RULES.loginPerAccount` (12 per email
+  per 15 min).
   Playwright's `storageState` plus a `globalSetup` that POSTs `/api/auth/login`
   is the standard fix.
 - **Stub Gemini and Cloudinary.** `page.route()` the `parse-pdf` and

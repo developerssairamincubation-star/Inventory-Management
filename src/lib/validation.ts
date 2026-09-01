@@ -105,9 +105,11 @@ export const userRole = z.enum(['super_admin', 'user'])
  * began with "Password" rendered as "Password Password must be at least 6
  * characters".
  *
- * What protects accounts now is bcrypt at cost 12 plus the login rate limits
- * in src/lib/rateLimit.ts (8 attempts per IP and 12 per account per 15
- * minutes). Revisit before this app holds anything that would hurt to lose.
+ * What protects accounts now is bcrypt at cost 12 plus the per-account login
+ * rate limit in src/lib/rateLimit.ts (12 attempts per email per 15 minutes).
+ * The per-IP login rule that used to sit alongside it has been removed, so
+ * that per-account cap is the only attempt limit left. Revisit before this
+ * app holds anything that would hurt to lose.
  */
 export const password = z
   .string()

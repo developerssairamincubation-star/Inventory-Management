@@ -170,9 +170,8 @@ defaults are the local dev bootstrap account documented in
 | Rule | Limit |
 |---|---|
 | `read` (GET/HEAD) | 600 / min |
-| `mutation` (POST/PUT/PATCH/DELETE) | 120 / min |
-| `login` | 8 / 15 min |
-| `loginPerAccount` | 12 / 15 min |
+| `mutation` (POST/PUT/PATCH/DELETE, incl. `login`) | 120 / min |
+| `loginPerAccount` (per email, not per IP) | 12 / 15 min |
 | `expensive` (`parse-pdf`, `presign`) | 20 / hour |
 
 From one machine, everything above ~10 VUs trips these instantly, and the
@@ -207,7 +206,7 @@ PERF_SPOOF_CLIENT_IP=false k6 run k6/tests/load.js
 ```
 
 `RATE_LIMIT_DISABLED=true` short-circuits `rateLimit()` for every rule at once
-— per-IP, per-account login, and the `expensive` cap. The app logs
+— the per-IP rules, the per-account login cap, and the `expensive` cap. The app logs
 `RATE LIMITING IS DISABLED` at **error** level on the first bypass, so it can
 never be on quietly.
 

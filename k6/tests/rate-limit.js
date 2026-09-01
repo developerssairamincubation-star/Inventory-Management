@@ -11,9 +11,9 @@
 //
 // Uses a fixed, made-up source IP rather than the real one, so running this
 // does not burn the login budget for the machine you run load tests from.
-// Buckets are fixed-window; wait out the window (15 min for login, 1 min for
-// read/mutation) before re-running, or restart the app to clear the
-// in-process store.
+// Buckets are fixed-window; wait out the window (15 min for the per-account
+// login rule, 1 min for read/mutation) before re-running, or restart the app
+// to clear the in-process store.
 //
 // Note what this cannot prove: with the default in-process store, counters
 // are per app instance. On a multi-instance deployment without REDIS_URL the
@@ -49,9 +49,10 @@ export default function () {
     })
   })
 
-  group('login is rate limited per IP', () => {
-    // RULES.login = 8 per IP per 15 min. Deliberately a nonexistent account,
-    // so the per-account bucket that also fires belongs to nobody real.
+  group('login is rate limited per account', () => {
+    // RULES.loginPerAccount = 12 per email per 15 min — the login-specific
+    // per-IP rule was removed. Deliberately a nonexistent account, so the
+    // bucket that fires belongs to nobody real.
     const email = `k6-ratelimit-probe-${Date.now()}@invalid.local`
     let sawLimit = false
     let attemptsBeforeLimit = 0
@@ -72,6 +73,10 @@ export default function () {
       check(res, { 'pre-limit login attempt -> 401': (r) => r.status === 401 })
     }
 
+    // The login-specific per-IP rule (8 / 15 min) was removed; /api/auth/login
+    // now takes the ordinary mutation budget (120/min), so what fires here is
+    // RULES.loginPerAccount at 12 attempts per email. Same probe, same bound —
+    // this asserts the remaining guard still works.
     check(null, {
       'login limiter fired': () => sawLimit,
       'login limiter fired within 12 attempts': () => sawLimit && attemptsBeforeLimit <= 12,
@@ -85,7 +90,7 @@ export default function () {
           !String(r.body).toLowerCase().includes('disabled'),
       })
     }
-    console.log(`login: ${attemptsBeforeLimit} attempts allowed before 429 (rule says 8)`)
+    console.log(`login: ${attemptsBeforeLimit} attempts allowed before 429 (per-account rule says 12)`)
   })
 
   group('user enumeration is not possible', () => {

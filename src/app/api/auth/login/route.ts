@@ -28,9 +28,10 @@ export async function POST(req: NextRequest) {
   const ip = clientIp(req)
 
   // Login doesn't go through requireUser, so it applies the per-IP limit
-  // itself — and a per-account limit below. One without the other is
-  // incomplete: per-IP alone lets a distributed attack spray one account,
-  // per-account alone lets one host walk the whole user list.
+  // itself. That limit is now just the ordinary `mutation` budget — the
+  // login-specific 8-per-15-min rule was removed by request, because a shared
+  // office NAT puts every user behind one source IP. The per-account limit
+  // below is what caps brute force now.
   const limited = await enforceIpRateLimit(req, '/api/auth/login')
   if (limited) return limited
 
@@ -43,10 +44,9 @@ export async function POST(req: NextRequest) {
       return fail(400, 'VALIDATION_ERROR', 'email and password are required')
     }
 
-    // Per-account limit, alongside the per-IP limit the middleware already
-    // applied. One without the other is incomplete: per-IP alone lets a
-    // distributed attack spray one account, and per-account alone lets one
-    // host walk the whole user list.
+    // Per-account limit. With the login-specific per-IP rule gone this is the
+    // narrow guard on credential stuffing: it caps attempts against any one
+    // email regardless of how many addresses they come from.
     const accountLimit = await rateLimit(`login:account:${email.toLowerCase()}`, RULES.loginPerAccount)
     if (!accountLimit.allowed) {
       logger.warn('Login blocked by per-account rate limit', { requestId, ip, email })

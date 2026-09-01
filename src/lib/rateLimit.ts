@@ -31,14 +31,20 @@ export type RateLimitRule = {
 }
 
 // ── Rules ────────────────────────────────────────────────────────────────
-// Login is deliberately far stricter than everything else: it's the only
-// endpoint where a correct guess grants an account, and bcrypt at cost 12
-// makes each attempt ~250ms of server CPU, so an unbounded login endpoint is
-// both a credential-stuffing target and a CPU-exhaustion lever.
+// There is no longer a login-specific per-IP rule. The old
+// `login: { limit: 8, windowMs: 15 * 60_000 }` was removed by request — it
+// was tripping legitimate use, since everyone behind one office NAT shares a
+// source IP and eight sign-ins per quarter hour is a low ceiling for a shared
+// address. /api/auth/login now falls through ruleFor() to the ordinary
+// `mutation` rule like any other POST.
+//
+// What still guards the endpoint: loginPerAccount below (12 attempts per
+// email per 15 min), which is the rule that actually caps brute force against
+// a given account, and bcrypt at cost 12.
 export const RULES = {
-  login: { limit: 8, windowMs: 15 * 60_000 },
-  // Per-account, so one attacker can't lock a victim out by spraying — this
-  // is checked alongside the per-IP rule, not instead of it.
+  // Per-account rather than per-IP, so a distributed attempt on one account is
+  // still capped, and so one attacker cannot lock a victim out by spraying
+  // from an address the victim doesn't share.
   loginPerAccount: { limit: 12, windowMs: 15 * 60_000 },
   mutation: { limit: 120, windowMs: 60_000 },
   read: { limit: 600, windowMs: 60_000 },
@@ -126,9 +132,9 @@ function resolveStore(): RateLimitStore {
  * consults this logs at error level on the first bypass, and the startup
  * warning below is unmissable in any log aggregator.
  *
- * Setting this in a real deployment removes brute-force protection from
- * /api/auth/login and uncaps spend on the metered Gemini endpoint. It belongs
- * in a throwaway load-test environment's env file and nowhere else.
+ * Setting this in a real deployment removes the per-account brute-force cap
+ * on /api/auth/login and uncaps spend on the metered Gemini endpoint. It
+ * belongs in a throwaway load-test environment's env file and nowhere else.
  */
 const DISABLED = process.env.RATE_LIMIT_DISABLED === 'true'
 
@@ -140,7 +146,7 @@ function warnDisabledOnce() {
   logger.error('RATE LIMITING IS DISABLED', {
     component: 'rate-limit',
     detail:
-      'RATE_LIMIT_DISABLED=true — login brute-force protection and third-party spend caps are OFF. ' +
+      'RATE_LIMIT_DISABLED=true — the login per-account cap and third-party spend caps are OFF. ' +
       'This must only ever be set in a disposable load-test environment.',
   })
 }
@@ -187,13 +193,11 @@ export function clientIp(req: { headers: { get(name: string): string | null } })
 /**
  * Picks the rule that applies to a request path/method.
  *
- * Login is by far the strictest: it's the only endpoint where a correct guess
- * grants an account, and bcrypt at cost 12 makes each attempt ~250ms of
- * server CPU, so an unbounded login endpoint is both a credential-stuffing
- * target and a CPU-exhaustion lever.
+ * /api/auth/login used to be special-cased to a much stricter rule; it now
+ * takes the ordinary `mutation` budget along with every other POST. The
+ * per-account limit in the login route is what caps brute force now.
  */
 export function ruleFor(pathname: string, method: string): RateLimitRule {
-  if (pathname === '/api/auth/login') return RULES.login
   if (pathname === '/api/invoices/parse-pdf' || pathname === '/api/upload/presign') return RULES.expensive
   if (method === 'GET' || method === 'HEAD') return RULES.read
   return RULES.mutation

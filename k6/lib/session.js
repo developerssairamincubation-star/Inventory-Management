@@ -30,8 +30,8 @@ import { rateLimited, tokenRefreshes, authFailures, serverErrors } from './metri
 
 // One jar per VU, created at init time so it survives across iterations.
 // k6 resets the *default* VU jar between iterations; an explicit jar does
-// not, and a session that re-logs-in every iteration would burn through
-// RULES.login (8 per IP per 15 min) in seconds.
+// not, and a session that re-logs-in every iteration would burn through the
+// login budget (now the ordinary mutation rule, 120 per IP per min) fast.
 const jar = new http.CookieJar()
 
 let loggedIn = false
