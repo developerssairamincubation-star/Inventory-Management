@@ -217,6 +217,7 @@ export default function ConsumablePage() {
           style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--border)", color: "var(--fg)", background: "var(--bg)", outline: "none" }}
         />
         <div style={{ width: 1, height: 20, background: "var(--border)", margin: "0 2px" }} />
+        <button onClick={() => applyDatePreset("thisWeek")} className="seg-tab-btn" style={{ background: "var(--surface)", color: "var(--fg)" }}>This Week</button>
         <button onClick={() => applyDatePreset("thisMonth")} className="seg-tab-btn" style={{ background: "var(--surface)", color: "var(--fg)" }}>This Month</button>
         <button onClick={() => applyDatePreset("lastMonth")} className="seg-tab-btn" style={{ background: "var(--surface)", color: "var(--fg)" }}>Last Month</button>
         <button onClick={() => applyDatePreset("thisYear")} className="seg-tab-btn" style={{ background: "var(--surface)", color: "var(--fg)" }}>This Year</button>
