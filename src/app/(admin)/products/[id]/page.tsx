@@ -387,7 +387,8 @@ function EditModal({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
               <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Unit Cost (₹)</div>
-              <input type="number" step="0.01" min={0} value={cost as number | ''}
+              {/* step="any": spinner moves by ₹1, paise still accepted. */}
+              <input type="number" step="any" min={0} value={cost as number | ''}
                 onChange={e => setCost(e.target.value === '' ? '' : Number(e.target.value))}
                 style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg)', boxSizing: 'border-box' as const }} />
             </div>

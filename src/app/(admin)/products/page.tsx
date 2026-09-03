@@ -913,7 +913,10 @@ export default function ProductsPage() {
                     {/* Cost */}
                     <input
                       type="number"
-                      step="0.01"
+                      // "any" so the spinner arrows move by ₹1 rather than by
+                      // one paisa, while still accepting paise when typed —
+                      // step="1" would step correctly but mark 33.50 invalid.
+                      step="any"
                       min={0}
                       value={item.cost as any}
                       onChange={(e) => updateProductItem(item.id, 'cost', e.target.value === '' ? '' : Number(e.target.value))}
@@ -1376,7 +1379,8 @@ export default function ProductsPage() {
                     <td style={td}>
                       <input
                         type="number"
-                        step="0.01"
+                        // See the cost input in the add-product form above.
+                        step="any"
                         min={0}
                         value={item.cost as any}
                         onChange={(e) => updateInlineItem(item.id, 'cost', e.target.value === '' ? '' : Number(e.target.value))}

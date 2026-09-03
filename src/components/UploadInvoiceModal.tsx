@@ -531,7 +531,7 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
                     <div>
                       <label style={lbl}>Invoice Total (₹)</label>
                       <input
-                        type="number" min="0" step="0.01" style={inp}
+                        type="number" min="0" step="any" style={inp}
                         value={invoiceTotal}
                         onChange={(e) => setInvoiceTotal(e.target.value === "" ? "" : (parseFloat(e.target.value) || 0))}
                         placeholder={itemsSubtotal.toFixed(2)}
@@ -585,11 +585,11 @@ export default function UploadInvoiceModal({ onClose, existingProducts, onSucces
                                   onChange={(e) => updateNumberField(idx, "quantity", e.target.value)} />
                               </td>
                               <td style={td}>
-                                <input type="number" min="0" step="0.01" style={inp} value={row.unit_price}
+                                <input type="number" min="0" step="any" style={inp} value={row.unit_price}
                                   onChange={(e) => updateNumberField(idx, "unit_price", e.target.value)} />
                               </td>
                               <td style={td}>
-                                <input type="number" min="0" step="0.01" style={inpRO} value={row.total.toFixed(2)} readOnly />
+                                <input type="number" min="0" step="any" style={inpRO} value={row.total.toFixed(2)} readOnly />
                               </td>
                               <td style={td}>
                                 {row.action === "invoice_only" ? (
