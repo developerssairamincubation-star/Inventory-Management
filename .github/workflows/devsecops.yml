@@ -1,1 +1,42 @@
+name: Inventory DevSecOps Security Pipeline
 
+on:
+  push:
+    branches:
+      - devsecops-integration
+
+  pull_request:
+    branches:
+      - devsecops-integration
+
+permissions:
+  contents: read
+
+jobs:
+  security-scan:
+    name: DevSecOps Security Scan
+    runs-on: [self-hosted, Linux, X64]
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Run GitLeaks
+        run: |
+          docker run --rm \
+            -v "$PWD:/repo" \
+            zricethezav/gitleaks:latest \
+            detect \
+            --source=/repo \
+            --no-git \
+            --verbose
+
+      - name: Run Semgrep
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            semgrep/semgrep \
+            semgrep scan \
+            --config=auto \
+            --error \
+            /src
