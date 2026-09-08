@@ -15,7 +15,7 @@ permissions:
 jobs:
   security-scan:
     name: DevSecOps Security Scan
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: self-hosted
 
     steps:
       - name: Checkout Source Code
