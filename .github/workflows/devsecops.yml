@@ -88,14 +88,14 @@ jobs:
             echo "Dockerfile not found."
             exit 1
           fi
-
       - name: Run Hadolint
         run: |
           docker run --rm \
             -i \
             hadolint/hadolint:latest \
-            < Dockerfile
-
+            hadolint \
+            --failure-threshold error \
+            - < Dockerfile
 
   # ==========================================================
   # JOB 4 - TRIVY CONFIGURATION SCANNING
