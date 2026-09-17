@@ -58,17 +58,20 @@ jobs:
             --exclude 'k6/seed/load-users.sql' \
             /src
 
-
-      # =========================================================
-      # 4. OWASP DEPENDENCY-CHECK
-      # =========================================================
+      # 4. DEPENDENCY VULNERABILITY SCANNING
       - name: Run OWASP Dependency-Check
+        shell: bash
         run: |
-          mkdir -p dependency-check-report dependency-check-data
+          set -euo pipefail
+
+          rm -rf dependency-check-report
+          mkdir -p dependency-check-report
+
+          DATA_DIR="$(mktemp -d)"
 
           docker run --rm \
             -v "$PWD:/src" \
-            -v "$PWD/dependency-check-data:/usr/share/dependency-check/data" \
+            -v "$DATA_DIR:/usr/share/dependency-check/data" \
             owasp/dependency-check:12.1.0 \
             --project "Inventory Management" \
             --scan /src/package-lock.json \
