@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout source code
+      # 1. Checkout Source Code
       - name: Checkout Source Code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -47,5 +47,4 @@ jobs:
             --exclude 'src/contexts/UserContext.tsx' \
             --exclude 'db/seed/R__seed_dev_data.sql' \
             --exclude 'k6/seed/load-users.sql' \
-            /src
             /src
