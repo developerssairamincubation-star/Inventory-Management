@@ -58,7 +58,7 @@ jobs:
           restore-keys: |
             dependency-check-${{ runner.os }}-
 
-      # 5. Dependency Vulnerability Scanning
+         # 4. Dependency Vulnerability Scanning
       - name: Run OWASP Dependency-Check
         run: |
           mkdir -p dependency-check-report dependency-check-data
