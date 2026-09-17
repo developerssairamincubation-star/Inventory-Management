@@ -48,9 +48,10 @@ jobs:
             --exclude 'db/seed/R__seed_dev_data.sql' \
             --exclude 'k6/seed/load-users.sql' \
             /src
-           # 4. Cache OWASP Dependency-Check Database
+
+      # 4. Cache OWASP Dependency-Check Database
       - name: Cache Dependency-Check Database
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.0
         with:
           path: dependency-check-data
           key: dependency-check-${{ runner.os }}
