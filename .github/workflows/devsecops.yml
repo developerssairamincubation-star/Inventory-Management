@@ -48,3 +48,15 @@ jobs:
             --exclude 'db/seed/R__seed_dev_data.sql' \
             --exclude 'k6/seed/load-users.sql' \
             /src
+
+       # 4. Dependency Vulnerability Scanning
+      - name: Run OWASP Dependency-Check
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            owasp/dependency-check:latest \
+            --scan /src \
+            --format HTML \
+            --format JSON \
+            --out /src/dependency-check-report \
+            --project "Inventory Management"    
