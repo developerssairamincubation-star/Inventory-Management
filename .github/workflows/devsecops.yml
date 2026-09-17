@@ -18,11 +18,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout Source Code
+
+      # =========================================================
+      # 1. CHECKOUT SOURCE CODE
+      # =========================================================
       - name: Checkout Source Code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      # 2. Secret Scanning
+
+      # =========================================================
+      # 2. SECRET SCANNING - GITLEAKS
+      # =========================================================
       - name: Run GitLeaks
         run: |
           docker run --rm \
@@ -33,7 +39,10 @@ jobs:
             --no-git \
             --verbose
 
-      # 3. Static Application Security Testing
+
+      # =========================================================
+      # 3. STATIC APPLICATION SECURITY TESTING - SEMGREP
+      # =========================================================
       - name: Run Semgrep
         run: |
           docker run --rm \
@@ -49,16 +58,10 @@ jobs:
             --exclude 'k6/seed/load-users.sql' \
             /src
 
-      # 4. Cache OWASP Dependency-Check Database
-      - name: Cache Dependency-Check Database
-        uses: actions/cache@v4.2.0
-        with:
-          path: dependency-check-data
-          key: dependency-check-${{ runner.os }}
-          restore-keys: |
-            dependency-check-${{ runner.os }}-
 
-         # 4. Dependency Vulnerability Scanning
+      # =========================================================
+      # 4. DEPENDENCY VULNERABILITY SCANNING
+      # =========================================================
       - name: Run OWASP Dependency-Check
         run: |
           mkdir -p dependency-check-report dependency-check-data
@@ -68,7 +71,6 @@ jobs:
             -v "$PWD/dependency-check-data:/usr/share/dependency-check/data" \
             owasp/dependency-check:12.1.0 \
             --project "Inventory Management" \
-            --scan /src/package.json \
             --scan /src/package-lock.json \
             --format HTML \
             --format JSON \
