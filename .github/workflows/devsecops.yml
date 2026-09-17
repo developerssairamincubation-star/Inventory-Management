@@ -48,7 +48,16 @@ jobs:
             --exclude 'db/seed/R__seed_dev_data.sql' \
             --exclude 'k6/seed/load-users.sql' \
             /src
-        # 4. Dependency Vulnerability Scanning
+           # 4. Cache OWASP Dependency-Check Database
+      - name: Cache Dependency-Check Database
+        uses: actions/cache@v4
+        with:
+          path: dependency-check-data
+          key: dependency-check-${{ runner.os }}
+          restore-keys: |
+            dependency-check-${{ runner.os }}-
+
+      # 5. Dependency Vulnerability Scanning
       - name: Run OWASP Dependency-Check
         run: |
           mkdir -p dependency-check-report dependency-check-data
@@ -63,5 +72,4 @@ jobs:
             --format HTML \
             --format JSON \
             --out /src/dependency-check-report \
-            --noupdate \
             --disableAssembly
