@@ -139,3 +139,32 @@ jobs:
             fs \
             --severity HIGH,CRITICAL \
             /workspace
+
+         
+        # ==========================================================
+  # JOB 6 - CONTAINER IMAGE SECURITY SCANNING
+  # ==========================================================
+  container-scan:
+    name: Container Security - Trivy
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Source Code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Build Docker Image
+        run: |
+          docker build \
+            -t inventory-management:security-scan \
+            .
+
+      - name: Run Trivy Image Scan
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest \
+            image \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            inventory-management:security-scan
