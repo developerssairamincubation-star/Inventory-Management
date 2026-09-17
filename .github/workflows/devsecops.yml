@@ -134,8 +134,8 @@ jobs:
       - name: Run Trivy Filesystem Scan
         run: |
           docker run --rm \
-            -v "$PWD:/src" \
+            -v "${{ github.workspace }}:/workspace:ro" \
             aquasec/trivy:latest \
             fs \
             --severity HIGH,CRITICAL \
-            /src-scan
+            /workspace
