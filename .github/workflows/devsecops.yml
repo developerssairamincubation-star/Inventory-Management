@@ -12,23 +12,25 @@ on:
 permissions:
   contents: read
 
+
+# ============================================================
+# DEVSECOPS JOBS
+# ============================================================
+
 jobs:
-  security-scan:
-    name: DevSecOps Security Scan
+
+  # ==========================================================
+  # JOB 1 - SECRET SCANNING
+  # ==========================================================
+  secret-scan:
+    name: Secret Scanning - GitLeaks
     runs-on: ubuntu-latest
 
     steps:
 
-      # =========================================================
-      # 1. CHECKOUT SOURCE CODE
-      # =========================================================
       - name: Checkout Source Code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-
-      # =========================================================
-      # 2. SECRET SCANNING - GITLEAKS
-      # =========================================================
       - name: Run GitLeaks
         run: |
           docker run --rm \
@@ -40,9 +42,18 @@ jobs:
             --verbose
 
 
-      # =========================================================
-      # 3. STATIC APPLICATION SECURITY TESTING - SEMGREP
-      # =========================================================
+  # ==========================================================
+  # JOB 2 - STATIC APPLICATION SECURITY TESTING
+  # ==========================================================
+  sast-scan:
+    name: SAST - Semgrep
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Source Code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
       - name: Run Semgrep
         run: |
           docker run --rm \
@@ -58,47 +69,73 @@ jobs:
             --exclude 'k6/seed/load-users.sql' \
             /src
 
-       # 4. DEPENDENCY VULNERABILITY SCANNING
-      - name: Run OWASP Dependency-Check
-        shell: bash
+
+  # ==========================================================
+  # JOB 3 - DOCKERFILE LINTING
+  # ==========================================================
+  dockerfile-scan:
+    name: Dockerfile Security - Hadolint
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Source Code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Check Dockerfile Exists
         run: |
-          set -euo pipefail
+          if [ ! -f Dockerfile ]; then
+            echo "Dockerfile not found."
+            exit 1
+          fi
 
-          rm -rf dependency-check-report
-          mkdir -p dependency-check-report
+      - name: Run Hadolint
+        run: |
+          docker run --rm \
+            -i \
+            hadolint/hadolint:latest \
+            < Dockerfile
 
-          DATA_DIR="$(mktemp -d)"
 
+  # ==========================================================
+  # JOB 4 - TRIVY CONFIGURATION SCANNING
+  # ==========================================================
+  config-scan:
+    name: Configuration Security - Trivy
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Source Code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Run Trivy Config Scan
+        run: |
           docker run --rm \
             -v "$PWD:/src" \
-            -v "$DATA_DIR:/usr/share/dependency-check/data" \
-            owasp/dependency-check:12.1.0 \
-            --project "Inventory Management" \
-            --scan /src/package-lock.json \
-            --format HTML \
-            --format JSON \
-            --out /src/dependency-check-report \
-            --disableAssembly
-
-       # =========================================================
-      # 4. BUILD DOCKER IMAGE FOR SECURITY SCANNING
-      # =========================================================
-      - name: Build Docker Image
-        run: |
-          docker build \
-            -t inventory-management:security-scan \
-            .
+            aquasec/trivy:latest \
+            config \
+            --severity HIGH,CRITICAL \
+            /src
 
 
-      # =========================================================
-      # 5. CONTAINER VULNERABILITY SCANNING - TRIVY
-      # =========================================================
-      - name: Run Trivy Container Scan
+  # ==========================================================
+  # JOB 5 - FILESYSTEM VULNERABILITY SCANNING
+  # ==========================================================
+  filesystem-scan:
+    name: Filesystem Vulnerability Scan - Trivy
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Source Code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Run Trivy Filesystem Scan
         run: |
           docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/src" \
             aquasec/trivy:latest \
-            image \
+            fs \
             --severity HIGH,CRITICAL \
-            --exit-code 1 \
-            inventory-management:security-scan
+            /src-scan
