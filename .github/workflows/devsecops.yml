@@ -60,7 +60,7 @@ jobs:
 
 
       # =========================================================
-      # 4. DEPENDENCY VULNERABILITY SCANNING
+      # 4. OWASP DEPENDENCY-CHECK
       # =========================================================
       - name: Run OWASP Dependency-Check
         run: |
