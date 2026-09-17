@@ -1,4 +1,4 @@
-nname: Inventory DevSecOps Security Pipeline
+name: Inventory DevSecOps Security Pipeline
 
 on:
   push:
