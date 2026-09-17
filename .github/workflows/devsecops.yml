@@ -58,7 +58,7 @@ jobs:
             --exclude 'k6/seed/load-users.sql' \
             /src
 
-      # 4. DEPENDENCY VULNERABILITY SCANNING
+       # 4. DEPENDENCY VULNERABILITY SCANNING
       - name: Run OWASP Dependency-Check
         shell: bash
         run: |
