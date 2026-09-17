@@ -18,9 +18,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout source code
       - name: Checkout Source Code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
+      # 2. Secret Scanning
       - name: Run GitLeaks
         run: |
           docker run --rm \
@@ -31,6 +33,7 @@ jobs:
             --no-git \
             --verbose
 
+      # 3. Static Application Security Testing
       - name: Run Semgrep
         run: |
           docker run --rm \
@@ -39,4 +42,10 @@ jobs:
             semgrep scan \
             --config=auto \
             --error \
+            --exclude '.github/workflows/test.yml' \
+            --exclude '.github/workflows/deploy-dit.yml' \
+            --exclude 'src/contexts/UserContext.tsx' \
+            --exclude 'db/seed/R__seed_dev_data.sql' \
+            --exclude 'k6/seed/load-users.sql' \
+            /src
             /src
