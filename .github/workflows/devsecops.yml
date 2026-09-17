@@ -79,3 +79,26 @@ jobs:
             --format JSON \
             --out /src/dependency-check-report \
             --disableAssembly
+
+       # =========================================================
+      # 4. BUILD DOCKER IMAGE FOR SECURITY SCANNING
+      # =========================================================
+      - name: Build Docker Image
+        run: |
+          docker build \
+            -t inventory-management:security-scan \
+            .
+
+
+      # =========================================================
+      # 5. CONTAINER VULNERABILITY SCANNING - TRIVY
+      # =========================================================
+      - name: Run Trivy Container Scan
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest \
+            image \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            inventory-management:security-scan
