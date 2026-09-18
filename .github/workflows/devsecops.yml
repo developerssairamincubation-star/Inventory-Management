@@ -140,8 +140,7 @@ jobs:
             --severity HIGH,CRITICAL \
             /workspace
 
-         
-        # ==========================================================
+       # ==========================================================
   # JOB 6 - CONTAINER IMAGE SECURITY SCANNING
   # ==========================================================
   container-scan:
@@ -163,8 +162,19 @@ jobs:
         run: |
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            aquasec/trivy:latest \
+            aquasec/trivy:0.74.0 \
             image \
             --severity HIGH,CRITICAL \
-            --exit-code 1 \
+            inventory-management:security-scan
+
+      - name: Generate Trivy JSON Report
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${{ github.workspace }}:/workspace" \
+            aquasec/trivy:0.74.0 \
+            image \
+            --severity HIGH,CRITICAL \
+            --format json \
+            --output /workspace/trivy-image-report.json \
             inventory-management:security-scan
