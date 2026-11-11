@@ -826,8 +826,16 @@ export default function ProductDetailPage() {
           <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Current Stock</div>
           <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--fg)', marginTop: 4 }}>{stock} <span style={{ fontSize: 12, color: 'var(--muted)' }}>units</span></div>
           {product.unit_cost != null && (
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
-              ₹{Number(product.unit_cost).toLocaleString('en-US', { minimumFractionDigits: 2 })} / unit
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 16, rowGap: 2, fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+              <span>
+                ₹{Number(product.unit_cost).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / unit
+              </span>
+              <span>
+                Total{' '}
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>
+                  ₹{(Number(product.unit_cost) * stock).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </span>
             </div>
           )}
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
