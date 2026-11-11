@@ -6,7 +6,7 @@
 import * as Sentry from "@sentry/nextjs";
 
 Sentry.init({
-  dsn: "https://3d8bd1b17d2552d1417d0d69ec435c78@o4511939419308032.ingest.de.sentry.io/4511939455615056",
+  dsn: "https://8c51a7f890ba68c375bfcb3164dc13af@o4511939419308032.ingest.de.sentry.io/4512412364701776",
   // Only report from deployed builds. `next dev` runs with
   // NODE_ENV=development, so local errors stay in the terminal instead of
   // polluting the production issue stream and burning event quota. The SDK

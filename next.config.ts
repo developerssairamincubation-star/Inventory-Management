@@ -107,7 +107,7 @@ export default withSentryConfig(nextConfig, {
 
   org: "stif-software-team",
 
-  project: "nextjs",
+  project: "inventory-management",
 
   // Only print logs for uploading source maps in CI
   silent: !process.env.CI,
